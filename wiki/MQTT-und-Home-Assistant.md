@@ -1,29 +1,51 @@
 # MQTT und Home Assistant
 
-Alle Livewerte gehen auf Wunsch an einen MQTT-Broker — mit optionaler Home-Assistant-Auto-Discovery, Retain-Flag und Last Will. Konfiguriert wird das im Tab „MQTT", gespeichert in NVS.
+## Was MQTT ist
 
-## Konfiguration
+MQTT ist ein Nachrichtendienst für Geräte. Man kann sich ein Schwarzes Brett mit vielen beschrifteten Fächern vorstellen:
 
-| Feld | Standard | Bemerkung |
+* Ein Gerät hängt Nachrichten in ein Fach (das nennt man **veröffentlichen**).
+* Andere sagen „ich will alles wissen, was in dieses Fach kommt" (das nennt man **abonnieren**).
+* Ein Vermittler in der Mitte, der **Broker**, verteilt alles. Sender und Empfänger kennen sich nicht.
+
+Die Fächer heißen **Topics** und sind wie Ordnerpfade aufgebaut: `deye-display/state`.
+
+Das ist praktisch, weil das Display nicht wissen muss, wer sich für seine Werte interessiert. Es legt sie ins Fach, und wer will, holt sie sich — Home Assistant, ein eigenes Skript, eine Grafana-Anzeige.
+
+Was du brauchst: einen Broker im Netz. Meistens ist das **Mosquitto**, oft schon als Zusatz in Home Assistant installiert.
+
+## Einstellungen
+
+| Feld | Standard | Bedeutung |
 | --- | --- | --- |
-| Broker (Host/IP) | — | |
-| Port | 1883 | |
-| Benutzer / Passwort | leer | optional |
-| Basistopic | `deye-display` | Präfix aller Topics |
-| Retain | ein | State-Publishes mit Retain-Flag |
-| HA Discovery | ein | Konfigurations-Topics für Home Assistant |
-| Last Will | ein | `offline` auf dem Availability-Topic bei Verbindungsverlust |
+| Broker | — | IP-Adresse oder Name des Vermittlers |
+| Port | 1883 | die Standard-Tür für MQTT |
+| Benutzer / Passwort | leer | nur nötig, wenn der Broker es verlangt |
+| Basistopic | `deye-display` | der vordere Teil aller Fachnamen |
+| Retain | ein | siehe unten |
+| HA Discovery | ein | siehe unten |
+| Last Will | ein | siehe unten |
 
-## Topics
+### Die drei Schalter erklärt
+
+**Retain** („behalten"): Normalerweise vergisst der Broker eine Nachricht, sobald er sie verteilt hat. Wer sich später anmeldet, sieht nichts — bis die nächste Nachricht kommt. Mit Retain merkt sich der Broker die jeweils letzte Nachricht und gibt sie neuen Interessenten sofort. Praktisch: Home Assistant zeigt nach einem Neustart direkt Werte an, statt erst leer zu sein. Nachteil: nach einem Ausfall des Displays stehen die alten Werte noch da, obwohl sie nicht mehr aktuell sind.
+
+**Last Will** („letzter Wille"): Beim Anmelden hinterlegt das Gerät beim Broker eine Nachricht mit der Anweisung „falls ich mich unerwartet nicht mehr melde, schicke das bitte". Es ist dann `offline`. Ohne diesen Mechanismus würden Anzeigen einfach für immer den letzten Wert zeigen, ohne dass jemand merkt, dass die Quelle weg ist.
+
+**HA Discovery**: siehe nächster Abschnitt.
+
+## Die Fächer
 
 | Topic | Richtung | Inhalt |
 | --- | --- | --- |
-| `<base>/state` | Gerät → Broker | JSON mit allen Messwerten und dem Akku-Modus |
-| `<base>/availability` | Gerät → Broker | `online` / `offline` |
-| `<base>/deye/mode/set` | Broker → Gerät | `Normal` \| `Laden` \| `Entladen` |
-| `<base>/deye/power/set` | Broker → Gerät | Leistung in Watt (1000 … 20000) |
+| `<basis>/state` | Gerät → Broker | alle Messwerte als JSON |
+| `<basis>/availability` | Gerät → Broker | `online` oder `offline` |
+| `<basis>/deye/mode/set` | Broker → Gerät | `Normal`, `Laden` oder `Entladen` |
+| `<basis>/deye/power/set` | Broker → Gerät | Leistung in Watt (1000 bis 20000) |
 
-Das State-Objekt:
+Die letzten zwei sind der interessante Teil: über die kann man das Gerät **steuern**, nicht nur auslesen.
+
+Der Inhalt von `state`:
 
 ```json
 {
@@ -39,52 +61,59 @@ Das State-Objekt:
 }
 ```
 
-Vorzeichen: `grid_w` positiv = Bezug, negativ = Einspeisung. Akku positiv = Entladung, negativ = Ladung.
+Vorzeichen: `grid_w` positiv heißt Bezug aus dem Netz, negativ heißt Einspeisung. Bei den Akkus heißt positiv entladen, negativ laden. Hier lädt der Deye also mit 3547 Watt und ist zu 91 Prozent voll.
 
-## Auto-Discovery
+## Auto-Discovery: Home Assistant richtet sich selbst ein
 
-Bei aktivierter Discovery veröffentlicht das Gerät nach dem Verbinden die Konfigurations-Topics unter `homeassistant/...`. Alle Entities erscheinen als ein Gerät **„Deye Display"** (Modell `ESP32-P4`).
+Normalerweise müsste man in Home Assistant jeden Wert einzeln von Hand konfigurieren: Name, Einheit, Typ, welches Topic, wie man den Wert aus dem JSON herausholt. Für neun Werte ist das eine lange, fehleranfällige Textdatei.
 
-Sensoren:
+MQTT-Discovery dreht das um: **das Gerät beschreibt sich selbst.** Es schickt nach dem Verbinden Nachrichten an spezielle Topics unter `homeassistant/...`, in denen steht: „ich bin ein Leistungssensor, ich heiße PV Leistung, meine Einheit ist Watt, mein Wert steht in diesem JSON unter dem Schlüssel `pv_w`." Home Assistant hört auf diese Topics und legt alles automatisch an.
 
-| Entity | Einheit | `device_class` |
+Alles erscheint als ein Gerät namens **„Deye Display"**.
+
+Diese Anzeigen entstehen:
+
+| Anzeige | Einheit | Typ |
 | --- | --- | --- |
-| PV Leistung | W | `power` |
-| Hausverbrauch | W | `power` |
-| Netz | W | `power` |
-| BYD Leistung | W | `power` |
-| BYD SoC | % | `battery` |
-| Deye Leistung | W | `power` |
-| Deye SoC | % | `battery` |
+| PV Leistung | W | Leistung |
+| Hausverbrauch | W | Leistung |
+| Netz | W | Leistung |
+| BYD Leistung | W | Leistung |
+| BYD SoC | % | Batterie |
+| Deye Leistung | W | Leistung |
+| Deye SoC | % | Batterie |
 
-Alle mit `state_class: measurement`, also direkt für Statistiken und das Energie-Dashboard brauchbar.
+Alle sind als Messwerte gekennzeichnet, also direkt für Verläufe, Statistiken und das Energie-Dashboard von Home Assistant brauchbar.
 
-Steuerelemente:
+Und diese zwei Bedienelemente:
 
-| Entity | Typ | Details |
+| Element | Typ | Details |
 | --- | --- | --- |
-| **Deye Modus** | `select` | Optionen `Normal`, `Laden`, `Entladen`, Icon `mdi:home-battery` |
-| **Deye Leistung** | `number` | 1000 … 20000 W, Schrittweite 100, Darstellung als Schieber, Icon `mdi:battery-charging` |
+| **Deye Modus** | Auswahlliste | `Normal`, `Laden`, `Entladen` |
+| **Deye Leistung** | Schieber | 1000 bis 20000 W in 100er-Schritten |
 
-Beide melden ihren Zustand aus demselben State-JSON zurück — was am Display eingestellt wird, erscheint sofort in Home Assistant und umgekehrt.
+Beide zeigen immer den echten aktuellen Zustand, weil sie ihren Wert aus derselben `state`-Nachricht lesen. Stellst du am Display etwas um, springt Home Assistant mit. Und umgekehrt.
 
 ## Von außen steuern
 
+Zum Ausprobieren auf der Kommandozeile:
+
 ```bash
-# Zwangsentladung mit 6 kW
+# Akku mit 6 kW zwangsweise entladen
 mosquitto_pub -h broker -t deye-display/deye/power/set -m 6000
 mosquitto_pub -h broker -t deye-display/deye/mode/set  -m Entladen
 
-# zurück in den Regelbetrieb
+# zurück in den Normalbetrieb
 mosquitto_pub -h broker -t deye-display/deye/mode/set  -m Normal
 ```
 
-Der Schreibvorgang läuft über denselben Pfad wie die Bedienung am Gerät: [`deye_ctrl_apply()`](Deye-Steuerung) → FC16 über den RTU-Master-Bus. Auch der [SLS-Export-Schutz](Deye-Steuerung#sls-export-schutz) gilt unverändert.
+Der Weg dahinter ist genau derselbe wie beim Antippen am Gerät: die Firmware schreibt die passenden Register über die Zweidrahtleitung. Auch der [SLS-Schutz](Deye-Steuerung#der-sls-schutz) greift genauso — es gibt keine Hintertür, die ihn umgeht.
 
 ## Beispiel-Automation
 
+Ein typischer Anwendungsfall: Strom ist an der Börse gerade billig oder negativ, also Akku aus dem Netz füllen.
+
 ```yaml
-# Zwangsladung, wenn der Börsenpreis negativ ist
 automation:
   - alias: "Akku laden bei negativem Strompreis"
     trigger:
@@ -104,16 +133,18 @@ automation:
           option: "Laden"
 ```
 
-Die tatsächlichen Entity-IDs hängen davon ab, wie Home Assistant sie beim Anlegen benennt — bitte in den Entwicklerwerkzeugen nachsehen.
+Die genauen Entity-IDs vergibt Home Assistant selbst — die richtigen findest du in den Entwicklerwerkzeugen unter „Zustände".
 
 > [!TIP]
-> Wer eine Automation baut, die den Modus umschaltet, sollte einen Rückweg nach `Normal` vorsehen (Zeitbegrenzung oder SoC-Bedingung). Eine Zwangsladung bleibt sonst aktiv, bis jemand sie beendet.
+> Baue **immer auch den Rückweg** mit ein. Eine Zwangsladung endet nicht von selbst: sie läuft, bis jemand wieder auf `Normal` stellt. Also entweder eine zweite Automation für die Gegenbedingung oder eine Zeitbegrenzung. Sonst lädt der Akku womöglich die ganze Nacht aus dem Netz durch, weil der Preis um zwei Uhr kurz negativ war.
 
-## Status prüfen
+## Läuft es?
 
-Im Kopf des MQTT-Tabs steht Verbindungszustand und Anzahl der Publishes. Alternativ über die JSON-Schnittstelle:
+Im Menü „MQTT" steht oben, ob die Verbindung besteht und wie viele Nachrichten schon verschickt wurden. Oder über das Netzwerk:
 
 ```bash
-curl -s http://<ip>/api/live
+curl -s http://<ip-des-geräts>/api/live
 # {... "mqtt_en":1,"mqtt_conn":1,"mqtt_host":"10.0.0.50", ...}
 ```
+
+`mqtt_en` heißt „eingeschaltet", `mqtt_conn` heißt „verbunden". Steht das erste auf 1 und das zweite auf 0, stimmt etwas mit Adresse oder Zugangsdaten nicht — siehe [Fehlersuche](Fehlersuche#mqtt).

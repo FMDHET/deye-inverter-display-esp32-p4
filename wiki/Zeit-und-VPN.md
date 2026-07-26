@@ -1,10 +1,10 @@
 # Zeit und VPN
 
-## SNTP-Uhr
+## Die Uhr
 
-Der Hauptbildschirm zeigt oben in der Mitte Uhrzeit (groß) und Wochentag mit Datum. Beides kommt von einer per SNTP gestellten Systemuhr.
+Oben in der Mitte des Hauptbildschirms stehen Uhrzeit und Datum. Ein Mikrocontroller hat aber keine Uhr, die ohne Strom weiterläuft — nach jedem Neustart wüsste er nicht, welcher Tag ist. Deshalb holt er sich die Zeit aus dem Internet, über ein Protokoll namens **SNTP**.
 
-Tab „Zeit":
+Einstellungen im Reiter „Zeit":
 
 | Feld | Standard |
 | --- | --- |
@@ -12,9 +12,23 @@ Tab „Zeit":
 | NTP-Server | `pool.ntp.org` |
 | Zeitzone | `UTC+1 Berlin` |
 
-Die Zeitzone ist keine reine Stundenverschiebung, sondern eine POSIX-Regel mit Sommerzeitumstellung — die Uhr springt also selbst um. Verfügbar sind 13 Zonen:
+`pool.ntp.org` ist ein weltweiter Verbund freiwilliger Zeitserver — man bekommt automatisch einen in der Nähe.
 
-| Zone | POSIX-Regel |
+### Warum die Zeitzone mehr ist als eine Zahl
+
+Die Server liefern die Zeit immer in UTC, also der Weltzeit ohne Zeitzonen. Für die Anzeige in Berlin muss man eine Stunde addieren — im Sommer aber zwei. Und die Umstellung ist am letzten Sonntag im März um 2 Uhr beziehungsweise am letzten Sonntag im Oktober um 3 Uhr.
+
+Genau diese Regel steckt in einer kryptischen Zeichenkette:
+
+```text
+CET-1CEST,M3.5.0,M10.5.0/3
+```
+
+Gelesen: normale Zeit heißt CET und liegt eine Stunde vor UTC, Sommerzeit heißt CEST, sie beginnt im **M**onat 3 in der **5**. Woche am Tag **0** (Sonntag) und endet im Monat 10 in der 5. Woche am Sonntag um 3 Uhr. „5. Woche" ist dabei die Konvention für „die letzte".
+
+Deshalb stellt die Uhr von selbst um, ohne dass man etwas tun muss. Zur Auswahl stehen 13 Zonen:
+
+| Zone | Regel |
 | --- | --- |
 | UTC−8 Los Angeles | `PST8PDT,M3.2.0,M11.1.0` |
 | UTC−5 New York | `EST5EDT,M3.2.0,M11.1.0` |
@@ -30,45 +44,38 @@ Die Zeitzone ist keine reine Stundenverschiebung, sondern eine POSIX-Regel mit S
 | UTC+9 Tokio | `JST-9` |
 | UTC+10 Sydney | `AEST-10AEDT,M10.1.0,M4.1.0/3` |
 
-Der Kopf des Tabs zeigt die aktuelle Zeit und ob bereits synchronisiert wurde. Solange nicht synchronisiert ist, bleibt die Uhr auf dem Hauptbildschirm leer statt eine falsche Zeit zu zeigen.
+Wo keine Umstellungsregel steht (Moskau, Dubai, Tokio), gibt es dort keine Sommerzeit.
 
-Antippen der Uhr öffnet ein Popup mit der Laufzeit und einer Schaltfläche zum Neustart (mit Rückfrage).
+Oben im Reiter stehen die aktuelle Zeit und ob schon abgeglichen wurde. Solange nicht, bleibt die Anzeige auf dem Hauptbildschirm **leer** — lieber keine Zeit als eine falsche.
+
+Ein Tipp: tippt man auf die Uhr, öffnet sich ein Fenster mit der Laufzeit seit dem letzten Start und einem Knopf für Neustart (mit Rückfrage). Die Laufzeit ist eine gute erste Diagnose — wenn dort nur ein paar Minuten stehen, hat sich das Gerät neu gestartet.
 
 ## WireGuard-Tunnel
 
-Damit ist das Display von außen erreichbar — für den [Web-Mirror](Web-Mirror) und für [OTA-Updates](OTA-und-Recovery) — ohne eine Portweiterleitung einzurichten. Grundlage ist die eingebundene Komponente [`esp_wireguard`](https://github.com/trombik/esp_wireguard) (BSD-3).
+### Das Problem
 
-Tab „VPN":
+Du bist unterwegs und willst nachsehen, was die Solaranlage macht — oder eine neue Firmware aufspielen. Das Gerät hängt aber im Heimnetz hinter dem Router, und der Router versteckt alle Geräte hinter einer einzigen öffentlichen Adresse. Von außen kommt man nicht hinein. Das ist eine Funktion, kein Fehler.
 
-| Feld | Inhalt |
-| --- | --- |
-| WireGuard aktiv | Schalter |
-| Privater Schlüssel | dieses Gerät, Base64 (`wg genkey`) |
-| Public Key | Gegenstelle / Server (`wg pubkey`) |
-| Preshared Key | optional, leer = aus |
-| Adresse | Tunnel-IP dieses Geräts, z. B. `10.6.0.2` |
-| Netzmaske | z. B. `255.255.255.0` |
-| Endpunkt | Host oder IP der Gegenstelle |
-| Endpunkt-Port | Standard 51820 |
-| Keepalive | Sekunden, 0 = aus |
+Der naheliegende Ausweg wäre eine **Portweiterleitung** im Router: „alles, was an Tür 80 kommt, an das Display schicken". Bitte nicht. Das Display hat kein Passwort — auf keinem seiner Zugänge. Damit stellt man einen Wechselrichter-Fernsteuerknopf ins offene Internet, und automatische Scanner finden so etwas innerhalb von Stunden.
 
-Der Kopf zeigt, ob der Handschlag zustande gekommen ist.
+### Die Lösung
 
-> [!IMPORTANT]
-> Der Tunnel wird erst **nach** der NTP-Synchronisation aufgebaut. Der WireGuard-Handschlag braucht eine plausible Wanduhrzeit; ohne gestellte Uhr scheitert er. Ist SNTP deaktiviert oder der Server nicht erreichbar, kommt kein Tunnel zustande.
+Ein **VPN-Tunnel**: eine verschlüsselte Verbindung, die von innen nach außen aufgebaut wird. Der Router hat nichts dagegen, weil die Verbindung von innen kommt. Wer sich im Tunnel befindet, ist praktisch im Heimnetz — und wer nicht, sieht überhaupt nichts.
+
+**WireGuard** ist eine moderne, sehr schlanke VPN-Software. Statt Benutzernamen und Passwörtern arbeitet sie mit Schlüsselpaaren: jede Seite hat einen privaten Schlüssel (bleibt geheim) und einen öffentlichen (wird der anderen Seite mitgeteilt). Die Implementierung hier ist die eingebundene Komponente [`esp_wireguard`](https://github.com/trombik/esp_wireguard).
 
 ### Einrichten
 
-Schlüsselpaar erzeugen (auf einem Rechner mit installiertem WireGuard):
+Zuerst ein Schlüsselpaar erzeugen, auf einem Rechner mit installiertem WireGuard:
 
 ```bash
 wg genkey | tee display.key | wg pubkey > display.pub
 ```
 
-* `display.key` → Feld „Privater Schlüssel" am Gerät
-* `display.pub` → beim Server als Peer eintragen
+* `display.key` ist der **private** Schlüssel — der kommt ins Gerät und wird niemandem gezeigt.
+* `display.pub` ist der **öffentliche** — der wird beim Server als erlaubte Gegenstelle eingetragen.
 
-Serverseitig, zum Beispiel:
+Beim Server, zum Beispiel auf einem Raspberry Pi oder im Router (Fritzbox können das inzwischen):
 
 ```ini
 [Peer]
@@ -77,20 +84,46 @@ PublicKey = <Inhalt von display.pub>
 AllowedIPs = 10.6.0.2/32
 ```
 
-Am Gerät den Public Key des Servers, Endpunkt und Port eintragen, Tunnel-IP passend zu `AllowedIPs` setzen, Keepalive auf 25 s, wenn das Gerät hinter NAT steht. Speichern.
+`AllowedIPs` legt fest, welche Adresse das Display im Tunnel bekommt.
 
-> [!TIP]
-> Die Schlüssel lassen sich über den Web-Mirror per Zwischenablage einfügen (`POST /paste`) — deutlich angenehmer, als 44 Base64-Zeichen auf der Bildschirmtastatur zu tippen.
+Dann am Gerät im Reiter „VPN":
 
-### Nach dem Aufbau
+| Feld | Was dort hinein muss |
+| --- | --- |
+| WireGuard aktiv | einschalten |
+| Privater Schlüssel | Inhalt von `display.key` |
+| Public Key | der öffentliche Schlüssel des **Servers** |
+| Preshared Key | optional, zusätzlicher gemeinsamer Schlüssel — leer lassen ist in Ordnung |
+| Adresse | die Tunnel-Adresse, hier `10.6.0.2` (muss zu `AllowedIPs` passen) |
+| Netzmaske | meist `255.255.255.0` |
+| Endpunkt | Adresse oder Name des Servers, von außen erreichbar |
+| Endpunkt-Port | Standard 51820 |
+| Keepalive | 25 Sekunden, wenn das Gerät hinter einem Router steht |
 
-Vom Tunnel-Netz aus ist das Gerät unter seiner Tunnel-IP erreichbar:
+Speichern. Oben im Reiter steht dann, ob die Verbindung zustande gekommen ist.
+
+**Was Keepalive macht:** Der Router merkt sich Verbindungen nur eine Weile. Passiert längere Zeit nichts, wirft er den Eintrag weg, und Antworten von außen finden nicht mehr den Weg zurück. Mit Keepalive schickt das Gerät alle 25 Sekunden ein winziges Lebenszeichen und hält den Weg damit offen.
+
+> [!IMPORTANT]
+> **Der Tunnel wird erst aufgebaut, nachdem die Uhr gestellt ist.** Das ist kein Zufall, sondern zwingend: WireGuard baut in seinen Handschlag einen Zeitstempel ein, damit niemand alte, mitgeschnittene Nachrichten wiederverwenden kann. Ist die Uhr des Geräts auf dem Jahr 1970, hält der Server den Handschlag für ungültig und antwortet nicht.
+>
+> Praktische Folge: **kein NTP, kein VPN.** Wenn der Tunnel nicht zustande kommt, ist die Uhr der erste Verdächtige.
+
+### Wenn der Tunnel steht
+
+Vom Tunnel-Netz aus benutzt man einfach die Tunnel-Adresse:
 
 ```bash
 curl -s http://10.6.0.2/ota
 curl --data-binary @firmware.bin http://10.6.0.2/ota
 ```
 
-### Eine technische Besonderheit
+Auch das Display im Browser funktioniert so — nur etwas langsamer, weil das Bild durch den Tunnel muss.
 
-Damit das funktioniert, ist `CONFIG_ESP_NETIF_BRIDGE_EN=y` gesetzt — nicht wegen Bridging, sondern weil das als Nebeneffekt `LWIP_ESP_NETIF_DATA=1` aktiviert. Ohne das speichert `esp_netif` seinen Handle in `netif->state`, wo das rohe lwIP-Netif von WireGuard schon seine eigene Struktur ablegt; der DHCP-Callback greift dann auf die falschen Daten zu und das Gerät stürzt ab (`Load access fault in esp_netif_internal_dhcpc_cb`).
+### Eine kuriose technische Notwendigkeit
+
+In den Firmware-Einstellungen steht `CONFIG_ESP_NETIF_BRIDGE_EN=y`. Das klingt nach Netzwerkbrücke und hat mit dem VPN nichts zu tun — es ist ein Trick.
+
+Diese Option schaltet nebenbei eine andere Einstellung um, die dafür sorgt, dass die Netzwerkverwaltung ihre internen Daten an einer anderen Stelle ablegt. Ohne sie legt sie sie genau dort ab, wo WireGuard schon seine eigenen Daten hat. Beide überschreiben sich gegenseitig, und beim nächsten DHCP-Ereignis stürzt das Gerät ab.
+
+Solche Dinge findet man nur durch stundenlanges Debuggen. Deshalb steht ein Kommentar dazu im Code — und deshalb steht es hier.

@@ -1,79 +1,109 @@
-# Deye-Steuerung
+# Deye-Steuerung — Akku laden und entladen
 
 > [!CAUTION]
-> Diese Seite beschreibt **schreibende** Zugriffe auf einen Wechselrichter, der an einer Netzanlage mit Batteriespeicher hängt. Die Registerbelegungen sind an einem konkreten **Deye SG04LP3** ermittelt worden und können bei anderer Firmware oder anderem Modell abweichen. Vor jedem Schreibversuch mit dem Werkzeug unter [`/deye`](Web-Mirror) prüfen, was an der Adresse tatsächlich steht.
+> Diese Seite beschreibt, wie man **in den Wechselrichter hineinschreibt**. Das ist etwas anderes, als ihn nur auszulesen: hier ändert man das Verhalten eines Geräts, das an der Hausinstallation und am öffentlichen Netz hängt.
+>
+> Die Registeradressen sind an einem konkreten **Deye SG04LP3** durch Ausprobieren gefunden worden — sie stehen in keinem offiziellen Handbuch. Bei einem anderen Modell oder einer anderen Gerätesoftware kann dieselbe Adresse etwas völlig anderes bedeuten. **Vorher immer mit dem [Register-Werkzeug](Web-Mirror#register-werkzeug-deye) nachsehen, was an der Adresse steht.**
 
-## Die drei Modi
+## Die drei Betriebsarten
 
-Antippen des Deye-Knotens auf dem Hauptbildschirm öffnet das Popup mit **Normal**, **Laden** und **Entladen** sowie einem Leistungsschieber. Erst „Übernehmen" schreibt.
+Tippst du auf dem Hauptbildschirm auf den Deye-Kreis, öffnet sich ein Fenster mit drei Knöpfen und einem Schieber für die Leistung:
 
-Dieselben Modi sind über MQTT erreichbar — siehe [MQTT und Home Assistant](MQTT-und-Home-Assistant).
+| Knopf | Was passiert |
+| --- | --- |
+| **Normal** | Der Wechselrichter macht, was er für richtig hält — der übliche Betrieb. |
+| **Laden** | Die Batterie wird zwangsweise geladen, auch aus dem Netz. |
+| **Entladen** | Die Batterie wird zwangsweise entladen, notfalls ins Netz. |
 
-## Register
+Wichtig: es passiert erst etwas, wenn du **„Übernehmen"** drückst. Einen Knopf antippen wählt nur aus.
 
-Geschrieben wird mit **FC16** (Write Multiple Registers), nicht mit FC06 — der Deye nimmt FC06 an diesen Adressen nicht an. Alle Schreibzugriffe laufen über den RTU-Master-Bus.
+Wozu man das braucht? Zum Beispiel: Strom ist an der Börse gerade billig oder sogar negativ — dann lohnt es sich, den Akku aus dem Netz zu füllen. Oder umgekehrt: der Preis ist hoch, und man will den Akku verkaufen. Automatisieren lässt sich das über [Home Assistant](MQTT-und-Home-Assistant).
+
+## Welche Register geschrieben werden
+
+Geschrieben wird immer mit **FC16**, dem Befehl für „schreibe mehrere Register" — auch dann, wenn nur ein einzelnes Register geändert wird. Der Deye nimmt den einfacheren Befehl FC06 an diesen Adressen nicht an. Solche Eigenheiten sind bei Modbus-Geräten normal.
 
 ### Normal
 
-Zurück in den Regelbetrieb „Zero Export to CT":
+Zurück in den Regelbetrieb. Alles wird auf Ausgangswerte gesetzt:
 
 | Register | Wert | Bedeutung |
 | --- | --- | --- |
-| 142 | 2 | Work Mode = Zero Export to CT |
-| 143 | 20000 | Max Sell Power (W) |
+| 142 | 2 | Betriebsart „Zero Export to CT" — auf null am Zähler regeln |
+| 143 | 20000 | maximale Verkaufsleistung in Watt |
 | 126 | 5000 | |
 | 127 | 10 | |
 | 128 | 40 | |
-| 166–171 | 13 | SoC-Sollwerte der sechs Zeitfenster (%) |
-| 172–177 | 0 | Netzladen der sechs Zeitfenster aus |
+| 166–171 | 13 | Ziel-Ladezustand der sechs Zeitfenster, in Prozent |
+| 172–177 | 0 | Laden aus dem Netz: für alle sechs Zeitfenster aus |
 
-### Laden (Zwangsladung)
+Die „sechs Zeitfenster" sind eine Deye-Eigenheit: man kann den Tag in sechs Abschnitte teilen und für jeden festlegen, bis zu welchem Ladezustand geladen werden soll und ob dafür Netzstrom erlaubt ist. Wir setzen alle sechs gleich, weil wir die Zeitsteuerung nicht benutzen — wir wollen ja *jetzt* etwas.
 
-Der Wechselrichter reagiert hier **nicht** auf eine Wattangabe, sondern auf den Ladestrom:
+### Laden
+
+Hier gibt es eine Überraschung, die viel Zeit gekostet hat:
 
 | Register | Wert | Bedeutung |
 | --- | --- | --- |
-| 126 | Leistung in W | wird gesetzt, vom Gerät aber ignoriert |
+| 126 | Leistung in Watt | wird gesetzt, **aber vom Gerät ignoriert** |
 | 127 | 99 | |
-| 128 | Leistung / 50 | **Ladestrom in A**, gerechnet mit etwa 50 V Batteriespannung |
-| 166–171 | 99 | SoC-Sollwerte auf 99 % — sonst bricht die Ladung beim erreichten Sollwert ab |
-| 172–177 | 1 | Netzladen in allen sechs Zeitfenstern erlaubt |
+| 128 | Leistung ÷ 50 | **der Ladestrom in Ampere** — hierauf reagiert er wirklich |
+| 166–171 | 99 | Ziel-Ladezustand auf 99 % |
+| 172–177 | 1 | Laden aus dem Netz erlaubt |
 
-Die Umrechnung `A = W / 50` ist eine Näherung über die Nennspannung des Batteriestrangs. Bei anderer Systemspannung stimmt der Faktor nicht.
+Zwei Dinge, die man wissen muss:
 
-### Entladen (Zwangsentladung)
+**Der Wechselrichter will Ampere, nicht Watt.** Man schreibt eine Wattzahl in Register 126, und nichts passiert. Der Wert, auf den er reagiert, ist der Ladestrom in Ampere in Register 128. Umgerechnet wird mit `Ampere = Watt ÷ 50`, weil der Batteriestrang etwa 50 Volt hat. Das ist eine Näherung — bei einer anderen Batteriespannung stimmt der Faktor nicht, und man lädt mit der falschen Leistung.
+
+**Der Ziel-Ladezustand muss hoch.** Steht in den Registern 166–171 noch 13 %, hört der Wechselrichter bei 13 % einfach auf zu laden — er hat sein Ziel ja erreicht. Deshalb werden sie auf 99 % gesetzt. Und weil aus dem Netz geladen werden soll, müssen zusätzlich die Freigaben in 172–177 auf 1 stehen.
+
+### Entladen
+
+Hier ist es angenehm einfach:
 
 | Register | Wert | Bedeutung |
 | --- | --- | --- |
-| 142 | 3 | Work Mode = Selling First |
-| 143 | Leistung in W | Max Sell Power |
+| 142 | 3 | Betriebsart „Selling First" — verkaufen hat Vorrang |
+| 143 | Leistung in Watt | maximale Verkaufsleistung |
 
 ## Leistungsgrenzen
 
 | | |
 | --- | --- |
 | Minimum | 1000 W |
-| Maximum (Schreibpfad) | 20000 W |
-| Maximum (Schieber im Popup) | 22000 W, wird auf 20000 W begrenzt |
+| Maximum beim Schreiben | 20000 W |
+| Maximum am Schieber | 22000 W (wird auf 20000 begrenzt) |
 
-## Asynchron schreiben
+## Warum das Schreiben in einem eigenen Programmteil läuft
 
-Die Schreibzugriffe laufen in einer eigenen Task (`deye_ctrl`, Priorität 4, Kern 0), nicht auf der UI-Task. Grund: `modbus_rtu_deye_write()` blockiert, bis der RTU-Master-Bus die Anfrage bedient — auf der LVGL-Task würde das das Touch-Display einfrieren.
+Ein Schreibvorgang auf der Zweidrahtleitung dauert. Die Anfrage muss gesendet werden, das Gerät muss antworten, und wenn gerade eine Abfrage läuft, muss man warten, bis der Bus frei ist. Das können mehrere hundert Millisekunden sein.
 
-Die Task wird per Notify geweckt, dabei gilt immer die **letzte** Anfrage. Wer den Schieber bewegt und mehrfach „Übernehmen" drückt, erzeugt keine Warteschlange.
+Würde man das direkt aus dem Bildschirm-Programmteil machen, wäre die Anzeige in dieser Zeit **eingefroren** — der Touchscreen würde nicht reagieren. Deshalb gibt es eine eigene Task (`deye_ctrl`), die auf dem zweiten Rechenkern läuft und nichts anderes tut, als auf Aufträge zu warten und sie abzuarbeiten.
+
+Nebeneffekt: es entsteht **keine Warteschlange**. Wenn du den Schieber bewegst und dreimal „Übernehmen" drückst, gilt immer nur der letzte Auftrag. Das ist genau richtig — man will nicht, dass drei alte Sollwerte hintereinander abgearbeitet werden.
 
 > [!IMPORTANT]
-> `deye_ctrl_start()` muss **nach** `modbus_rtu_start()` aufgerufen werden — die Task braucht den Anfrage-Mutex des RTU-Busses. Umgekehrt lief das Gerät früher in einen Absturz beim Start.
+> Diese Task darf erst gestartet werden, **nachdem** die Zweidrahtleitung läuft — sie braucht deren Zugriffssperre. War die Reihenfolge falsch, stürzte das Gerät beim Start ab.
 
-## SLS-Export-Schutz
+## Der SLS-Schutz
 
-Bei Zwangsentladung kann die Einspeisung den Hausanschluss überlasten. Der Schutz im Tab „System" begrenzt sie:
+### Das Problem
+
+Bei Zwangsentladung kann eine Menge Leistung ins Netz gehen: der Akku entlädt, die Sonne scheint zusätzlich, und alles fließt nach draußen. Dein Hausanschluss ist aber für einen bestimmten Strom ausgelegt — begrenzt durch den Hauptschalter, meistens 35 Ampere.
+
+Überlastung in Einspeiserichtung ist genauso ein Problem wie in Bezugsrichtung. Nur merkt man es weniger, weil nichts spürbar ausfällt.
+
+### Die Lösung
+
+Im Menü „System" stellst du ein, wie viel Ampere dein Hauptschalter hat. Daraus rechnet die Firmware eine Grenze:
 
 ```text
-maximaler Export  =  SLS-Nennstrom × 3 × 230 V × 0,9
+maximaler Export  =  Ampere  ×  3 Phasen  ×  230 Volt  ×  0,9
 ```
 
-| SLS | Grenze |
+Der Faktor 0,9 ist ein Sicherheitsabstand: es wird bei 90 Prozent der theoretischen Grenze eingegriffen, nicht erst bei 100.
+
+| Hauptschalter | Grenze |
 | --- | --- |
 | 16 A | 9,9 kW |
 | 20 A | 12,4 kW |
@@ -82,37 +112,46 @@ maximaler Export  =  SLS-Nennstrom × 3 × 230 V × 0,9
 | 50 A | 31,0 kW |
 | 63 A | 39,1 kW |
 
-Überschreitet die gemessene Einspeisung diese Grenze, drosselt der Schutz Register 143 (Verkaufsleistung) über `deye_ctrl_set_throttled()`. Wichtig dabei: der **Nutzer-Sollwert bleibt unverändert**. Sinkt die Einspeisung wieder, wird der ursprüngliche Wert automatisch wiederhergestellt.
+Wird die Grenze überschritten, drosselt die Firmware Register 143 (die Verkaufsleistung), bis die Einspeisung wieder passt.
+
+Der wichtige Teil: **dein eingestellter Wunschwert bleibt unangetastet.** Es gibt zwei getrennte Zahlen — was du wolltest und was gerade tatsächlich geschrieben ist. Sinkt die Einspeisung wieder (weil zum Beispiel eine Wolke kommt oder die Waschmaschine anläuft), wird dein Wunschwert automatisch wiederhergestellt.
+
+Im Protokoll sieht man beides:
 
 ```text
 W modbus_tcp: SLS guard: export 22400 W > limit 21735 W (SLS 35A) -- throttle → 18000 W
 I modbus_tcp: SLS guard: export 19100 W OK -- restore → 20000 W
 ```
 
-Deshalb gibt es zwei Abfragen: `deye_ctrl_get_user_power()` liefert, was der Nutzer eingestellt hat, `deye_ctrl_get_power()` was tatsächlich geschrieben wurde.
-
 > [!WARNING]
-> Der Schutz ist eine Software-Hilfe und kein Ersatz für die Schutzeinrichtungen der Anlage. Er greift erst, wenn ein Messwert vorliegt, und er kann eine falsch parametrierte Anlage nicht retten.
+> Das ist **Software**. Sie greift nur, wenn ein Messwert vorliegt, und sie hat womöglich Fehler. Sie ist eine Bequemlichkeit und ausdrücklich **kein Ersatz** für die Schutzeinrichtungen der Anlage. Die richtige Absicherung deines Hausanschlusses ist Sache der Elektroinstallation.
 
 ## Register selbst untersuchen
 
-Unter `http://<ip>/deye` liegt ein Werkzeug für genau diesen Zweck:
+Wenn du eigene Register finden oder eine Vermutung prüfen willst, ist das Werkzeug unter `http://<ip-des-geräts>/deye` genau dafür da.
 
-* **Register-Probe** — beliebige Holding-Register lesen (FC03), mit Klartext-Deutung bekannter Adressen. Hilfreiche Bereiche: `148/12` zeigt TOU-Zeiten und -Leistungen, `166/12` die SoC-Sollwerte und Netzlade-Flags, `142/6` Energy Mode, Work Mode und Solar Sell.
-* **Einzelnes Register schreiben** (FC16) — mit ausdrücklicher Warnung.
-* **Bereich exportieren** — Adressbereich vollständig auslesen und als CSV speichern (Spalten `addr;value;hex;signed;name;interp`), in Excel öffenbar.
-* **CSV importieren** — die enthaltenen Zeilen per FC16 zurückschreiben, jeweils die Spalte `signed`.
+**Register-Probe** — irgendeinen Adressbereich lesen. Neben dem Rohwert steht bei bekannten Adressen auch eine Deutung in Klartext. Gute Startpunkte:
+
+| Adresse / Anzahl | Zeigt |
+| --- | --- |
+| `142` / `6` | Betriebsart, Energy Mode, Solar Sell |
+| `148` / `12` | die Zeiten und Leistungen der sechs Zeitfenster |
+| `166` / `12` | die Ziel-Ladezustände und die Netzlade-Freigaben |
+
+**Ein Register schreiben** — für Versuche mit einzelnen Adressen.
+
+**Bereich sichern und zurückschreiben** — ein Adressbereich wird komplett gelesen und als CSV-Datei gespeichert (Spalten `addr;value;hex;signed;name;interp`), die man in Excel öffnen kann. Dieselbe Datei lässt sich später wieder einspielen.
 
 > [!CAUTION]
-> Beim Import vorher die Zeilen entfernen, die **nicht** geschrieben werden sollen. Mess- und Statusregister sind in der Regel nur lesbar; ein Rückschreiben führt zu Fehlern oder unerwartetem Verhalten.
+> Beim Zurückschreiben **vorher alle Zeilen löschen, die nicht geschrieben werden sollen.** Messwerte und Statusregister sind meist nur lesbar; ein Schreibversuch führt zu Fehlern oder unerwartetem Verhalten. Eine gesicherte Datei enthält immer beides — Einstellungen und Messwerte.
 
-Im Repository liegen dazu die Registerkarten: [`deye-register-map.csv`](https://github.com/FMDHET/deye-inverter-display-esp32-p4/blob/main/deye-register-map.csv) (kommentiert) und `register tables/Deye_SG04LP3.json`.
+Im Repository liegen als Nachschlagewerk: [`deye-register-map.csv`](https://github.com/FMDHET/deye-inverter-display-esp32-p4/blob/main/deye-register-map.csv) mit Kommentaren und `register tables/Deye_SG04LP3.json`.
 
-## Bekannte Lücke
+## Was hier noch offen ist
 
-Die Register für die Zwangsladung sind empirisch ermittelt. Die beiden Referenz-Dumps liegen im Repository und zeigen den Unterschied direkt:
+Die Register für das Zwangsladen sind durch Vergleichen gefunden worden: Zustand aufnehmen, im Wechselrichter-Menü etwas umstellen, wieder aufnehmen, Unterschiede ansehen. Die beiden entscheidenden Aufnahmen liegen im Repository:
 
-* [`docs/register-dumps/laden-soc100.csv`](https://github.com/FMDHET/deye-inverter-display-esp32-p4/blob/main/docs/register-dumps/laden-soc100.csv) — Zustand bei aktiver Zwangsladung: TOU-SoC-Sollwerte auf 99 %
+* [`docs/register-dumps/laden-soc100.csv`](https://github.com/FMDHET/deye-inverter-display-esp32-p4/blob/main/docs/register-dumps/laden-soc100.csv) — während der Zwangsladung: Ziel-Ladezustände auf 99 %
 * [`docs/register-dumps/entladen-soc13.csv`](https://github.com/FMDHET/deye-inverter-display-esp32-p4/blob/main/docs/register-dumps/entladen-soc13.csv) — Normalzustand: dieselben Register auf 13 %
 
-Die Kombination aus 126/127/128 und den TOU-Registern funktioniert an diesem Gerät zuverlässig, ist aber keine dokumentierte Herstellerschnittstelle. Wer eine bessere Belegung findet: gern melden.
+Die Kombination aus 126/127/128 und den Zeitfenster-Registern funktioniert an diesem Gerät zuverlässig. Sie ist aber keine offizielle Schnittstelle, und es ist gut möglich, dass es einen saubereren Weg gibt. Wer einen findet: gerne melden.

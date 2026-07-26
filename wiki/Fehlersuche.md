@@ -1,157 +1,183 @@
 # Fehlersuche
 
-## Erste Anlaufstellen
+## Wo man zuerst hinschaut
 
-| Weg | Was man sieht |
+Bevor man rät, holt man sich Informationen. Es gibt fünf Quellen:
+
+| Quelle | Was man sieht |
 | --- | --- |
-| Serieller Monitor | `pio device monitor -e guition-p4` — mit Exception-Decoder und Zeitstempeln |
-| `GET /ota` | Version, Build, FS-Build, aktiver Slot, Laufzeit |
-| `GET /api/live` | alle Messwerte, MQTT- und NTP-Zustand |
-| `GET /api/devices` | Verbindungszustand und Werte pro Modbus-TCP-Gerät |
-| Tab-Kopfzeilen | jeder Einstellungs-Tab zeigt oben eine Livezeile mit Zählern |
+| **Serieller Monitor** | `pio device monitor -e guition-p4` — alle Meldungen der Firmware mit Zeitstempel. Bei Abstürzen wird sogar die Fehlerstelle im Code aufgelöst. |
+| **`GET /ota`** | Version, Build-Nummer, welcher Speicherabschnitt läuft, Laufzeit |
+| **`GET /api/live`** | alle Messwerte, MQTT- und Uhr-Zustand |
+| **`GET /api/devices`** | pro Gerät: antwortet es, und mit welchen Werten |
+| **Kopfzeilen der Menüs** | jeder Reiter zeigt oben laufende Zähler — oft steht die Antwort schon dort |
 
-## Display
+Ein Tipp zur Laufzeit: tippe auf die Uhr. Steht dort nur eine kurze Zeit, hat das Gerät sich neu gestartet — dann lohnt der Blick in den seriellen Monitor mehr als jede weitere Vermutung.
 
-**Bild bleibt schwarz, Gerät bootet aber**
-Standby ist aktiv (Tab „Display") — einmal antippen. Andernfalls Helligkeit auf 0 %?
+## Bildschirm
 
-**Bild verzerrt, gestreift oder versetzt**
-DSI-Timings oder Rotation passen nicht zum Panel. Werte in `main/board_jc4880p443c.h` gegen die Referenz prüfen. Für dieses Modul sind sie verifiziert; bei einer anderen Panelrevision können sie abweichen.
+**Bild bleibt schwarz, das Gerät läuft aber.**
+Wahrscheinlich der Standby: nach einer eingestellten Zeit ohne Berührung geht die Beleuchtung aus. Einmal antippen. Sonst prüfen, ob die Helligkeit auf 0 % steht.
 
-**Umlaute erscheinen als Kästchen**
-`CONFIG_LV_CACHE_DEF_SIZE` ist 0 oder zu klein. Tiny-TTF rastert zur Laufzeit und braucht den Cache, sonst fällt LVGL auf die Bitmap-Schrift ohne Umlaute zurück.
+**Bild verzerrt, gestreift oder verschoben.**
+Die Zeitwerte für die Bildschirmansteuerung passen nicht zum Panel. Sie stehen in `main/board_jc4880p443c.h` und sind für dieses Modul erprobt — bei einer anderen Panel-Revision können sie abweichen. Selbst herumprobieren ist hier mühsam; besser die Werte aus einer bekannten funktionierenden Quelle übernehmen.
 
-**Panel flackert beim Flashen**
-Sollte nicht passieren — das UI-Einfrieren samt Backlight-Abschaltung ist eingebaut. Tritt es doch auf, hat `ota_freeze_ui()` den LVGL-Lock nicht bekommen (Zeitüberschreitung nach 2 s); im Log steht `lvgl_lock=0`.
+**Umlaute erscheinen als leere Kästchen.**
+Der Zwischenspeicher für Schriftzeichen ist zu klein oder aus. Die Buchstaben werden zur Laufzeit aus einer Schriftdatei berechnet und brauchen Platz dafür; ohne ihn fällt LVGL lautlos auf die eingebaute Bildschriftart zurück, und die kennt keine Umlaute. Lösung: `CONFIG_LV_CACHE_DEF_SIZE` muss gesetzt sein (hier 262144). Der Standardwert ist 0.
+
+**Das Panel flackert beim Firmware-Update.**
+Sollte nicht passieren, denn Oberfläche und Beleuchtung werden dafür abgeschaltet. Wenn doch: die Sperre auf dem Bildschirmspeicher wurde nicht rechtzeitig frei (Abbruch nach 2 Sekunden). Im Protokoll steht dann `lvgl_lock=0`.
 
 ## WLAN
 
-**Bootschleife, sobald WiFi initialisiert wird**
-Die Firmware des ESP32-C6-Slave passt nicht zum Host. Hier läuft Slave **2.12.8** zu `esp_hosted ~2.12.0`. Zum Eingrenzen `DEYE_ENABLE_WIFI` in `main.c` auf 0 setzen: bootet das Gerät dann durch, ist es der C6.
+**Das Gerät startet immer wieder neu, sobald WLAN dazukommt.**
+Die Programme auf Haupt- und Funkchip passen nicht zueinander. Hier läuft auf dem Funkchip Version **2.12.8** zu `esp_hosted` 2.12.x. Zum Eingrenzen in `main.c` `#define DEYE_ENABLE_WIFI 1` auf `0` setzen — startet es dann durch, ist es bestätigt.
 
-**Kein Netz gefunden, obwohl vorhanden**
-Nur 2,4 GHz ist zuverlässig erreichbar, wenn das Gerät weit vom Router steht. Ein eigenes 2,4-GHz-Netz hilft mehr als jede Softwareeinstellung.
+**Das eigene WLAN wird nicht gefunden.**
+Weiter weg vom Router ist nur 2,4 GHz zuverlässig; 5 GHz kommt durch Wände viel schlechter. Ein eigenes 2,4-GHz-Netz hilft mehr als jede Softwareeinstellung. Zur Einschätzung der Signalstärke: [WLAN-Seite](WLAN-und-Captive-Portal#signalstärke-verstehen).
 
-**Captive Portal öffnet sich nicht von selbst**
-Manche Betriebssysteme merken sich, dass ein Netz kein Portal hat. `http://192.168.4.1` direkt aufrufen.
+**Das Anmeldefenster springt nicht auf.**
+Manche Betriebssysteme merken sich, dass ein Netz kein Portal hat. Einfach `http://192.168.4.1` direkt im Browser aufrufen.
 
-**Gerät nach Update nicht erreichbar**
-Zugangsdaten liegen in NVS und überleben Updates — es sei denn, das Partitionslayout wurde verändert. Dann per USB neu einrichten.
+**Nach einem Update ist das Gerät nicht mehr erreichbar.**
+Zugangsdaten liegen in einem Speicherbereich, der Updates übersteht — es sei denn, die Speicheraufteilung selbst wurde geändert. Dann hilft nur die Ersteinrichtung per USB.
 
-## Modbus-TCP
+## Geräte im Netzwerk (Modbus-TCP)
 
-**Gerät bleibt `offline`**
+**Ein Gerät bleibt `offline`.** In dieser Reihenfolge prüfen:
 
-1. IP, Port und Slave-ID prüfen — mehrere Slave-IDs auf einer IP sind erlaubt und üblich (z. B. mehrere Wechselrichter an einem Datalogger).
-2. Timeout erhöhen: manche Datalogger antworten erst nach über einer Sekunde.
-3. Von einem Rechner im gleichen Netz gegenprüfen, ob Port 502 offen ist.
+1. IP-Adresse, Port und Slave-ID. Mehrere Slave-IDs auf derselben IP sind normal — bei Wechselrichtern hinter einem gemeinsamen Datenlogger sogar der Regelfall.
+2. Timeout hochsetzen. Manche Datenlogger brauchen über eine Sekunde für eine Antwort.
+3. Von einem Rechner aus prüfen, ob Port 502 überhaupt offen ist. Manche Geräte müssen Modbus erst in ihrem eigenen Menü freigeschaltet bekommen.
+4. Steht der Schalter „aktiv" auf ein?
 
-**Werte sind `nan` oder absurd groß**
-Fast immer das falsche Hersteller-Profil. Der häufigste Fall: ein **Eltako DSZ16DZE** ist als Fronius oder als SDM630-float eingetragen. Der Eltako liefert auf `0x0034` **int32**, dort wo ein SDM630 float32 führt.
+**Werte sind `nan` oder absurd groß.**
+Das ist fast immer das falsche Hersteller-Profil. Der klassische Fall: ein **Eltako-Zähler**, eingetragen als Fronius oder als SDM630. Der Eltako legt seine Leistung als ganze Zahl in dasselbe Register, in dem ein SDM630 eine Fließkommazahl hat. Dieselbe Adresse, komplett andere Bedeutung der Bits — und es gibt keine Fehlermeldung, nur Unsinn. Ausführlich: [Modbus-TCP](Modbus-TCP#die-falle-mit-dem-eltako-zähler).
 
-**Log zeigt `implausible ... skipped`**
-Die Plausibilitätsprüfung hat einen Wert über 100 kW oder ein `nan` verworfen. Meist falsches Profil, gelegentlich eine gestörte Verbindung.
+**Im Protokoll steht `implausible ... skipped`.**
+Die Plausibilitätsprüfung hat einen Wert über 100 kW oder keine gültige Zahl verworfen. Auch hier: meist das falsche Profil, seltener eine gestörte Verbindung.
 
-**PV zu hoch, Akku fehlt bei einem Fronius-Hybrid**
-Der Hybrid wird als reiner String-Wechselrichter behandelt, weil SunSpec-Modell 124 nicht gefunden wurde. Prüfen, ob das Gerät das Speichermodell überhaupt anbietet — sonst wird die Akku-Entladung als PV gezählt.
+**Solarleistung zu hoch, Akku fehlt bei einem Fronius-Hybrid.**
+Das Gerät wird als normaler Wechselrichter behandelt, weil der Speicher-Block (SunSpec-Modell 124) nicht gefunden wurde. Dadurch wird die Akku-Entladung als Solarleistung mitgezählt — abends sieht man dann „Sonnenstrom" ohne Sonne. Prüfen, ob das Gerät diesen Block überhaupt anbietet. Erklärung: [Modbus-TCP](Modbus-TCP#ein-hybrid-rechnet-anders).
 
-**Ein Knoten zeigt `--`**
-Genau so gedacht: die Quelle ist weg (Gerät deaktiviert, entfernt oder Wert veraltet). Besser als ein eingefrorener Wert.
+**Ein Kreis zeigt `--`.**
+Das ist kein Fehler, sondern Absicht: die Quelle ist weg (Gerät aus, entfernt oder Wert zu alt). Ein eingefrorener alter Wert wäre schlimmer, weil er wie ein aktueller aussieht.
 
-## Modbus-RTU
+## Zweidrahtleitung (Modbus-RTU)
 
-**Bus A oder B bleibt `offline`**
+**Ein Bus bleibt `offline`.** Der Reihe nach:
 
-1. **Selbsttest** ausführen (Tab „Mod RTU"): A-TX → B-RX und A-RX → B-TX verdrahten. Läuft der durch, sind Transceiver und Firmware in Ordnung und das Problem liegt beim Wechselrichter oder der Strecke dorthin.
-2. A und B vertauscht? Der häufigste Verdrahtungsfehler.
-3. Gemeinsame Masse zwischen Display und Wechselrichter vorhanden?
-4. Baudrate und Slave-ID gegen die Einstellung im Wechselrichter prüfen (Standard 9600).
-5. 120 Ω an beiden Busenden.
+1. **Erst den Selbsttest laufen lassen** (Reiter „Mod RTU"). Dafür Bus A und B gegeneinander verdrahten: A-senden → B-empfangen und A-empfangen → B-senden. Läuft der Test durch, sind Transceiver und Software in Ordnung, und das Problem liegt auf der Strecke zum Wechselrichter oder in dessen Einstellungen. Das spart viel Ratearbeit.
+2. **A und B vertauscht?** Der häufigste Verdrahtungsfehler überhaupt, und das Symptom ist immer dasselbe: gar nichts.
+3. **Gemeinsame Masse** zwischen Display und Wechselrichter vorhanden?
+4. **Baudrate und Slave-ID** mit den Einstellungen im Wechselrichter vergleichen (üblich 9600).
+5. **120 Ω an beiden Leitungsenden** zwischen A und B.
 
-**Fehlerzähler wächst schnell**
-Abschluss, Masse oder Baudrate. Ein langsam mitwachsender Zähler ist auf RS485 dagegen normal.
+**Der Fehlerzähler wächst schnell.**
+Ein langsam mitwachsender Zähler ist auf so einer Leitung völlig normal — elektrische Störungen gibt es immer, und eine kaputte Nachricht wird einfach weggeworfen. Wächst er aber ähnlich schnell wie der Zähler der erfolgreichen Abfragen, stimmt etwas mit Abschlusswiderständen, Masse, Baudrate oder Leitungsführung nicht.
 
-**Der Deye meldet „Zähler verloren"**
-Die Emulation antwortet nicht — Bus deaktiviert, falsche Slave-ID oder falscher Bus als Slave konfiguriert. Der Slave-Zähler im Tab-Kopf muss steigen.
+**Der Deye meldet „Zähler verloren".**
+Unser gefälschter Zähler antwortet nicht. Prüfen: ist der Bus eingeschaltet, steht er auf *Slave*, und stimmt die Slave-ID? Der Slave-Zähler im Menükopf muss steigen — wenn nicht, kommen die Fragen des Deye nicht bei uns an.
 
-**Der Deye regelt nicht auf den Sollwert**
-Die Emulation meldet 0 W, weil kein **frischer** Netzmesswert vorliegt. Ursachen: kein Gerät mit Rolle `Netz-Zaehler` konfiguriert, dieses Gerät offline, oder die Konfiguration wurde gerade gespeichert (dann gilt der Wert bis zum ersten Lesen als ungültig). Das ist die eingebaute Sicherung, kein Fehler — siehe unten.
+**Der Deye regelt nicht auf den eingestellten Sollwert.**
+Sehr wahrscheinlich meldet die Emulation gerade 0 Watt, weil **kein frischer Netzmesswert** vorliegt. Mögliche Ursachen: kein Gerät mit der Rolle `Netz-Zaehler` eingerichtet, dieses Gerät antwortet nicht, oder die Geräteliste wurde eben gespeichert (dann gilt der Wert bis zum ersten Lesen absichtlich als ungültig).
+
+Das ist **kein Fehler, sondern die eingebaute Sicherung.** Warum, steht gleich unten.
 
 ## Deye-Steuerung
 
-**Modus wird gesetzt, der Wechselrichter reagiert nicht**
+**Der Modus wird gesetzt, der Wechselrichter reagiert nicht.**
 
-1. Läuft ein Bus als **Master**? Ohne Master gibt es keinen Schreibweg.
-2. Mit `/deye` prüfen, ob die Register den erwarteten Wert tragen (`142/6` und `166/12`).
-3. Modell und Firmwarestand: die Registerbelegung ist an einem SG04LP3 ermittelt.
+1. Läuft überhaupt ein Bus als **Master**? Ohne Master gibt es keinen Schreibweg.
+2. Mit dem [Register-Werkzeug](Web-Mirror#register-werkzeug-deye) nachsehen, ob in den Registern das steht, was dort stehen soll (`142/6` und `166/12`).
+3. Modell und Gerätesoftware prüfen. Die Adressen sind an einem SG04LP3 ermittelt und nicht offiziell dokumentiert.
 
-**Zwangsladung lädt nicht mit der eingestellten Leistung**
-Der Wechselrichter reagiert nicht auf die Wattangabe in Register 126, sondern auf den Ladestrom in Register 128. Die Umrechnung `A = W / 50` unterstellt etwa 50 V Batteriespannung — bei anderer Systemspannung stimmt sie nicht.
+**Die Zwangsladung lädt mit der falschen Leistung.**
+Der Wechselrichter reagiert nicht auf die Wattzahl in Register 126, sondern auf den Ladestrom in Ampere in Register 128. Umgerechnet wird mit `Ampere = Watt ÷ 50`, weil der Batteriestrang etwa 50 Volt hat. Bei einer anderen Batteriespannung stimmt dieser Faktor nicht — dann lädt es entsprechend zu schwach oder zu stark.
 
-**Zwangsentladung bricht ein oder wird gedrosselt**
-Der [SLS-Export-Schutz](Deye-Steuerung#sls-export-schutz) greift. Im Log:
-`SLS guard: export 22400 W > limit 21735 W (SLS 35A) -- throttle → 18000 W`
-Der Nutzer-Sollwert bleibt dabei erhalten und wird wiederhergestellt, sobald die Einspeisung sinkt.
+**Die Zwangsladung hört zu früh auf.**
+Dann stehen die Ziel-Ladezustände in den Registern 166–171 noch niedrig. Der Wechselrichter hat sein Ziel erreicht und stellt ab. Beim Umschalten auf „Laden" werden sie auf 99 % gesetzt — passiert das nicht, ist der Schreibvorgang gescheitert.
 
-**Anzeige friert beim Umschalten des Modus ein**
-Sollte nicht passieren: die Schreibzugriffe laufen in der `deye_ctrl`-Task, nicht auf der UI-Task. Tritt es doch auf, wurde ein Modbus-Schreibaufruf direkt aus einem LVGL-Callback gemacht.
+**Die Zwangsentladung wird gedrosselt.**
+Der SLS-Schutz greift, weil die Einspeisung an die Grenze deines Hausanschlusses stößt. Im Protokoll:
+
+```text
+W modbus_tcp: SLS guard: export 22400 W > limit 21735 W (SLS 35A) -- throttle → 18000 W
+I modbus_tcp: SLS guard: export 19100 W OK -- restore → 20000 W
+```
+
+Dein eingestellter Wunschwert bleibt dabei erhalten und wird wiederhergestellt, sobald die Einspeisung sinkt. Erklärung: [Der SLS-Schutz](Deye-Steuerung#der-sls-schutz).
+
+**Die Anzeige friert beim Umschalten ein.**
+Sollte nicht passieren, denn das Schreiben läuft in einem eigenen Programmteil. Wenn doch, wurde irgendwo ein Modbus-Schreibaufruf direkt aus der Bildschirm-Verarbeitung gemacht — das blockiert dann so lange, wie die Leitung braucht.
 
 ## Die 15-kW-Geschichte
 
-Einmal hat diese Anlage **15 kW ins Netz eingespeist**, weil die Eastron-Emulation einen eingefrorenen Netzmesswert weitergemeldet hat: die TCP-Poll-Task hing, der letzte Wert blieb stehen, und der Deye regelte mit voller Leistung gegen eine Zahl, die sich nicht mehr bewegte.
+Das ist der wichtigste Abschnitt auf dieser Seite, auch wenn er nach einer Anekdote klingt.
 
-Die Konsequenz steht heute im Code:
+Diese Anlage hat einmal **15 Kilowatt ins Netz eingespeist**, ohne dass jemand das wollte. Der Ablauf:
 
-* Die Emulation fragt `modbus_tcp_grid_w_fresh(&w, 12000)`.
-* Bei `false` meldet sie **0 W** — nicht den letzten Wert, aber sie **antwortet weiterhin** (Schweigen würde der Deye als Zählerausfall werten und auf seinen eigenen CT umschalten).
-* Nach jedem Speichern der Gerätekonfiguration ist der Netzwert ungültig, bis er frisch gelesen wurde.
+1. Der Programmteil, der den Netzzähler abfragt, blieb hängen.
+2. Der gemessene Netzwert blieb dadurch auf seinem letzten Stand stehen — er sah aber vollkommen normal aus.
+3. Der gefälschte Zähler meldete diesen eingefrorenen Wert brav weiter an den Deye.
+4. Der Deye regelte dagegen: er drehte auf, sah keine Veränderung in der Messung, drehte weiter auf, sah weiter keine Veränderung — bis zum Anschlag.
+
+Das Fatale daran: nichts war offensichtlich kaputt. Es lief alles, die Zahlen sahen plausibel aus. **Ein toter Sensor in einem laufenden Regelkreis ist schlimmer als gar kein Sensor**, weil der Regler ihn für gesund hält.
+
+Die Konsequenz steckt heute an drei Stellen im Code:
+
+* Der gefälschte Zähler fragt vor jeder Antwort `modbus_tcp_grid_w_fresh(&w, 12000)` — „gib mir den Netzwert, aber nur, wenn er höchstens 12 Sekunden alt ist."
+* Bekommt er ein „nein", meldet er **0 Watt** — nicht den letzten bekannten Wert. Er **antwortet aber weiterhin**, denn Schweigen würde der Deye als Zählerausfall werten und auf seinen eigenen Stromwandler umschalten.
+* Nach jedem Speichern der Geräteliste gilt der Netzwert absichtlich als ungültig, bis er wieder frisch gelesen wurde.
 
 > [!WARNING]
-> Wer an `modbus_rtu.c` oder am Netzpfad in `modbus_tcp.c` arbeitet: diese Kopplung muss erhalten bleiben. Ein Regelkreis mit einem stehenden Messwert ist gefährlicher als einer ohne Messwert.
+> Wenn du an `modbus_rtu.c` oder am Netzpfad in `modbus_tcp.c` arbeitest: **diese Kopplung muss bleiben.** Sie sieht wie eine unnötige Vorsichtsmaßnahme aus, ist aber der Unterschied zwischen einer nützlichen und einer gefährlichen Funktion.
 
-## Build und Flash
+## Bauen und Flashen
 
 **`BUILD MISMATCH: firmware #146 but filesystem #145`**
-Firmware und Dateisystem sind getrennt geflasht worden. Beides in einem Aufruf: `pio run -e guition-p4 -t upload -t flashfs`. Über WiFi beide Images schreiben und neu starten.
+Programm und Dateisystem wurden getrennt geflasht und sind aus dem Takt. Lösung: beides in einem Befehl — `pio run -e guition-p4 -t upload -t flashfs`. Über WLAN: beide Dateien schreiben und neu starten.
 
 **`Filesystem build unavailable (asset image not flashed?)`**
-Die `storage`-Partition ist leer oder unlesbar. `-t flashfs` bzw. `POST /ota/fs` nachziehen. Unkritisch: die Firmware läuft weiter.
+Der Dateisystem-Abschnitt ist leer oder unlesbar. Unkritisch, die Firmware läuft weiter. Mit `-t flashfs` beziehungsweise `POST /ota/fs` nachziehen.
 
-**OTA-Upload wird abgelehnt**
+**Das Firmware-Update wird abgelehnt.**
 
-* `bad size` — Image größer als die Partition
-* `image invalid` — beschädigtes oder für ein anderes Ziel gebautes Image
-* Abbruch ohne Meldung — früher durch Socket-Erschöpfung verursacht; dagegen steht `CONFIG_LWIP_TCP_MSL=5000` in `sdkconfig.defaults`
+* `bad size` — die Datei ist größer als der Speicherabschnitt. Meist die falsche Datei erwischt.
+* `image invalid` — beschädigt oder für einen anderen Chip gebaut. Wird erkannt, *bevor* umgeschaltet wird; die alte Version läuft weiter.
+* Abbruch ohne Meldung — gab es früher wegen erschöpfter Netzwerkkanäle, dagegen steht heute `CONFIG_LWIP_TCP_MSL=5000` in den Einstellungen.
 
-**Nach dem Update verhält sich die Firmware falsch**
-`POST /ota/rollback` schaltet auf den vorigen Slot zurück, oder die Recovery-Seite unter `/recovery` benutzen.
+**Die neue Version läuft, verhält sich aber falsch.**
+`POST /ota/rollback` schaltet auf die vorige zurück, oder die Notfallseite unter `/recovery` benutzen. Der alte Stand liegt unangetastet im anderen Speicherabschnitt.
 
-**Firmware läuft nicht auf ECO2-Silizium**
-`CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` muss gesetzt sein, sonst enthält das Binary `xespv2p2`-Befehle, die ältere Revisionen nicht dekodieren.
+**Die Firmware läuft auf einem Modul nicht.**
+Manche ESP32-P4 haben älteres Silizium (ECO2) und verstehen bestimmte Maschinenbefehle nicht. `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` muss gesetzt sein.
 
 ## MQTT
 
-**Verbindet nicht**
-Host, Port und Zugangsdaten prüfen; `mqtt_conn` in `/api/live` zeigt den Zustand. Broker, die eine Authentifizierung erzwingen, brechen ohne Zugangsdaten sofort ab.
+**Keine Verbindung.**
+Adresse, Port und Zugangsdaten prüfen. Broker, die eine Anmeldung verlangen, trennen sofort wieder, wenn keine Zugangsdaten kommen. Zustand ablesen mit `curl -s http://<ip>/api/live` — `mqtt_en` ist „eingeschaltet", `mqtt_conn` ist „verbunden".
 
-**Entities erscheinen nicht in Home Assistant**
-„HA Discovery" muss aktiv sein. Die Konfigurations-Topics werden nach dem Verbinden gesendet — Discovery einschalten, speichern, dann verbindet sich der Client neu und veröffentlicht sie.
+**In Home Assistant erscheint nichts.**
+„HA Discovery" muss eingeschaltet sein. Die Beschreibungsnachrichten werden nur beim Verbinden gesendet — also einschalten, speichern, dann verbindet sich der Client neu und schickt sie.
 
-**Werte bleiben nach einem Neustart stehen**
-Retain-Flag. Gewollt, wenn Home Assistant beim Start sofort Werte sehen soll; abschaltbar im Tab „MQTT".
+**Nach einem Ausfall stehen alte Werte weiter da.**
+Das ist das Retain-Flag: der Broker hält die letzte Nachricht vor. Gewollt, damit Home Assistant nach einem Neustart sofort Werte hat. Wer es nicht mag, schaltet Retain ab. Wichtiger ist das Last-Will: damit erscheint zumindest `offline` auf dem Verfügbarkeits-Topic.
 
 ## VPN
 
-**Tunnel kommt nicht zustande**
-Die häufigste Ursache: die Uhr ist nicht gestellt. Der WireGuard-Handschlag braucht eine plausible Wanduhrzeit — SNTP muss aktiv und der Server erreichbar sein. Danach Schlüssel, Endpunkt und Port prüfen und `AllowedIPs` auf der Gegenseite gegen die Tunnel-IP abgleichen.
+**Der Tunnel kommt nicht zustande.**
+Der erste Verdächtige ist immer die **Uhr**. WireGuard braucht eine plausible Zeit für seinen Handschlag; ohne gestellte Uhr lehnt der Server ab. Also: NTP eingeschaltet? Server erreichbar? Steht im Reiter „Zeit" ein Datum?
 
-**Tunnel bricht regelmäßig ab**
-Keepalive setzen (25 s), wenn das Gerät hinter NAT steht.
+Danach: Schlüssel richtig herum eingetragen (privater Schlüssel des Geräts, öffentlicher des Servers), Endpunkt und Port korrekt, und passt `AllowedIPs` beim Server zur eingestellten Tunnel-Adresse?
+
+**Der Tunnel bricht regelmäßig ab.**
+Keepalive auf 25 Sekunden setzen. Ohne regelmäßiges Lebenszeichen wirft der Router den Verbindungseintrag weg, und Antworten von außen finden nicht mehr zurück.
 
 ## Einstellungen
 
-**Gespeicherte Werte scheinen verloren**
-Wenn ein Tab leer rendert und ein Speichern die Konfiguration überschreibt, wurde `ui_settings_create()` **vor** den Backend-Starts aufgerufen. In `main.c` muss es am Ende stehen — siehe [Architektur](Architektur#bootreihenfolge).
+**Gespeicherte Werte scheinen verloren.**
+Wenn ein Reiter leer erscheint und ein Druck auf „Speichern" die Konfiguration löscht, wurde der Einstellungsbildschirm zu früh im Startvorgang aufgebaut — dann liest er aus noch leeren Programmteilen. Er muss in `main.c` **zuletzt** kommen, siehe [Architektur](Architektur#die-startreihenfolge).
 
-**Absturz beim Start, kurz nach dem RTU-Start**
-`deye_ctrl_start()` läuft vor `modbus_rtu_start()`. Die Schreibtask braucht den Anfrage-Mutex des Busses.
+**Absturz kurz nach dem Start der Zweidrahtleitung.**
+Die Akku-Schreibtask wurde vor der Zweidrahtleitung gestartet und findet deren Zugriffssperre nicht.

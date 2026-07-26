@@ -1,69 +1,105 @@
-# WLAN und Captive Portal
+# WLAN und Ersteinrichtung
 
-WLAN läuft nicht auf dem ESP32-P4 selbst, sondern auf dem **ESP32-C6** des Moduls: `esp_hosted` überträgt den Netzwerk-Stack über SDIO, `esp_wifi_remote` leitet die gewohnten `esp_wifi`-Aufrufe dorthin weiter.
+## Erst mal: WLAN macht ein zweiter Chip
 
-## Zustände
+Der Hauptchip ESP32-P4 hat kein eigenes Funkmodul. Auf dem Modul sitzt deshalb noch ein ESP32-C6, der das komplette WLAN übernimmt. Die beiden reden intern miteinander, und zwei Hilfsbibliotheken sorgen dafür, dass sich das im Programm anfühlt wie ein einzelner Chip mit eingebautem WLAN. Näheres unter [Hardware](Hardware#die-sache-mit-dem-zweiten-chip).
+
+## Die zwei Betriebsarten
+
+Ein WLAN-Chip kann zwei Dinge tun:
+
+* sich in ein **bestehendes** WLAN einbuchen — wie dein Handy zu Hause. Das nennt man **Station** (STA).
+* selbst ein WLAN **aufspannen**, in das sich andere einbuchen können. Das nennt man **Access Point** (AP).
+
+Dieses Gerät kann beides und entscheidet selbst, was gerade sinnvoll ist:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Booting
-    Booting --> STA_verbinde: Zugangsdaten gespeichert
-    Booting --> AP_only: keine Zugangsdaten
-    STA_verbinde --> STA_verbunden: Erfolg
-    STA_verbinde --> AP_Fallback: Zeitüberschreitung
-    AP_Fallback --> STA_verbunden: erneuter Versuch klappt
-    AP_only --> STA_verbunden: Netz eingerichtet
+    [*] --> Start
+    Start --> Verbinde: Passwörter gespeichert
+    Start --> NurAP: nichts gespeichert
+    Verbinde --> Verbunden: klappt
+    Verbinde --> APundSuche: klappt nicht
+    APundSuche --> Verbunden: späterer Versuch klappt
+    NurAP --> Verbunden: WLAN eingerichtet
 ```
 
-| Zustand | Bedeutung |
+| Zustand | Was er bedeutet |
 | --- | --- |
-| `BOOTING` | Startphase |
-| `STA_CONNECTING` | verbindet mit einem gespeicherten Netz |
-| `STA_CONNECTED` | verbunden, IP vorhanden |
-| `AP_FALLBACK` | Access Point aktiv, STA versucht es im Hintergrund weiter |
-| `AP_ONLY` | keine Zugangsdaten gespeichert |
+| `BOOTING` | startet gerade |
+| `STA_CONNECTING` | versucht, sich in ein gespeichertes WLAN einzubuchen |
+| `STA_CONNECTED` | drin, hat eine IP-Adresse |
+| `AP_FALLBACK` | spannt selbst ein WLAN auf, probiert im Hintergrund aber weiter |
+| `AP_ONLY` | kein Passwort gespeichert, wartet auf Einrichtung |
 
-Im AP-Betrieb heißt das Netz **`DeyeDisplay-XXXXXX`** (die letzten drei Bytes der MAC), Standard-Passwort **`deyedisplay`**. Das Passwort ist in den Einstellungen änderbar, die SSID nicht. Die AP-Adresse ist `192.168.4.1`.
+Im AP-Betrieb heißt das eigene Netz **`DeyeDisplay-XXXXXX`** — die sechs Zeichen sind die letzten Stellen der Hardware-Adresse, damit zwei Geräte im selben Raum sich nicht in die Quere kommen. Das Standard-Passwort ist **`deyedisplay`** und lässt sich später ändern. Das Gerät selbst ist dann unter `192.168.4.1` erreichbar.
 
-## Erste Einrichtung über das Captive Portal
+## Ersteinrichtung: der Hotel-WLAN-Trick
 
-1. Mit dem Telefon oder Notebook dem Netz `DeyeDisplay-XXXXXX` beitreten.
-2. Das Betriebssystem meldet „Anmeldung beim Netzwerk erforderlich" und öffnet die Seite von selbst.
-3. Auf der Seite die Netzsuche starten, das eigene WLAN wählen, Passwort eingeben, absenden.
-4. Das Gerät speichert die Zugangsdaten und verbindet sich. Die IP steht danach im WLAN-Tab und im Popup hinter dem WLAN-Status oben links.
+Kennst du das Anmeldefenster, das aufspringt, wenn du dich in ein Hotel- oder Café-WLAN einbuchst? Dieses Gerät benutzt genau denselben Mechanismus. Das nennt man **Captive Portal**.
 
-Technisch dahinter: ein **DNS-Hijack**, der jeden Namen auf die AP-Adresse auflöst, plus ein HTTP-Server, der die Erreichbarkeitsprüfungen der Betriebssysteme (`/generate_204`, `/hotspot-detect.html` und Verwandte) mit einer Umleitung beantwortet — dadurch springt das Anmeldefenster auf. Beide Server laufen dauerhaft und tun nichts, solange kein AP-Client verbunden ist.
+So geht die Einrichtung:
 
-Ist ein Netz eingerichtet, liefert die Portal-Seite den [Web-Mirror](Web-Mirror) aus — dieselbe URL, sinnvollerer Inhalt.
+1. Mit Handy oder Notebook dem WLAN `DeyeDisplay-XXXXXX` beitreten (Passwort `deyedisplay`).
+2. Es erscheint von selbst die Meldung „Anmeldung beim Netzwerk erforderlich", und die Einrichtungsseite geht auf.
+3. Auf der Seite die Netzsuche starten, dein WLAN aussuchen, Passwort eingeben, abschicken.
+4. Das Gerät speichert die Zugangsdaten und bucht sich ein. Die IP-Adresse steht danach im Menü unter „WLAN" und im Fenster, das aufgeht, wenn du oben links auf den WLAN-Namen tippst.
 
-## Einrichtung am Gerät
+### Wie dieser Trick funktioniert
 
-Der Tab „WLAN" bietet dasselbe mit dem gleichen Backend, nur als Touch-Oberfläche:
+Zwei Dinge greifen zusammen:
 
-* **Status** — Zustand, verbundene SSID mit Signalstärke, IP, AP-Zustand
-* **Gespeicherte Netze** — bis zu **10** Einträge, jeder mit Papierkorb-Symbol zum Einzel-Löschen; das aktive Netz ist grün mit Häkchen markiert
-* **Scan** — Schaltfläche oben rechts, Ergebnisliste mit Signalstärke; Antippen übernimmt die SSID
-* **Bildschirmtastatur** mit Umlauten und Umschaltung Groß/Klein
+**Erstens: alle Namen zeigen auf uns.** Wenn dein Handy `www.beispiel.de` aufrufen will, fragt es zuerst einen Namensdienst (DNS) nach der Adresse. Dieses Gerät betreibt einen eigenen DNS und antwortet auf **jede** Frage mit seiner eigenen Adresse. Egal, welche Seite man aufruft, man landet beim Display.
 
-Das Gerät verbindet sich mit demjenigen gespeicherten Netz, das erreichbar ist. Wird das aktive Netz gelöscht, sucht es sich ein anderes gespeichertes — oder fällt in den AP-Betrieb.
+**Zweitens: wir beantworten die Testanfragen.** Jedes Betriebssystem prüft nach dem Einbuchen automatisch, ob das Internet erreichbar ist. Dazu ruft es eine bestimmte kleine Testadresse auf — Android nimmt `/generate_204`, Apple `/hotspot-detect.html`, Windows etwas Ähnliches. Kommt die erwartete Antwort nicht, sondern eine Umleitung, weiß das System: „hier ist ein Anmeldefenster" — und öffnet es.
 
-## Warum mehrere Netze
+Beide Dienste laufen dauerhaft mit und tun nichts, solange sich niemand einbucht.
 
-Das Gerät hängt an einem Wechselrichter, oft im Keller oder in der Garage, am Rand der Funkabdeckung. Mit mehreren gespeicherten Netzen (Haupt-Router, Repeater, Mobilfunk-Hotspot für Wartungsarbeiten) bleibt es erreichbar, ohne dass jemand mit dem USB-Kabel hingehen muss.
+Ist ein WLAN eingerichtet, zeigt dieselbe Adresse etwas Nützlicheres: den [Web-Mirror](Web-Mirror), also das Display im Browser.
+
+## Einrichtung direkt am Gerät
+
+Das Menü „WLAN" kann dasselbe, nur zum Antippen:
+
+* **Status** — Zustand, verbundenes Netz mit Signalstärke, IP-Adresse, AP-Zustand
+* **Gespeicherte Netze** — bis zu **10** Einträge. Jeder hat ein Papierkorb-Symbol zum Löschen; das aktuell verbundene ist grün mit Häkchen markiert.
+* **Scan** (oben rechts) — sucht Netze in der Umgebung und listet sie mit Signalstärke. Antippen übernimmt den Namen.
+* **Bildschirmtastatur** mit Umlauten und Umschaltung zwischen Groß- und Kleinschreibung.
+
+Das Gerät verbindet sich mit dem gespeicherten Netz, das gerade erreichbar ist. Löscht du das aktive, sucht es sich ein anderes gespeichertes — und wenn keines mehr da ist, spannt es wieder sein eigenes auf.
+
+### Warum gleich zehn Netze?
+
+Weil das Gerät an einem Wechselrichter hängt, und der steht typischerweise im Keller, in der Garage oder im Technikraum — also am Rand der WLAN-Abdeckung. Mit mehreren gespeicherten Netzen (Router, Repeater, Handy-Hotspot für Wartungsarbeiten) bleibt es erreichbar, ohne dass jemand mit einem USB-Kabel in den Keller muss.
+
+## Signalstärke verstehen
+
+Der Wert in dBm ist immer negativ, und **näher an null ist besser**:
+
+| Wert | Bewertung |
+| --- | --- |
+| −30 bis −60 dBm | sehr gut |
+| −60 bis −70 dBm | brauchbar |
+| −70 bis −80 dBm | schwach, Verbindungsabbrüche möglich |
+| unter −80 dBm | kaum benutzbar |
 
 ## Status abfragen
 
-Auf dem Hauptbildschirm oben links: SSID in Grün bei Verbindung. Antippen öffnet ein Popup mit IP, Signalstärke, MAC und AP-Zustand.
+Auf dem Hauptbildschirm oben links steht der Netzname in Grün, wenn eine Verbindung besteht. Antippen öffnet ein Fenster mit IP-Adresse, Signalstärke, Hardware-Adresse und AP-Zustand.
 
-Über das Netz:
+Vom Rechner aus:
 
 ```bash
-curl -s http://<ip>/ota      # enthält die MAC-Adresse
-curl -s http://<ip>/api/live # bestätigt, dass die Firmware läuft
+curl -s http://<ip-des-geräts>/api/live   # läuft die Firmware?
+curl -s http://<ip-des-geräts>/ota        # Version und Hardware-Adresse
 ```
 
-## Fallgruben
+## Typische Probleme
 
-* **Bootschleife bei WiFi-Init** — Firmware des C6-Slave passt nicht zum Host. Hier läuft Slave 2.12.8 zu `esp_hosted ~2.12.0`.
-* **Nur 2,4 GHz zuverlässig** — bei großer Entfernung zum Router hilft ein separates 2,4-GHz-Netz mehr als jede Softwareeinstellung.
-* **Zugangsdaten überleben ein Update**, weil `nvs` seinen Standard-Offset behält. Beim Wechsel des Partitionslayouts wäre das nicht garantiert.
+**Das Gerät startet immer wieder neu, sobald WLAN dazukommt.** Die Programme auf den beiden Chips passen nicht zueinander. Zum Eingrenzen kann man in `main.c` die Zeile `#define DEYE_ENABLE_WIFI 1` auf `0` setzen: startet das Gerät dann durch, liegt es am Funkchip.
+
+**Das WLAN wird nicht gefunden, obwohl es da ist.** Weit weg vom Router ist nur das 2,4-GHz-Band zuverlässig; 5 GHz kommt durch Wände deutlich schlechter. Ein eigenes 2,4-GHz-Netz hilft mehr als jede Softwareeinstellung.
+
+**Das Anmeldefenster springt nicht auf.** Manche Betriebssysteme merken sich, dass ein Netz kein Portal hat. Dann einfach `http://192.168.4.1` direkt im Browser aufrufen.
+
+**Nach einem Firmware-Update ist das Gerät weg.** Sollte nicht passieren — die Zugangsdaten liegen in einem Speicherbereich, der Updates übersteht. Es sei denn, die Speicheraufteilung selbst wurde geändert. Dann bleibt nur die Einrichtung per USB.

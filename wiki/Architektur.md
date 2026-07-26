@@ -1,126 +1,146 @@
-# Architektur
+# Architektur — wie das Programm innen aussieht
+
+Diese Seite ist für alle, die am Code arbeiten wollen. Begriffe wie „Task" oder „Priorität" sind im [Glossar](Glossar#computerbegriffe) erklärt.
 
 ![Systemübersicht](https://raw.githubusercontent.com/FMDHET/deye-inverter-display-esp32-p4/main/docs/img/architecture.svg)
 
-## Module
+## Die Bausteine
+
+Jede Datei hat genau eine Aufgabe. Das macht es leicht, etwas zu finden, und schwer, versehentlich etwas anderes kaputt zu machen.
 
 | Datei | Aufgabe |
 | --- | --- |
-| `main.c` | Bootreihenfolge |
-| `display.c` | MIPI-DSI-PHY, ST7701, Backlight-PWM |
-| `touch.c` | GT911 über I²C |
-| `lvgl_port.c` | LVGL-9-Anbindung, Framebuffer, 90°-Rotation per PPA, Lock |
-| `fonts.c` | Tiny-TTF-Schriften in vier Größen mit Bitmap-Rückfall |
-| `ui_flow.c` | Hauptbildschirm: Gauges, Flusslinien, Popups, Uhr, Sollwert-Schieber |
-| `ui_settings.c` | Einstellungsbildschirm, acht Tabs, Bildschirmtastatur |
-| `modbus_tcp.c` | Multi-Geräte-Master, Worker pro IP, Aggregator, SLS-Schutz |
-| `modbus_rtu.c` | zwei RS485-Busse, Master und Eastron-Emulation, Selbsttest |
-| `deye_ctrl.c` | Akku-Modi, asynchroner FC16-Schreibpfad |
-| `mqtt_fwd.c` | MQTT-Publish und HA-Auto-Discovery |
-| `wifi_mgr.c` | STA/AP-Verwaltung, Mehrfach-Netze, Scan |
-| `captive.c` | DNS-Hijack und Portal-Server |
-| `web_mirror.c` | MJPEG-Spiegel, Eingabe-Injektion, JSON-Schnittstellen |
-| `ota.c` | OTA-Endpunkte, Recovery-Seite, UI-Einfrieren |
-| `deye_web.c` | Register-Werkzeug `/deye` |
-| `ntp_client.c` | SNTP und Zeitzonen |
-| `wg_client.c` | WireGuard-Client |
-| `nvs_store.c` | gesamte Persistenz |
-| `assets_fs.c` | SPIFFS-Partition `storage`, Build-Nummer lesen |
+| `main.c` | Startreihenfolge — und sonst nichts |
+| `display.c` | Bildschirm anschalten, Helligkeit regeln |
+| `touch.c` | Fingerpositionen vom Touchcontroller lesen |
+| `lvgl_port.c` | LVGL mit diesem Chip verbinden, Bilddrehung, Zugriffssperre |
+| `fonts.c` | Schriftarten aus der Schriftdatei berechnen (für die Umlaute) |
+| `ui_flow.c` | der Hauptbildschirm: Kreise, Flusslinien, Fenster, Uhr, Schieber |
+| `ui_settings.c` | der Einstellungsbildschirm mit acht Reitern und Tastatur |
+| `modbus_tcp.c` | Geräte im Netzwerk abfragen, Energiemodell, SLS-Schutz |
+| `modbus_rtu.c` | die zwei Zweidrahtleitungen, gefälschter Zähler, Selbsttest |
+| `deye_ctrl.c` | Akku-Betriebsarten schreiben |
+| `mqtt_fwd.c` | Werte veröffentlichen, Home Assistant einrichten |
+| `wifi_mgr.c` | WLAN-Verwaltung, mehrere Netze, Suche |
+| `captive.c` | Ersteinrichtungs-Portal (DNS-Umleitung und Webserver) |
+| `web_mirror.c` | Display im Browser, Eingaben von dort, JSON-Schnittstellen |
+| `ota.c` | Firmware-Updates, Notfallseite |
+| `deye_web.c` | Register-Werkzeug im Browser |
+| `ntp_client.c` | Uhrzeit und Zeitzonen |
+| `wg_client.c` | VPN-Tunnel |
+| `nvs_store.c` | alles, was gespeichert wird — an einer Stelle gebündelt |
+| `assets_fs.c` | das kleine Dateisystem, Build-Nummer auslesen |
 
-## Bootreihenfolge
+## Die Startreihenfolge
 
-Die Reihenfolge in `app_main()` ist nicht beliebig:
+Die Reihenfolge in `app_main()` sieht willkürlich aus, ist es aber nicht. Jeder Schritt braucht etwas aus den vorherigen.
 
 ```mermaid
 flowchart TB
-    A["nvs_store_init()"] --> B["assets_fs_mount()<br/>Build-Nummern vergleichen"]
-    B --> C["display_init()"]
-    C --> D["touch_init()"]
-    D --> E["app_lvgl_start()"]
-    E --> F["fonts_init()<br/>ui_flow_create()"]
-    F --> G["wifi_mgr_init()"]
-    G --> H["web_mirror_init()<br/>captive_start()"]
-    H --> I["modbus_tcp_start()<br/>modbus_rtu_start()"]
-    I --> J["deye_ctrl_start()"]
-    J --> K["mqtt_fwd_start()<br/>ntp_start()<br/>wg_start()"]
-    K --> L["ui_settings_create()"]
+    A["Einstellungsspeicher öffnen"] --> B["Dateisystem einbinden<br/>Build-Nummern vergleichen"]
+    B --> C["Bildschirm anschalten"]
+    C --> D["Touch initialisieren"]
+    D --> E["LVGL starten"]
+    E --> F["Schriften laden<br/>Hauptbildschirm bauen"]
+    F --> G["WLAN starten"]
+    G --> H["Webserver, Portal"]
+    H --> I["Modbus TCP + RTU starten"]
+    I --> J["Akku-Schreibtask starten"]
+    J --> K["MQTT, Uhr, VPN starten"]
+    K --> L["Einstellungsbildschirm bauen"]
 ```
 
-Drei Abhängigkeiten, die man kennen muss:
+Vier Abhängigkeiten, die man kennen muss, weil ihre Verletzung jeweils einen echten Fehler verursacht hat:
 
-1. **`ui_settings_create()` ganz am Ende** — nach allen `*_start()`, weil die Tabs aus den Backend-Caches rendern. Vorher gebaut, wären sie leer und ein Speichern würde NVS überschreiben.
-2. **`deye_ctrl_start()` nach `modbus_rtu_start()`** — die Schreibtask braucht den Anfrage-Mutex des RTU-Busses.
-3. **`web_mirror_init()` nach `wifi_mgr_init()` und laufendem LVGL** — es braucht lwIP und den Framebuffer.
+**1. Der Einstellungsbildschirm kommt zuletzt.** Seine Reiter lesen ihre Werte nicht direkt aus dem Speicher, sondern aus den laufenden Programmteilen. Baut man ihn vorher, sind die noch leer — die Felder erscheinen leer, und wer dann „Speichern" drückt, überschreibt seine echten Einstellungen mit Leere. Das sah aus wie „die Einstellungen werden nicht gespeichert" und war tatsächlich das Gegenteil.
 
-`ntp_start()` vor `wg_start()`: der WireGuard-Handschlag braucht eine gestellte Uhr.
+**2. Die Akku-Schreibtask kommt nach der Zweidrahtleitung.** Sie braucht deren Zugriffssperre. War die Reihenfolge falsch, stürzte das Gerät beim Start ab.
 
-## Tasks und Prioritäten
+**3. Der Web-Mirror kommt nach WLAN und LVGL.** Er braucht den Netzwerkstapel und den Bildspeicher.
 
-| Task | Prio | Kern | Aufgabe |
+**4. Das VPN kommt nach der Uhr.** WireGuard braucht eine plausible Zeit für seinen Handschlag, siehe [Zeit und VPN](Zeit-und-VPN#wireguard-tunnel).
+
+## Wer wann rechnen darf
+
+Der Chip hat zwei Rechenkerne, aber viel mehr als zwei Aufgaben. Deshalb wechseln sich die Programmteile ab, und die **Priorität** entscheidet, wer bei Gleichzeitigkeit vorgeht: höhere Zahl gewinnt.
+
+| Programmteil | Priorität | Kern | Aufgabe |
 | --- | --- | --- | --- |
-| RTU-Bus A / B | 5 | — | Regelpfad: Eastron-Emulation und Deye lesen |
-| LVGL / Touch | 4 | 1 | Zeichnen und Eingabe |
-| `deye_ctrl` | 4 | 0 | FC16-Schreibzugriffe (meist blockiert) |
-| TCP-Worker (Netz / Deye-Zähler) | 3 | — | zeitkritische Zähler |
-| TCP-Worker (PV etc.) | 2 | — | alles andere |
+| Zweidrahtleitung A und B | 5 | — | Regelpfad: gefälschter Zähler, Deye auslesen |
+| Bildschirm und Touch | 4 | 1 | zeichnen, Eingaben verarbeiten |
+| Akku-Schreibtask | 4 | 0 | Register schreiben (wartet meist) |
+| Netzwerk-Task des Netzzählers | 3 | — | der zeitkritische Zähler |
+| alle anderen Netzwerk-Tasks | 2 | — | Solar-Wechselrichter und so weiter |
 
-Die Logik dahinter: der **Regelpfad** darf nie warten, weil die UI zeichnet — deshalb 5. Die **UI** darf nie zäh werden, weil ein Datalogger hängt — deshalb liegen alle TCP-Poller darunter. Innerhalb der Poller rangiert der Netzzähler über den PV-Wechselrichtern, weil sein Wert in die Regelung eingeht; die PV-Werte müssen nur „irgendwann" aktuell sein.
+Die Überlegung dahinter in zwei Sätzen:
 
-Der Aggregator baut alle 800 ms das Energiemodell aus den Beiträgen der Worker.
+* **Der Regelpfad darf nie warten, weil der Bildschirm zeichnet.** Am anderen Ende hängt ein Wechselrichter, der eine Antwort erwartet. Deshalb Priorität 5, über allem anderen.
+* **Die Bedienung darf nie ruckeln, weil ein Datenlogger hängt.** Deshalb liegen alle Netzwerk-Abfragen unter dem Bildschirm.
 
-## Energiemodell
+Innerhalb der Netzwerk-Abfragen rangiert der Netzzähler über den Solar-Wechselrichtern, weil sein Wert in die Regelung eingeht. Die Solarwerte müssen nur „irgendwann" aktuell sein — ob sie zwei Sekunden alt sind, sieht niemand.
+
+Der Aggregator sammelt alle 800 Millisekunden die Ergebnisse ein und baut daraus das Gesamtbild.
+
+## Das Energiemodell
 
 ```text
-Haus  =  PV  +  Akku  +  Netz
+Haus  =  Solar  +  Akku  +  Netz
 ```
 
-Vorzeichen: positiv = in den Verteiler hinein. Ausführlich mit Ersatzwegen, Plausibilitätsprüfung und Hybrid-Aufteilung unter [Modbus-TCP](Modbus-TCP#energiemodell).
+Vorzeichen: positiv heißt „fließt in die Hausverteilung hinein". Rechenbeispiel und die Ersatzwege für fehlende Quellen: [Modbus-TCP](Modbus-TCP#wie-der-hausverbrauch-berechnet-wird).
 
-Zwei Regeln, die im ganzen Modell gelten:
+Zwei Regeln gelten im ganzen Programm, und sie sind wichtiger als jede einzelne Funktion:
 
-* **Keine Geisterwerte.** Fällt eine Quelle weg, wird der Knoten auf `--` gesetzt, nicht auf den letzten bekannten Wert.
-* **Frische vor Vollständigkeit.** Wer steuert, fragt `modbus_tcp_grid_w_fresh()` und bleibt passiv, wenn der Wert alt ist.
+**Keine Geisterwerte.** Fällt eine Quelle weg, wird der Kreis auf `--` gesetzt — nicht auf den letzten bekannten Wert. Ein alter Wert sieht aus wie ein aktueller, und darauf trifft man dann Entscheidungen.
 
-## Persistenz
+**Frische vor Vollständigkeit.** Wer etwas steuert, fragt vorher `modbus_tcp_grid_w_fresh()` und hält still, wenn die Antwort „nein" ist. Lieber nichts tun als das Falsche.
 
-Alles in NVS, über `nvs_store.c` gekapselt:
+## Was gespeichert wird
+
+Alles läuft über `nvs_store.c`, damit es genau eine Stelle gibt, an der man nachsehen kann:
 
 | Inhalt | Form |
 | --- | --- |
-| STA-Zugangsdaten (bis 10 Netze) | Blob |
-| AP-Passwort | String |
-| Helligkeit, Kontrast, Standby, Ausrichtung | Skalare |
-| Modbus-TCP-Geräteliste | Blob (Struct-Array) |
-| Modbus-RTU-Konfiguration | Blob |
-| MQTT-, NTP-, WireGuard-Konfiguration | je ein Blob |
-| Netz-Sollwert | Integer |
-| SLS-Nennstrom | Byte |
+| WLAN-Zugangsdaten (bis 10 Netze) | Datenblock |
+| Passwort des eigenen WLANs | Text |
+| Helligkeit, Kontrast, Standby, Ausrichtung | einzelne Zahlen |
+| Geräteliste Netzwerk | Datenblock |
+| Konfiguration Zweidrahtleitungen | Datenblock |
+| MQTT, Uhr, VPN | je ein Datenblock |
+| Netz-Sollwert | Zahl |
+| Hauptschalter-Nennstrom | Zahl |
 
-**Blob-Migration:** neue Felder werden ausschließlich **angehängt**, damit ein älteres Layout in-place weiterverwendet werden kann. Für den Sprung des Geräteeintrags von 42 Byte (`devs4`) auf das aktuelle Layout gibt es einen einmaligen Migrationspfad.
+### Wie man Datenblöcke erweitert, ohne alles zu zerstören
 
-Läuft NVS voll oder ist die Partition beschädigt, löscht `nvs_store_init()` sie und initialisiert neu — das Gerät startet dann mit Standardwerten statt gar nicht.
+Ein Datenblock ist einfach eine Kopie der Datenstruktur aus dem Programm. Das ist bequem, hat aber eine Falle: ändert man die Struktur, passt der gespeicherte Block nicht mehr, und die Werte werden falsch interpretiert.
 
-## Versionierung
+Die Regel dagegen: **neue Felder werden immer hinten angehängt, niemals dazwischen eingefügt.** Dann kann ein alter, kürzerer Block einfach übernommen werden — die neuen Felder bleiben eben leer und werden mit Standardwerten gefüllt.
 
-Eine Zahl für alles: `version.json` → Pre-Build-Hook → `main/build_info.h` (Firmware, UI) und `data/build.txt` (SPIFFS). Beim Booten vergleicht die Firmware beide und meldet einen Versatz. Details unter [Bauen und Flashen](Bauen-und-Flashen#build-zähler).
+Als das Feld für den Anzeigenamen dazukam, wuchs der Eintrag über die alten 42 Byte hinaus. Deshalb gibt es dafür zusätzlich einen einmaligen Umzugspfad, der den alten Stand liest und in das neue Format überträgt.
 
-## Grafik-Pipeline
+Und wenn der Speicher doch einmal beschädigt ist: dann löscht ihn die Initialisierung und legt ihn neu an. Das Gerät startet mit Standardwerten — was unangenehm ist, aber besser, als überhaupt nicht zu starten.
+
+## Wie das Bild entsteht
 
 ```text
-LVGL zeichnet (800×480, RGB565)
-   ↓ esp_lvgl_port
-PPA dreht 90°  →  Framebuffer im PSRAM (480×800)
-   ↓ MIPI-DSI, 2 Lanes
+LVGL zeichnet  (800 × 480, RGB565)
+        ↓
+PPA dreht 90°  →  Bildspeicher im PSRAM  (480 × 800)
+        ↓  MIPI-DSI, 2 Leitungspaare
 ST7701-Panel
-   ↓ Framebuffer wird direkt gelesen (kein erneutes Rendern)
-JPEG-Encoder (Hardware)  →  MJPEG auf :81
+        ↓  derselbe Speicher wird nochmal gelesen
+JPEG-Encoder (Hardware)  →  Bildstrom auf Port 81
 ```
 
-Der Web-Mirror greift also am Ende der Kette ab und rendert nichts neu. Deshalb kostet er kaum Rechenzeit — die Begrenzung auf etwa 8 Bilder pro Sekunde dient allein dazu, die Konkurrenz um den LVGL-Lock klein zu halten.
+Der interessante Punkt ist das Ende: der [Web-Mirror](Web-Mirror) greift den **fertigen** Bildspeicher ab und zeichnet nichts neu. Deshalb kostet er fast keine Rechenzeit, und deshalb sieht man im Browser garantiert dasselbe wie auf dem Gerät. Die Begrenzung auf etwa 8 Bilder pro Sekunde hat nur einen Grund: den Bildspeicher nicht zu oft sperren, damit die Bedienung flüssig bleibt.
 
-## Was bewusst nicht vorhanden ist
+## Was absichtlich fehlt
 
-* **Keine Authentifizierung** auf den HTTP-Endpunkten. Das Gerät ist für ein vertrauenswürdiges Netz gedacht; Fernzugriff über WireGuard.
-* **Keine TLS-Verschlüsselung** für MQTT.
-* **Kein Modbus-TCP-Server** — das Gerät ist Master (TCP) bzw. Master/Slave (RTU), aber kein TCP-Slave.
-* **Kein Datenverlauf.** Historie und Statistik macht Home Assistant, das Display zeigt den Augenblick.
+Manchmal ist es aufschlussreicher zu wissen, was ein Projekt **nicht** tut:
+
+* **Keine Passwörter auf den Webzugängen.** Das Gerät ist für ein vertrauenswürdiges Heimnetz gedacht; für Fernzugriff gibt es den VPN-Tunnel.
+* **Keine Verschlüsselung bei MQTT.** Im Heimnetz vertretbar, über unsichere Netze nicht.
+* **Kein Modbus-Server über Netzwerk.** Das Gerät fragt andere ab, aber niemand kann *es* über Netzwerk abfragen — dafür gibt es die JSON-Schnittstellen und MQTT.
+* **Keine Datenhistorie.** Das Display zeigt den Augenblick. Verläufe, Statistiken und Diagramme macht Home Assistant, und das viel besser.
+
+Das Letzte ist eine bewusste Entscheidung: ein Mikrocontroller mit 32 MB Speicher ist eine schlechte Datenbank. Werte weiterreichen ist die richtige Aufgabenteilung.

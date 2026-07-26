@@ -1,82 +1,90 @@
-# Einstellungen — Referenz
+# Die Menüs am Gerät
 
-Erreichbar über das Zahnrad oben rechts. Links eine Leiste mit acht Tabs, oben eine Kopfzeile mit „Zurück", Titel und einer kontextabhängigen Schaltfläche rechts („Scan" im WLAN-Tab, „+ Gerät" im Mod-TCP-Tab, „Speichern" in den übrigen).
+Das Zahnrad oben rechts öffnet die Einstellungen. Links stehen acht Reiter, oben eine Leiste mit „Zurück", dem Titel und rechts einem Knopf, der sich je nach Reiter ändert: „Scan" im WLAN-Reiter, „+ Gerät" bei den Netzwerkgeräten, „Speichern" bei den übrigen.
 
 ![Legende des Hauptbildschirms](https://raw.githubusercontent.com/FMDHET/deye-inverter-display-esp32-p4/main/docs/img/dashboard-legend.png)
 
 ## WLAN
 
-Status, Netzsuche, gespeicherte Netze. Ausführlich unter [WLAN und Captive Portal](WLAN-und-Captive-Portal).
+Verbindungsstatus, Netzsuche und die Liste der gespeicherten Netze. Ausführlich erklärt unter [WLAN und Ersteinrichtung](WLAN-und-Captive-Portal#einrichtung-direkt-am-gerät).
 
 ## Display
 
-| Einstellung | Wirkung |
+| Einstellung | Was sie macht |
 | --- | --- |
-| **Helligkeit** | Hintergrundbeleuchtung über LEDC-PWM, 0–100 % (Standard 80) |
-| **Kontrast** | Software-Überlagerung auf der obersten LVGL-Ebene, 0–100 % (Standard 100 = keine Überlagerung) |
-| **Standby** | Beleuchtung nach Ablauf ohne Berührung ausschalten: Aus / 30 s / 1 / 2 / 5 / 10 min. Eine Berührung weckt wieder auf. |
-| **Ausrichtung** | Normal oder 180° (umgedreht) — für kopfüber montierte Geräte |
+| **Helligkeit** | 0 bis 100 %. Die Hintergrundbeleuchtung wird nicht wirklich gedimmt, sondern sehr schnell ein- und ausgeschaltet (Pulsweitenmodulation). Fürs Auge sieht das aus wie dimmen. |
+| **Kontrast** | 0 bis 100 %. Legt einen halbtransparenten grauen Schleier über das Bild — ein Softwaretrick, weil das Panel selbst keinen Kontrastregler hat. 100 % heißt: kein Schleier. |
+| **Standby** | Beleuchtung nach einer Weile ohne Berührung ausschalten: Aus / 30 s / 1 / 2 / 5 / 10 min. Eine Berührung weckt wieder auf. Das Programm läuft dabei normal weiter, nur das Licht ist aus. |
+| **Ausrichtung** | Normal oder um 180° gedreht — für Geräte, die kopfüber montiert sind. |
 
-## Mod TCP
+## Mod TCP — Geräte im Netzwerk
 
-Die Geräteliste. „+ Gerät" oben rechts legt einen neuen Eintrag an, ein Antippen bearbeitet einen bestehenden.
+Hier steht die Liste der Geräte, die über das Netzwerk abgefragt werden. „+ Gerät" oben rechts legt einen neuen Eintrag an, Antippen bearbeitet einen bestehenden.
 
-| Feld | Bemerkung |
+| Feld | Erklärung |
 | --- | --- |
-| **Name (Anzeige)** | freier Text, erscheint in Popups und JSON (z. B. „PV Garage") |
-| **aktiv** | Schalter — deaktivierte Geräte werden nicht gepollt |
-| **Hersteller** | Fronius / Deye / Eltako → bestimmt das Registerprofil |
-| **Geräte-Typ** | Rolle → bestimmt, welchen Knoten das Gerät füttert |
-| **IP-Adresse** | |
-| **Port** | Standard 502 |
-| **Slave-ID** | Unit-ID; mehrere Geräte dürfen dieselbe IP mit verschiedenen IDs haben |
-| **Poll (ms)** | 200 … 60000, Standard 2000 |
-| **Timeout (ms)** | 100 … 10000, Standard 500 |
+| **Name (Anzeige)** | Freier Text, nur zur Wiedererkennung — z. B. „PV Garage" oder „Süd". Erscheint in den Detailfenstern. |
+| **aktiv** | Aus bedeutet: wird nicht abgefragt. Praktisch zum Eingrenzen von Problemen, ohne den Eintrag zu löschen. |
+| **Hersteller** | Fronius, Deye oder Eltako. Bestimmt, wie das Gerät gelesen wird — **hier passieren die meisten Fehler**, siehe [Modbus-TCP](Modbus-TCP#die-falle-mit-dem-eltako-zähler). |
+| **Geräte-Typ** | Die Rolle: Netzzähler, Wechselrichter, Batterie und so weiter. Bestimmt, welchen Kreis auf dem Bildschirm der Wert füttert. |
+| **IP-Adresse** | die Adresse im Netzwerk |
+| **Port** | fast immer 502, die Standard-Tür für Modbus |
+| **Slave-ID** | Die Gerätenummer. Mehrere Geräte dürfen dieselbe IP mit verschiedenen IDs haben — bei Wechselrichtern hinter einem gemeinsamen Datenlogger ist das der Normalfall. |
+| **Poll (ms)** | Wie oft gefragt wird. 200 bis 60000, Standard 2000 (also alle zwei Sekunden). |
+| **Timeout (ms)** | Wie lange auf Antwort gewartet wird, bevor der Versuch als gescheitert gilt. 100 bis 10000, Standard 500. Bei langsamen Datenloggern hochsetzen. |
 
-Der Kopf zeigt eine Livezeile: verbundene Geräte, Poll- und Fehlerzähler, aktuelle Werte. Details zu Profilen und Rollen: [Modbus-TCP](Modbus-TCP).
+Oben steht eine laufende Zeile mit Verbindungszählern und aktuellen Werten — praktisch, um sofort zu sehen, ob ein neu angelegtes Gerät antwortet.
 
-## Mod RTU
+## Mod RTU — die Zweidrahtleitungen
 
-Pro Bus (A = UART1/GPIO 52-51, B = UART2/GPIO 50-49):
+Für jeden der beiden Busse (A hängt an GPIO 52/51, B an GPIO 50/49):
 
 | Feld | Werte |
 | --- | --- |
-| **Schalter** | Bus aktiv |
-| **Rolle** | Master (Deye lesen) oder Slave (Eastron-Emulation) |
-| **Slave-ID** | Master: welche ID abgefragt wird. Slave: auf welche ID geantwortet wird. |
-| **Baud** | 4800 / 9600 / 19200 / 38400 |
+| **Schalter** | Bus ein oder aus |
+| **Rolle** | *Master* = wir fragen den Deye. *Slave* = wir geben uns als Stromzähler aus. |
+| **Slave-ID** | Als Master: welche Nummer wir ansprechen. Als Slave: auf welche Nummer wir antworten. |
+| **Baud** | 4800 / 9600 / 19200 / 38400. Muss mit der Einstellung im Wechselrichter übereinstimmen, üblich ist 9600. |
 
-Darunter der **Selbsttest** — siehe [Modbus-RTU](Modbus-RTU#selbsttest).
+Darunter der **Selbsttest** — der prüft die eigene Hardware, ohne dass der Wechselrichter beteiligt ist. Sehr nützlich zum Eingrenzen von Verkabelungsfehlern, siehe [Modbus-RTU](Modbus-RTU#der-selbsttest).
 
 ## MQTT
 
-Broker, Port, Zugangsdaten, Basistopic sowie die Schalter **Retain**, **HA Discovery** und **Last Will**. Details: [MQTT und Home Assistant](MQTT-und-Home-Assistant).
+Broker-Adresse, Port, Zugangsdaten, Basistopic und drei Schalter (Retain, HA Discovery, Last Will). Was die Schalter bedeuten, steht unter [MQTT und Home Assistant](MQTT-und-Home-Assistant#die-drei-schalter-erklärt).
 
 ## Zeit
 
-SNTP an/aus, Server, Zeitzone. Details: [Zeit und VPN](Zeit-und-VPN#sntp-uhr).
+Zeitabgleich über das Internet ein- oder ausschalten, Server und Zeitzone. Siehe [Zeit und VPN](Zeit-und-VPN#die-uhr).
 
 ## VPN
 
-WireGuard: Schlüssel, Tunnel-Adresse, Endpunkt, Keepalive. Details: [Zeit und VPN](Zeit-und-VPN#wireguard-tunnel).
+WireGuard-Tunnel für den Fernzugriff: Schlüssel, Adressen, Gegenstelle. Siehe [Zeit und VPN](Zeit-und-VPN#wireguard-tunnel).
 
 ## System
 
-**Netzanschluss (SLS-Schalter)** — Nennstrom des Hauptschalters, Auswahl: Deaktiviert / 16 / 20 / 25 / 35 / 50 / 63 A. Darunter steht die daraus errechnete Grenze, z. B. `Max. Export: 21,7 kW (35 A × 3 × 230 V × 90 %)`. Siehe [SLS-Export-Schutz](Deye-Steuerung#sls-export-schutz).
+**Netzanschluss (SLS-Schalter)** — hier stellst du ein, wie viele Ampere dein Hauptschalter hat: Deaktiviert / 16 / 20 / 25 / 35 / 50 / 63 A. Darunter zeigt das Gerät die daraus berechnete Grenze, zum Beispiel:
+
+```text
+Max. Export: 21,7 kW  (35 A × 3 × 230 V × 90%)
+```
+
+Diese Grenze bremst die Zwangsentladung, damit dein Hausanschluss nicht überlastet wird. Erklärung: [Der SLS-Schutz](Deye-Steuerung#der-sls-schutz).
 
 ---
 
-## Bildschirmtastatur
+## Die Bildschirmtastatur
 
-Textfelder öffnen eine Tastatur mit deutschem Layout, Umlauten und Umschaltung zwischen Groß- und Kleinschreibung (`ABC` / `abc`). Die Umlaute funktionieren, weil die Schriften zur Laufzeit aus der mitgelieferten `montserrat_medium.ttf` gerastert werden (Tiny-TTF) — die eingebauten Bitmap-Schriften von LVGL kennen keine Umlaute. Für die Symbolglyphen (FontAwesome) bleibt die Bitmap-Schrift als Rückfall.
+Textfelder öffnen eine Tastatur mit deutschem Layout, Umlauten und Umschaltung zwischen Groß- und Kleinschreibung (`ABC` / `abc`).
 
-Über den [Web-Mirror](Web-Mirror) lässt sich stattdessen die PC-Tastatur benutzen, inklusive Einfügen aus der Zwischenablage.
+Dass die Umlaute funktionieren, ist übrigens nicht selbstverständlich. Die in LVGL eingebauten Schriftarten sind vorgefertigte Bilder von Buchstaben und enthalten nur den englischen Zeichensatz — kein ä, ö, ü, ß. Deshalb liegt in der Firmware eine echte Schriftdatei (Montserrat), aus der die Buchstaben zur Laufzeit berechnet werden. Für die Symbole (Zahnrad, WLAN-Bögen, Batterie) wird weiter die eingebaute Bildschriftart benutzt, weil die Schriftdatei diese Symbole nicht hat.
+
+Bequemer als jede Bildschirmtastatur: über den [Web-Mirror](Web-Mirror) mit der richtigen Tastatur tippen und aus der Zwischenablage einfügen. Bei WireGuard-Schlüsseln ist das praktisch Pflicht.
 
 ## Speichern
 
-Tabs mit einfachen Feldern (Display, Mod RTU, MQTT, Zeit, VPN) speichern über „Speichern" oben rechts. Die Geräteliste im Mod-TCP-Tab und die Netzliste im WLAN-Tab speichern pro Eintrag beim Bestätigen.
+Reiter mit einfachen Feldern (Display, Mod RTU, MQTT, Zeit, VPN) speichern über den Knopf „Speichern" oben rechts. Die Geräteliste und die WLAN-Liste speichern jeden Eintrag einzeln beim Bestätigen.
 
-Alles liegt in NVS und übersteht Firmware-Updates.
+Alles landet im NVS-Speicher und übersteht Neustarts und Firmware-Updates.
 
 > [!IMPORTANT]
-> Der Einstellungsbildschirm wird beim Start bewusst **nach** allen Backend-Starts gebaut. Wurde er vorher gebaut, rendern die Tabs aus leeren Caches — die gespeicherten Werte sahen dann aus, als wären sie verloren, und ein Speichern hätte die echte Konfiguration in NVS überschrieben. Wer die Bootreihenfolge in `main.c` ändert, muss `ui_settings_create()` hinter den `*_start()`-Aufrufen halten.
+> Eine Eigenheit für alle, die am Programm arbeiten: der Einstellungsbildschirm wird beim Start absichtlich **zuletzt** aufgebaut — nach allen anderen Programmteilen. Grund: die Reiter lesen ihre Werte aus den Programmteilen, nicht direkt aus dem Speicher. Baut man sie zu früh auf, sind diese noch leer, die Felder bleiben leer, und ein Druck auf „Speichern" würde die echten Einstellungen mit Leere überschreiben. Wer die Startreihenfolge in `main.c` ändert, muss das im Blick behalten — siehe [Architektur](Architektur#die-startreihenfolge).

@@ -1,63 +1,105 @@
 # Deye-Display — Wiki
 
-Firmware für ein **GUITION JC4880P443C** (ESP32-P4 + ESP32-C6, 4,3″ 480×800): Energie-Dashboard, Messwertsammler und Regel-Bindeglied für einen **Deye SG04LP3** Hybrid-Wechselrichter.
+Hier steht, was dieses Gerät ist, wie es funktioniert und wie man es baut, einrichtet und reparieren kann. Die Seiten sind so geschrieben, dass man sie ohne Vorwissen lesen kann — Fachbegriffe werden erklärt, und was hier nicht erklärt wird, findest du im **[Glossar](Glossar)**.
 
 ![Hauptbildschirm](https://raw.githubusercontent.com/FMDHET/deye-inverter-display-esp32-p4/main/docs/img/dashboard.png)
 
-## Einstieg
+## Worum geht es überhaupt?
 
-| Seite | Inhalt |
+Stell dir ein Haus mit Solaranlage vor. Da hängen mehrere Geräte, die alle irgendwas mit Strom machen:
+
+* **drei Solar-Wechselrichter** von Fronius, die den Strom der Solarmodule nutzbar machen
+* ein **Hausakku** (BYD), der an einem dieser Wechselrichter hängt
+* ein **zweiter Wechselrichter** von Deye — mit einem eigenen Akku
+* ein **Stromzähler** von Eltako an der Stelle, wo das Haus am öffentlichen Netz hängt
+
+Das Problem: **keines dieser Geräte weiß etwas von den anderen.** Jeder Hersteller hat seine eigene App, sein eigenes Portal, seine eigene Sicht auf die Welt. Niemand zeigt dir das Gesamtbild.
+
+Dieses Projekt baut aus einem fertigen Touchdisplay mit eingebautem Mikrocontroller genau dieses Gesamtbild. Es fragt alle Geräte selbst ab, rechnet daraus zusammen, was im Haus passiert, und zeigt es auf einem Touchscreen an — in Echtzeit, ohne Cloud, ohne App, ohne Konto.
+
+Und dann geht es noch einen Schritt weiter: es **redet zurück**. Es kann dem Deye-Wechselrichter sagen, was er tun soll. Wie das geht, ist der interessanteste Teil dieses Projekts — siehe unten.
+
+## Der Trick mit dem gefälschten Zähler
+
+Der Deye-Wechselrichter will wissen, wie viel Strom gerade ins Netz geht oder aus dem Netz kommt. Dafür hat er einen eigenen Anschluss, an den normalerweise ein Stromzähler kommt. Sein Ziel ist immer dasselbe: **möglichst genau null am Netzanschluss** — also nichts einkaufen, nichts verschenken.
+
+Jetzt hängt an diesem Anschluss aber nicht ein echter Zähler, sondern unser Display. Und das Display sagt nicht die reine Wahrheit, sondern:
+
+```text
+was der Deye zu hören bekommt  =  echter Wert  −  Wunschwert
+```
+
+Ein Beispiel. Du stellst am Display „−350 W" ein, also: „ich will, dass 350 Watt ins Netz eingespeist werden". Real fließen gerade 0 Watt. Das Display meldet dem Deye also `0 − (−350) = +350 W`, sprich: „du beziehst gerade 350 Watt aus dem Netz!"
+
+Der Deye glaubt das, denkt „das muss ich abstellen" und fährt seine Leistung so weit hoch, bis er glaubt, wieder bei null zu sein. Weil aber seine Information um 350 Watt verschoben ist, landet er in Wirklichkeit bei −350 Watt — genau bei deinem Wunschwert.
+
+Das ist der Kern: **wir verschieben nicht den Wechselrichter, wir verschieben seine Wahrnehmung.** Man muss dafür nichts an seinen Einstellungen ändern und keine geheime Schnittstelle kennen.
+
+> [!WARNING]
+> Genau hier liegt aber auch die Gefahr. Wenn wir dem Deye eine Zahl liefern, die sich nicht mehr ändert (weil unsere Messung hängt), regelt er gegen einen Wert, der nicht mehr der Realität entspricht — und dreht immer weiter auf. Genau das ist hier einmal passiert: **15 kW Einspeisung**. Die Geschichte und die eingebaute Sicherung stehen unter [Fehlersuche](Fehlersuche#die-15-kw-geschichte).
+
+## Was das Gerät alles kann
+
+| | |
 | --- | --- |
-| **[Hardware](Hardware)** | Board, Panel, Touch, Pinbelegung, RS485-Transceiver |
-| **[Bauen und Flashen](Bauen-und-Flashen)** | PlatformIO, Build-Zähler, SPIFFS-Image, erste Installation |
-| **[OTA und Recovery](OTA-und-Recovery)** | Update über WiFi, zwei Slots, Rollback, Notfallseite |
-| **[WLAN und Captive Portal](WLAN-und-Captive-Portal)** | Erste Einrichtung, mehrere Netze, AP-Fallback |
+| **Messen** | Bis zu 8 Geräte über das Netzwerk plus 2 Geräte über Zweidrahtleitung gleichzeitig abfragen |
+| **Rechnen** | Aus Solarstrom, Netz und Akkus ausrechnen, wie viel das Haus gerade verbraucht |
+| **Anzeigen** | Fünf Kreise mit animierten Flusslinien, Uhr, Verbindungsstatus — antippbar für Details |
+| **Steuern** | Den Deye-Akku zwangsweise laden oder entladen, mit Schutz gegen Überlast |
+| **Weitergeben** | Alle Werte an Home Assistant schicken, inklusive Schalter zum Zurücksteuern |
+| **Fernwarten** | Das ganze Display im Browser anzeigen und bedienen, Updates über WLAN einspielen |
 
-## Betrieb
+## Wo fange ich an?
 
-| Seite | Inhalt |
-| --- | --- |
-| **[Einstellungen](Einstellungen)** | Referenz aller acht Tabs |
-| **[Modbus-TCP](Modbus-TCP)** | Geräteliste, Rollen, Hersteller-Profile, Energiemodell |
-| **[Modbus-RTU](Modbus-RTU)** | Zwei RS485-Busse, Eastron-SDM630-Emulation, Selbsttest |
-| **[Deye-Steuerung](Deye-Steuerung)** | Akku-Modi, Steuerregister, SLS-Export-Schutz |
-| **[MQTT und Home Assistant](MQTT-und-Home-Assistant)** | Topics, Auto-Discovery, Steuerung von außen |
-| **[Web-Mirror](Web-Mirror)** | Display im Browser, Register-Werkzeug, JSON-Schnittstellen |
-| **[Zeit und VPN](Zeit-und-VPN)** | SNTP, Zeitzonen, WireGuard-Tunnel |
+**Du willst verstehen, wie es funktioniert:**
 
-## Hintergrund
+1. [Glossar](Glossar) — alle Fachbegriffe auf einer Seite
+2. [Architektur](Architektur) — wie das Programm innen aufgebaut ist
+3. [Modbus-TCP](Modbus-TCP) und [Modbus-RTU](Modbus-RTU) — wie die Geräte abgefragt werden
 
-| Seite | Inhalt |
-| --- | --- |
-| **[Architektur](Architektur)** | Module, Tasks, Prioritäten, Bootreihenfolge, Persistenz |
-| **[Fehlersuche](Fehlersuche)** | Symptome, Ursachen, bekannte Fallgruben |
+**Du willst es nachbauen:**
 
----
+1. [Hardware](Hardware) — was du kaufen und wie du es verkabeln musst
+2. [Bauen und Flashen](Bauen-und-Flashen) — Programm übersetzen und aufs Gerät bringen
+3. [WLAN und Captive Portal](WLAN-und-Captive-Portal) — Ersteinrichtung
+4. [Einstellungen](Einstellungen) — alle Menüs erklärt
 
-## Was hier eigentlich passiert
+**Du willst es bedienen oder erweitern:**
 
-Die Anlage, für die das Gerät gebaut wurde, ist gemischt: drei Fronius-Wechselrichter (einer davon Hybrid mit BYD-Speicher), ein Eltako-Netzzähler am Übergabepunkt und ein Deye-Hybrid mit eigenem Akku. Keine Komponente kennt die andere.
+1. [Deye-Steuerung](Deye-Steuerung) — Akku laden und entladen (**bitte vorher lesen**)
+2. [MQTT und Home Assistant](MQTT-und-Home-Assistant) — Anbindung an die Hausautomatisierung
+3. [Web-Mirror](Web-Mirror) — Display im Browser und das Register-Werkzeug
+4. [Zeit und VPN](Zeit-und-VPN) — Uhr und Fernzugriff
+5. [OTA und Recovery](OTA-und-Recovery) — Updates über WLAN
 
-Das Display macht daraus ein Bild — und mehr: es gibt dem Deye die Netzmessung, die dieser für seine eigene Regelung braucht. Am Zähler-Port des Deye verhält sich das Gerät wie ein Eastron SDM630 und meldet nicht den wahren Netzbezug, sondern den wahren Netzbezug **minus einem Sollwert**. Damit lässt sich der Arbeitspunkt der ganzen Anlage am Übergabepunkt verschieben, ohne im Deye etwas umzustellen.
+**Es funktioniert etwas nicht:** [Fehlersuche](Fehlersuche)
+
+## Wie die Daten fließen
 
 ```mermaid
 flowchart TB
-    subgraph Messen
-        A["Fronius ×3<br/>SunSpec/TCP"]
-        B["Eltako DSZ16<br/>TCP, FC04 int32"]
-        C["Deye<br/>RS485 Master"]
+    subgraph Ablesen
+        A["3 × Fronius<br/>über Netzwerk"]
+        B["Eltako-Zähler<br/>über Netzwerk"]
+        C["Deye<br/>über Zweidrahtleitung"]
     end
-    M["Energiemodell<br/>PV · Haus · Netz · 2 Akkus"]
+    M["Energiemodell<br/>Solar · Haus · Netz · 2 Akkus"]
     A --> M
     B --> M
     C --> M
-    M --> D["Anzeige"]
-    M --> E["MQTT / Home Assistant"]
-    M --> F["Eastron-Emulation<br/>RS485 Slave"]
-    F --> G["Deye regelt auf<br/>Netz = Sollwert"]
+    M --> D["Bildschirm"]
+    M --> E["Home Assistant"]
+    M --> F["gefälschter Zähler<br/>für den Deye"]
+    F --> G["Deye regelt auf<br/>deinen Wunschwert"]
 ```
 
-Zusätzlich schreibt das Gerät direkt in die Steuerregister des Deye — Zwangsladen und Zwangsentladen mit einstellbarer Leistung, aus dem Touch-Menü oder aus Home Assistant.
+## Zum Schluss ein ernstes Wort
 
-> [!WARNING]
-> Das Projekt greift in eine Netzanlage mit Batteriespeicher ein. Vor dem ersten Schreibzugriff die Seite [Deye-Steuerung](Deye-Steuerung) lesen — insbesondere den Abschnitt über eingefrorene Messwerte.
+Das ist ein Bastelprojekt, aber es hängt an einer echten Hausinstallation mit einem Akku, der mehrere Kilowatt liefern kann, und an einem Netzanschluss, für den Regeln gelten.
+
+* Arbeiten an Netzanschluss, Zähler und Verkabelung gehören in fachkundige Hände.
+* Die Registeradressen des Deye sind durch Ausprobieren gefunden worden, nicht aus einem offiziellen Handbuch. Bei einem anderen Modell oder einer anderen Gerätesoftware können sie etwas anderes bedeuten.
+* Die eingebauten Schutzfunktionen sind Software. Software hat Fehler. Sie ersetzen keine Sicherungen.
+* Auf keinem der Web-Zugänge gibt es ein Passwort. Das Gerät gehört in ein Netz, dem du vertraust.
+
+Wenn du damit umgehen kannst: viel Spaß. Es ist ein sehr befriedigendes Projekt.

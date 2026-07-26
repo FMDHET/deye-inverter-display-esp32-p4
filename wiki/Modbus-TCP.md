@@ -1,110 +1,182 @@
-# Modbus-TCP
+# Modbus-TCP — Geräte über das Netzwerk auslesen
 
-Bis zu **8 Geräte**, jedes einzeln konfiguriert. Ein Gerät wird beschrieben durch **Hersteller** (welches Registerprofil gilt) und **Rolle** (welchen Wert es im Energiemodell liefert) — plus IP, Port, Slave-ID, Poll-Intervall und Timeout.
+Hier geht es um die Geräte, die über das normale Netzwerk abgefragt werden: die Fronius-Wechselrichter und der Eltako-Stromzähler. Wenn dir „Modbus" oder „Register" nichts sagen, lies zuerst das [Glossar](Glossar#wie-geräte-miteinander-reden).
 
-## Hersteller-Profile
+## Die Grundidee
 
-| Hersteller | Funktionscode | Registerprofil |
+Jedes Gerät im Netzwerk hat eine IP-Adresse. Fragt man es auf Port 502 nach einem Register, antwortet es mit einer Zahl. Genau das macht diese Firmware — für bis zu **8 Geräte gleichzeitig**.
+
+Ein Gerät wird durch zwei Angaben beschrieben:
+
+* **Hersteller** — sagt, *wie* man mit dem Gerät redet, also in welchen Registern welche Werte stehen.
+* **Rolle** — sagt, *wofür* der Wert gut ist, also welchen Kreis auf dem Bildschirm er füttert.
+
+Dazu kommen die üblichen Verbindungsangaben: IP, Port, Slave-ID, wie oft gefragt wird und wie lange man auf Antwort wartet.
+
+## Hersteller: welche Sprache spricht das Gerät?
+
+| Hersteller | Wie gelesen wird | Besonderheit |
 | --- | --- | --- |
-| **Fronius** | FC03 | SunSpec. Modelle 101–103 (int) bzw. 111–113 (float) für AC-Leistung, 124 für Speicher-SoC, 160 für MPPT-Strings, 201–204 für Zähler |
-| **Deye** | FC03 | natives SG04LP3-Layout, gelesen in zwei Blöcken (586 + 53 Register, 644 + 40 Register) |
-| **Eltako** | FC04 | DSZ15DZ / DSZ16DZ(E): **int32-Watt**, ausdrücklich *kein* SDM630-float |
+| **Fronius** | FC03, nach dem SunSpec-Standard | Sehr angenehm: das Gerät sagt selbst, wo was steht. Die Firmware sucht die Kennung „SunS" und liest dann die Liste der verfügbaren „Modelle". |
+| **Deye** | FC03, eigenes Register-Layout | Kein Standard. Die Adressen mussten von Hand ermittelt werden. Gelesen wird in zwei Blöcken (ab 586 und ab 644), weil einzelne Abfragen zu langsam wären. |
+| **Eltako** | FC04, Werte als int32 | Zähler der Baureihen DSZ15DZ und DSZ16DZ(E). |
 
-> [!IMPORTANT]
-> Der Eltako-Zähler liegt auf derselben Adresse (`0x0034`), auf der ein Eastron SDM630 seinen float32-Gesamtwert führt — liefert dort aber int32. Wer das Profil verwechselt, liest `nan`. Genau deshalb gibt es die Hersteller-Auswahl und keine Auto-Erkennung.
+### Die Falle mit dem Eltako-Zähler
 
-## Rollen
+Das ist ein Fehler, in den man leicht tappt, deshalb ausführlich:
 
-| Rolle | Speist | Bemerkung |
+Es gibt einen extrem verbreiteten Zähler namens Eastron SDM630. Der legt seine Gesamtleistung in Register `0x0034` ab, als **Fließkommazahl** (float32, verteilt auf zwei Register).
+
+Der Eltako-Zähler legt seine Gesamtleistung in **dasselbe Register** — aber als **ganze Zahl** (int32).
+
+Dieselbe Adresse, dieselbe Länge, komplett andere Bedeutung der Bits. Liest man das eine als das andere, kommen keine Fehlermeldungen, sondern schlicht Unsinn heraus: `nan` (keine Zahl) oder gigantische Werte.
+
+Genau deshalb muss man den Hersteller **von Hand** einstellen, und es gibt keine automatische Erkennung. Sie wäre nicht zuverlässig möglich.
+
+### Was SunSpec für uns tut
+
+Bei Fronius-Geräten ist es viel einfacher, weil SunSpec ein selbstbeschreibender Standard ist. An einer festen Stelle steht die Kennung „SunS", danach eine Liste von Blöcken mit Nummern:
+
+| Modell-Nummer | Inhalt |
+| --- | --- |
+| 101–103 (oder 111–113) | Wechselstrom-Leistung des Wechselrichters |
+| 124 | Batteriespeicher — vor allem der Ladezustand |
+| 160 | die einzelnen Solar-Stränge (MPPT) |
+| 201–204 | ein angeschlossener Stromzähler |
+
+Die Firmware läuft diese Liste **einmal** ab und merkt sich, wo was steht. Vorher wurde die Liste für jeden einzelnen Wert bei jeder Abfrage neu durchsucht — das waren 50 bis 100 Modbus-Zugriffe pro Runde, und alles war entsprechend langsam.
+
+## Rollen: wofür ist der Wert gut?
+
+| Rolle (so heißt sie im Gerät) | Füttert | Erklärung |
 | --- | --- | --- |
-| `Netz-Zaehler` | Netz-Knoten | Zähler am Netzübergabepunkt. Quelle für die [Eastron-Emulation](Modbus-RTU). |
-| `Erzeugungszaehler` | PV-Knoten | Zähler vor dem Wechselrichter |
-| `Wechselrichter` | PV-Knoten (+ Akku) | Fronius-Hybrid liefert zusätzlich BYD-Leistung und -SoC, Deye zusätzlich Akku |
-| `Batterie` | Akku-Knoten (BYD) | dedizierter Speicher |
-| `Deye-Zaehler` | Deye-AC-Leistung | Zähler direkt vor dem Deye |
+| `Netz-Zaehler` | den Netz-Kreis | Der Zähler am Hausanschluss. Das ist der wichtigste Wert überhaupt, weil er auch in die Regelung eingeht. |
+| `Erzeugungs-Zaehler` | den Solar-Kreis | Ein Zähler, der nur die Erzeugung misst. |
+| `Wechselrichter` | den Solar-Kreis (+ Akku) | Bei einem Hybrid kommen Batterieleistung und Ladezustand dazu. |
+| `Batterie` | den Akku-Kreis | Ein eigenständiger Speicher. |
+| `Deye-AC-Zaehler` | die Deye-Leistung | Ein Zähler direkt vor dem Deye-Wechselrichter. |
 
-## Fronius-Hybrid richtig rechnen
+> [!NOTE]
+> Diese Namen erscheinen im Gerät genau so — ohne Umlaut. Warum, steht im [Glossar](Glossar#die-rollen-im-energiemodell).
 
-Ein Fronius-Gerät mit SunSpec-Modell 124 ist ein **Hybrid** (Speicher vorhanden). Dann gilt:
+## Ein Hybrid rechnet anders
+
+Das ist ein Punkt, an dem man leicht falsche Zahlen bekommt.
+
+Ein normaler Solar-Wechselrichter macht aus Sonnenstrom Wechselstrom. Was er abgibt, *ist* die Solarleistung. Fertig.
+
+Ein Hybrid-Wechselrichter hat aber zusätzlich eine Batterie. Was er abgibt, ist:
 
 ```text
-AC (Modell 103)  =  Solar-DC (Modell 160)  +  Akku-Entladung
+abgegebene Leistung  =  Solarleistung  +  was die Batterie beisteuert
 ```
 
-Daraus folgt die Aufteilung:
+Wenn die Batterie gerade entlädt, ist die abgegebene Leistung also **größer** als die Solarleistung. Würde man einfach die abgegebene Leistung als „Solar" anzeigen, hätte man an einem trüben Abend plötzlich 4 kW Sonnenstrom — obwohl die Sonne längst weg ist und in Wahrheit die Batterie arbeitet.
 
-* **PV** = Solar-DC (reine Erzeugung, ohne Akku-Anteil)
-* **BYD** = AC − Solar-DC (positiv = Entladung, negativ = Ladung)
+Die Firmware erkennt Hybride daran, dass sie **SunSpec-Modell 124** anbieten (den Speicher-Block). Dann rechnet sie:
 
-Ein reiner String-Wechselrichter hat kein Modell 124: dann ist PV = AC und es gibt keinen Akku-Anteil. Ohne diese Unterscheidung würde die Akku-Entladung als PV-Erzeugung gezählt.
+* **Solar** = die Gleichstromleistung der Module (Modell 160) — reine Erzeugung
+* **Batterie** = abgegebene Leistung − Solarleistung (positiv = entladen, negativ = laden)
 
-## Parallel pollen
+Fehlt Modell 124, ist es ein normaler Wechselrichter: Solar = abgegebene Leistung, keine Batterie.
 
-Jede **IP** bekommt ihre eigene Worker-Task mit eigenem Socket. Ein separater Aggregator baut daraus alle 800 ms das Energiemodell.
+## Alle gleichzeitig fragen, nicht der Reihe nach
+
+Ein naives Programm würde alle Geräte hintereinander abfragen. Das Problem: manche Wechselrichter-Datenlogger antworten sehr langsam — manchmal über eine Sekunde. In der Zeit wartet alles andere, auch der wichtige Netzzähler.
+
+Deshalb bekommt hier **jede IP-Adresse ihren eigenen Programmteil** (Task), der unabhängig von den anderen fragt. Ein weiterer Programmteil, der Aggregator, sammelt die Ergebnisse alle 800 Millisekunden ein und rechnet daraus das Gesamtbild.
 
 ```mermaid
 flowchart LR
-    W1["Worker IP 1<br/>Prio 3 (Netz)"] --> AG
-    W2["Worker IP 2<br/>Prio 2 (PV)"] --> AG
-    W3["Worker IP 3<br/>Prio 2 (PV)"] --> AG
-    RTU["modbus_rtu.c<br/>Prio 5"] --> AG
-    AG["Aggregator<br/>800 ms"] --> UI["LVGL-UI"]
+    W1["Task für IP 1<br/>Netzzähler · Priorität 3"] --> AG
+    W2["Task für IP 2<br/>Solar · Priorität 2"] --> AG
+    W3["Task für IP 3<br/>Solar · Priorität 2"] --> AG
+    RTU["Zweidrahtleitung<br/>Priorität 5"] --> AG
+    AG["Aggregator<br/>alle 800 ms"] --> UI["Bildschirm"]
     AG --> MQ["MQTT"]
 ```
 
-Gründe für dieses Muster:
+Die Prioritäten sind bewusst so gewählt:
 
-* Ein Wechselrichter-Datalogger, der auf eine Anfrage sekundenlang nicht antwortet, darf den zeitkritischen Netzzähler nicht ausbremsen.
-* Die Task-Prioritäten liegen **unter** der LVGL-/Touch-Task (4), damit Bedienung nie zäh wird. Ausnahme ist der Worker, dem ein `Netz-Zaehler` oder `Deye-Zaehler` gehört: der läuft auf 3 und rangiert damit über den PV-Workern.
-* Die SunSpec-Struktur wird **einmal** ermittelt und pro Gerät gecacht. Vorher wurde die Modell-Liste für jeden Wert bei jedem Poll neu durchlaufen — 50 bis 100 Modbus-Lesevorgänge pro Runde.
-* Sockets bleiben offen (persistente Verbindungen).
+| Was | Priorität | Begründung |
+| --- | --- | --- |
+| Regelpfad (Zweidrahtleitung) | 5 | darf nie warten — hier hängt der Wechselrichter dran |
+| Bildschirm und Touch | 4 | soll sich flüssig anfühlen |
+| Task mit dem Netzzähler | 3 | wichtiger als Solar, weil der Wert in die Regelung geht |
+| alle anderen Tasks | 2 | dürfen warten |
 
-Prioritätsreihenfolge in der Sache: **1.** Netzzähler lesen → **2.** an den Deye weitergeben (RTU) → **3.** Deye lesen (RTU) → **4.** PV → **5.** BYD.
+Der Grundsatz dahinter: **die Bedienung darf nicht ruckeln, weil ein Datenlogger hängt — und die Regelung darf nicht warten, weil der Bildschirm zeichnet.**
 
-## Energiemodell
+Die Verbindungen bleiben übrigens offen, statt für jede Abfrage neu aufgebaut zu werden. Das spart pro Abfrage einige Millisekunden und viele Netzwerkkanäle.
+
+## Wie der Hausverbrauch berechnet wird
+
+Der Hausverbrauch wird **nicht gemessen** — dafür bräuchte man einen weiteren Zähler. Er wird ausgerechnet:
 
 ```text
-Haus  =  PV  +  Akku  +  Netz
+Haus  =  Solar  +  Akku  +  Netz
 ```
 
-Vorzeichen: positiv = in den Verteiler hinein. Netz positiv = Bezug, negativ = Einspeisung; Akku positiv = Entladung, negativ = Ladung. Negative Hausverbrauchswerte werden auf 0 begrenzt.
+Alle Vorzeichen so gedacht: *positiv = fließt in die Hausverteilung hinein*.
 
-Fällt PV oder Netz aus, greift ein Ersatzweg: ist ein Deye-Gerät vorhanden, liefert dieses `deye_mppt` als PV und `deye_ct` als Netz; sind beide Hauptquellen weg, wird `deye_load` direkt als Hausverbrauch genommen.
+Ein Beispiel: Solar liefert 6,9 kW, die Akkus laden mit zusammen 3,6 kW (also −3,6), und 0,6 kW gehen ins Netz raus (also −0,6):
 
-**Plausibilitätsprüfung** in zwei Stufen — beim Lesen und nochmals in der Aggregation. Verworfen wird alles, was nicht endlich ist oder 100 kW überschreitet (deutlich über einem 35-A-Drehstromanschluss mit etwa 24 kW). Verworfene Werte erscheinen im Log:
+```text
+6,9  +  (−3,6)  +  (−0,6)  =  2,7 kW Hausverbrauch
+```
+
+Genau das zeigt der Screenshot auf der Startseite.
+
+Wenn eine Quelle fehlt, gibt es Ersatzwege: ist ein Deye eingerichtet, liefert der notfalls seine eigenen Messwerte für Solar und Netz. Fehlt beides, wird direkt sein gemessener Hausverbrauch genommen.
+
+### Warum manchmal `--` dasteht
+
+Sehr bewusste Entscheidung: **wenn eine Quelle wegfällt, zeigt der Kreis `--` statt des letzten bekannten Werts.**
+
+Das sieht erst mal schlechter aus. Es ist aber viel besser, weil ein eingefrorener alter Wert wie ein aktueller aussieht. Man denkt, alles sei in Ordnung, und trifft Entscheidungen auf Basis einer Zahl von vor zwei Stunden. Bei einem System, das in die Regelung eingreift, ist das gefährlich.
+
+### Plausibilitätsprüfung
+
+Jeder Wert wird zweimal geprüft — beim Lesen und beim Zusammenrechnen. Verworfen wird alles, was keine echte Zahl ist oder über **100 kW** liegt. Zum Vergleich: ein 35-Ampere-Hausanschluss schafft etwa 24 kW. Ein Wert über 100 kW ist also mit Sicherheit ein Lesefehler.
+
+Im Protokoll sieht das so aus:
 
 ```text
 W modbus_tcp: agg: implausible netz 8388608 W skipped
 ```
 
-Fällt eine Quelle ganz weg (Gerät deaktiviert, entfernt, Wert veraltet), wird der Knoten auf `--` zurückgesetzt — er zeigt niemals einen eingefrorenen alten Wert.
+Meist steht dahinter das falsche Hersteller-Profil.
 
-## Timing pro Gerät
+## Zeiteinstellungen pro Gerät
 
-| Parameter | Standard | Bereich |
-| --- | --- | --- |
-| Poll-Intervall | 2000 ms | 200 … 60000 ms |
-| Timeout | 500 ms | 100 … 10000 ms |
+| Einstellung | Standard | Bereich | Bedeutung |
+| --- | --- | --- | --- |
+| Poll-Intervall | 2000 ms | 200 … 60000 ms | wie oft gefragt wird |
+| Timeout | 500 ms | 100 … 10000 ms | wie lange auf Antwort gewartet wird |
 
-Der Timeout gilt für Verbindungsaufbau und Lebendigkeitsprüfung; für die eigentlichen Leseoperationen gilt eine Untergrenze von 2 s, weil manche Datalogger schlicht langsam sind.
+Bei den eigentlichen Leseoperationen gilt eine Untergrenze von 2 Sekunden, egal was eingestellt ist — einfach weil manche Datenlogger so langsam sind und man sonst nie eine Antwort bekäme.
 
-## Frische-Garantie für den Regelpfad
+## Die Frische-Garantie
 
-`modbus_tcp_grid_w_fresh(&w, max_age_ms)` gibt die Netzleistung **nur** zurück, wenn sie innerhalb der angegebenen Zeitspanne aus einem echten Zählerzugriff stammt. `false` bedeutet: keine Netzquelle konfiguriert, Wert veraltet oder seit einer Umkonfiguration noch nichts gelesen.
+Das ist die wichtigste Funktion im ganzen Programm. Sie heißt `modbus_tcp_grid_w_fresh()` und beantwortet die Frage: *„Wie hoch ist die Netzleistung — aber nur, wenn du es wirklich weißt?"*
+
+Sie gibt nur dann einen Wert heraus, wenn er innerhalb einer vorgegebenen Zeitspanne wirklich von einem Zähler gelesen wurde. Sonst sagt sie „nein". „Nein" kommt in drei Fällen: kein Netzzähler eingerichtet, der Wert ist zu alt, oder es wurde gerade umkonfiguriert und noch nichts gelesen.
 
 > [!WARNING]
-> Alles, was den Wechselrichter **steuert**, muss diese Funktion benutzen und bei `false` passiv bleiben. Ein eingefrorener Wert in einem laufenden Regelkreis hat hier einmal eine Einspeisung von 15 kW ausgelöst. Details unter [Modbus-RTU](Modbus-RTU) und [Deye-Steuerung](Deye-Steuerung).
+> **Alles, was den Wechselrichter steuert, muss über diese Funktion gehen und bei „nein" die Finger stillhalten.** Ein Regelkreis, der auf eine eingefrorene Zahl reagiert, dreht immer weiter auf — er sieht ja keine Wirkung. Hier hat das einmal 15 kW Einspeisung erzeugt. Die ganze Geschichte: [Fehlersuche](Fehlersuche#die-15-kw-geschichte).
 
-Beim Speichern einer neuen Gerätekonfiguration wird der Netzwert bewusst als **ungültig** markiert, bis ein frischer Messwert vorliegt.
+Aus dem gleichen Grund wird der Netzwert nach jedem Speichern der Geräteliste absichtlich für ungültig erklärt, bis wieder frisch gelesen wurde.
 
-## Persistenz und Migration
+## Wie die Einstellungen gespeichert werden
 
-Die Geräteliste liegt als Blob in NVS. Neue Felder werden ausschließlich **angehängt**, sodass ein älteres Layout beim Laden in-place übernommen wird; für das vorherige Layout (`devs4`, 42 Byte pro Eintrag) gibt es einen einmaligen Migrationspfad. Konkret ist so das Feld `name` (Anzeigename) nachgerüstet worden.
+Die Geräteliste liegt als Datenblock im NVS-Speicher. Damit ein Update nicht alle Einstellungen zerstört, gilt eine Regel: **neue Felder werden immer nur hinten angehängt, nie dazwischen eingefügt.** Dann kann ein alter Datenblock einfach weiterverwendet werden — die neuen Felder sind dann eben leer.
 
-## Livewerte abfragen
+Als das Feld für den Anzeigenamen dazukam, wurde der Datensatz größer. Für den alten Stand (42 Byte pro Eintrag) gibt es deshalb einen einmaligen Umzugspfad beim Laden.
+
+## Werte von außen abfragen
 
 ```bash
-curl -s http://<ip>/api/devices
+curl -s http://<ip-des-geräts>/api/devices
 ```
 
 ```json
@@ -114,4 +186,4 @@ curl -s http://<ip>/api/devices
   "conn":1,"pv":690,"w":0,"soc":0}]
 ```
 
-Dieselben Werte zeigt das Popup, wenn man auf dem Hauptbildschirm den PV-Knoten antippt.
+`conn` ist 1, wenn das Gerät antwortet. Dieselben Angaben zeigt auch das Fenster, das aufgeht, wenn du auf dem Hauptbildschirm den Solar-Kreis antippst.

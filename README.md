@@ -310,4 +310,13 @@ Nutzung auf eigenes Risiko und eigene Verantwortung.
 
 ---
 
-Ausführliche Dokumentation: **[Wiki](../../wiki)**
+## Ausführliche Dokumentation
+
+Dieses README ist die Kurzfassung für Leute, die mit Mikrocontrollern und PV-Anlagen schon vertraut sind. Das **[Wiki](../../wiki)** erklärt dasselbe von Grund auf — ohne Vorwissen, mit einem [Glossar](../../wiki/Glossar) für jeden Fachbegriff:
+
+| | |
+| --- | --- |
+| **Nachbauen** | [Hardware](../../wiki/Hardware) · [Bauen und Flashen](../../wiki/Bauen-und-Flashen) · [WLAN und Ersteinrichtung](../../wiki/WLAN-und-Captive-Portal) · [Die Menüs](../../wiki/Einstellungen) |
+| **Verstehen** | [Modbus-TCP](../../wiki/Modbus-TCP) · [Modbus-RTU](../../wiki/Modbus-RTU) · [Architektur](../../wiki/Architektur) |
+| **Benutzen** | [Deye-Steuerung](../../wiki/Deye-Steuerung) · [MQTT und Home Assistant](../../wiki/MQTT-und-Home-Assistant) · [Web-Mirror](../../wiki/Web-Mirror) · [Zeit und VPN](../../wiki/Zeit-und-VPN) · [Updates über WLAN](../../wiki/OTA-und-Recovery) |
+| **Wenn es klemmt** | [Fehlersuche](../../wiki/Fehlersuche) |

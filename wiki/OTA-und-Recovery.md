@@ -1,19 +1,36 @@
-# OTA und Recovery
+# Updates über WLAN und Notfallrettung
 
-Nach der Erstinstallation über USB wird nur noch über WiFi geflasht.
+Nach der ersten Installation über USB braucht man kein Kabel mehr. Das Gerät kann seine eigene Firmware über das Netzwerk austauschen. Das nennt man **OTA** — *Over The Air*.
 
-## Endpunkte
+## Warum das sicher ist: zwei Speicherabschnitte
 
-| Methode | Pfad | Wirkung |
+Ein Firmware-Update ist eigentlich ein riskanter Vorgang: man überschreibt genau das Programm, das gerade läuft. Bricht die Übertragung in der Mitte ab, ist das Gerät ein Briefbeschwerer.
+
+Deshalb gibt es hier **zwei Programm-Abschnitte** im Speicher, `ota_0` und `ota_1`, je 4 MB groß. Es läuft immer nur einer davon.
+
+```mermaid
+flowchart LR
+    A["läuft:<br/>ota_1"] -->|"neue Firmware<br/>wird geschrieben"| B["ota_0<br/>wird gefüllt"]
+    B -->|"vollständig<br/>und heil?"| C["Merkzettel<br/>umstellen"]
+    C --> D["Neustart<br/>läuft: ota_0"]
+```
+
+Geschrieben wird immer in den, der gerade **nicht** läuft. Erst wenn die neue Version komplett und geprüft angekommen ist, wird der Merkzettel umgestellt und neu gestartet. Geht beim Übertragen etwas schief, passiert einfach nichts — die alte Version läuft weiter.
+
+Und wenn die neue Version zwar startet, sich aber falsch verhält? Dann gibt es den **Rollback**: zurück auf den anderen Abschnitt, wo die alte Version noch unangetastet liegt.
+
+## Die Adressen
+
+| Methode | Adresse | Wirkung |
 | --- | --- | --- |
-| `GET` | `/ota` | JSON: laufende Version, Build-Nummer, FS-Build, aktiver und Ziel-Slot, IDF-Version, MAC, Laufzeit |
-| `POST` | `/ota` | Firmware-Image (`firmware.bin`) roh im Body → inaktiver Slot, danach Neustart |
-| `POST` | `/ota/fs` | Dateisystem-Image (`storage.bin`) roh im Body → `storage`-Partition, **kein** automatischer Neustart |
+| `GET` | `/ota` | Auskunft: Version, Build-Nummer, welcher Abschnitt läuft, Laufzeit |
+| `POST` | `/ota` | Firmware schreiben, danach automatisch Neustart |
+| `POST` | `/ota/fs` | Dateisystem schreiben, **kein** automatischer Neustart |
 | `POST` | `/ota/reboot` | Neustart |
-| `POST` | `/ota/rollback` | Bootpartition auf den vorigen Slot setzen und neu starten |
+| `POST` | `/ota/rollback` | zurück auf die vorige Version |
 | `GET` | `/recovery` | Notfallseite im Browser |
 
-## Der übliche Ablauf
+## Der normale Ablauf
 
 ```bash
 IP=192.168.1.42
@@ -23,56 +40,62 @@ curl -s http://$IP/ota
 # {"version":"v1.0.57","build":146,"fs_build":146,"running":"ota_1",
 #  "target_slot":"ota_0","idf":"5.5.4","mac":"...","uptime":2844443}
 
-# 2. Bauen (zählt die Build-Nummer einmal hoch, erzeugt beide Images)
+# 2. Bauen. Zählt die Build-Nummer einmal hoch und erzeugt beide Dateien.
 pio run -e guition-p4
 
-# 3. Firmware schreiben -- das Gerät startet danach selbst neu
+# 3. Firmware schreiben. Das Gerät startet danach selbst neu.
 curl --data-binary @.pio/build/guition-p4/firmware.bin http://$IP/ota
 
-# 4. Dateisystem schreiben und neu starten
+# 4. Dateisystem schreiben und neu starten.
 curl --data-binary @.pio/build/guition-p4/storage.bin http://$IP/ota/fs
 curl -X POST http://$IP/ota/reboot
 
-# 5. Gegenprüfen: build und fs_build müssen gleich sein
+# 5. Kontrolle: build und fs_build müssen gleich sein.
 curl -s http://$IP/ota
 ```
 
-Das Dateisystem wird beim Booten gelesen — deshalb wirkt ein FS-Update erst nach dem Neustart, und deshalb startet `/ota/fs` nicht selbst neu (man will meist ohnehin beides schreiben).
+`--data-binary @datei` heißt: schicke den Inhalt dieser Datei unverändert im Anfragekörper. Ohne das `@` würde curl den Dateinamen selbst schicken, und ohne `--data-binary` würde es Zeilenumbrüche umschreiben und die Datei damit zerstören.
 
-## Zwei Slots
+**Warum startet Schritt 4 nicht selbst neu?** Das Dateisystem wird nur beim Hochfahren gelesen. Ein Update wirkt also erst nach einem Neustart. Und weil man meistens ohnehin beides schreibt, wäre ein Neustart nach Schritt 3 *und* nach Schritt 4 doppelt.
 
-Es gibt `ota_0` und `ota_1`, je 4 MB. Geschrieben wird immer in den **inaktiven** Slot; erst wenn das Image vollständig und gültig ist, wird die Bootpartition umgestellt. Ein abgebrochener Upload lässt die laufende Firmware unangetastet.
-
-`POST /ota/rollback` schaltet zurück auf den anderen Slot — der Weg zurück, wenn eine neue Version bootet, aber sich falsch verhält.
+Zur Build-Nummer und warum sie überall gleich sein muss: [Bauen und Flashen](Bauen-und-Flashen#warum-die-build-nummer-so-ein-thema-ist).
 
 ## Kein Flackern beim Flashen
 
-Während des Schreibens:
+Ein Detail, das man erst merkt, wenn es fehlt. Während in den Flash-Speicher geschrieben wird, kommt das Panel nicht mehr zuverlässig an seine Bilddaten — man sieht ein deutliches Flackern und Streifen. Sieht nach Defekt aus, ist aber harmlos.
 
-1. Der MJPEG-Strom wird pausiert (`web_mirror_pause(true)`).
-2. Der LVGL-Lock wird geholt und gehalten — die UI zeichnet nicht mehr.
+Deshalb passiert vor jedem Schreibvorgang der Reihe nach:
+
+1. Der Bildstrom zum Browser wird angehalten.
+2. Die Sperre auf dem Bildschirmspeicher wird geholt und gehalten — die Oberfläche zeichnet nicht mehr.
 3. Die Hintergrundbeleuchtung geht aus.
 
-Nach Abschluss (oder bei Fehler) wird alles zurückgenommen. Ohne diese Maßnahmen flackert das Panel während des Flash-Zugriffs deutlich sichtbar.
+Danach wird alles zurückgenommen — auch dann, wenn das Update fehlgeschlagen ist. Für den Betrachter ist das Display während des Updates einfach dunkel und wird danach wieder hell.
 
-## Die Recovery-Seite
+## Die Notfallseite
 
-`http://<ip>/recovery` — eine eigenständige Seite, die nichts vom übrigen UI braucht:
+`http://<ip-des-geräts>/recovery` ist eine eigenständige Seite, die nichts von der übrigen Oberfläche braucht:
 
 * Firmware-Datei auswählen und flashen, mit Fortschrittsbalken
 * Dateisystem-Datei auswählen und flashen
-* **Rollback** auf den vorigen Slot (mit Rückfrage)
+* **Rollback** auf die vorige Version (mit Rückfrage)
 * **Neustart** (mit Rückfrage)
 
-Nützlich, wenn `curl` gerade nicht zur Hand ist oder wenn jemand ohne Entwicklungsumgebung das Gerät wieder gerade ziehen soll.
+Nützlich, wenn gerade kein `curl` zur Hand ist — oder wenn jemand ohne Entwicklungsumgebung das Gerät wieder gerade ziehen soll. Ein Link und eine Datei reichen.
 
-## Grenzen
+## Was schiefgehen kann
+
+**`bad size`** — die Datei ist größer als der Speicherabschnitt. Meist hat man versehentlich die falsche Datei erwischt.
+
+**`image invalid`** — die Firmware ist beschädigt oder für einen anderen Chip gebaut. Das merkt der Chip an einer Prüfsumme, *bevor* er umschaltet. Die alte Version läuft weiter.
+
+**Abbruch ohne Meldung** — das gab es früher, wenn dem Gerät die Netzwerkkanäle ausgegangen waren. Dagegen steht `CONFIG_LWIP_TCP_MSL=5000` in den Einstellungen, siehe [Bauen und Flashen](Bauen-und-Flashen#ein-paar-einstellungen-die-erklärung-brauchen).
+
+**Dateisystem-Update mitten drin abgebrochen** — dann ist das Dateisystem unbrauchbar. Halb so wild: die Firmware läuft weiter und meldet beim Start `Filesystem build unavailable`. Einfach nochmal schreiben.
+
+## Und die Sicherheit?
 
 > [!CAUTION]
-> **Keine Authentifizierung.** Wer das Netz erreicht, kann die Firmware ersetzen. Das Gerät gehört in ein vertrauenswürdiges Netz; für Fernzugriff den [WireGuard-Tunnel](Zeit-und-VPN) nutzen, nicht eine Portweiterleitung.
-
-Weitere Einschränkungen:
-
-* Die Größe wird gegen die Partitionsgröße geprüft, ein zu großes Image abgelehnt (`bad size`).
-* Ein ungültiges Firmware-Image scheitert in `esp_ota_end` (`image invalid`) und wird verworfen.
-* Beim FS-Update wird die Partition zuerst vollständig gelöscht — ein Abbruch mitten drin lässt ein unbrauchbares Dateisystem zurück. Das ist unkritisch: die Firmware läuft weiter, meldet `Filesystem build unavailable` und man flasht erneut.
+> **Es gibt kein Passwort.** Wer dein Netz erreicht, kann die Firmware des Geräts ersetzen — und damit alles tun, was das Gerät kann, einschließlich Wechselrichter umstellen.
+>
+> Das ist eine bewusste Entscheidung für ein Gerät im eigenen Heimnetz, und für Bastelbetrieb ist es in Ordnung. Was du **nicht** tun solltest: eine Portweiterleitung im Router einrichten, damit du von unterwegs drankommst. Damit stellst du das Gerät ins offene Internet. Nimm stattdessen den [WireGuard-Tunnel](Zeit-und-VPN#wireguard-tunnel) — der ist genau dafür eingebaut.

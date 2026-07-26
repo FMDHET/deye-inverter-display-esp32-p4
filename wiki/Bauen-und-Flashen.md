@@ -1,22 +1,23 @@
 # Bauen und Flashen
 
-## Voraussetzungen
+„Bauen" heißt: aus dem Quellcode ein Programm machen. „Flashen" heißt: dieses Programm in den Speicher des Chips schreiben. Beides macht ein einziger Befehl.
 
-* [PlatformIO](https://platformio.org/) (CLI oder VS-Code-Erweiterung)
-* Die Plattform wird aus `platformio.ini` geladen: `pioarduino/platform-espressif32`
-* Framework ist **reines ESP-IDF** (5.3 … 5.x), keine Arduino-Schicht
-* Komponenten holt der IDF Component Manager beim ersten Build selbst (`main/idf_component.yml`)
+## Was du installieren musst
 
-Verwendete Komponenten:
+**[PlatformIO](https://platformio.org/)** — entweder als Erweiterung in Visual Studio Code (bequemer) oder als Kommandozeilenwerkzeug. PlatformIO holt sich alles Weitere von selbst: den Compiler, die Bibliotheken, die Werkzeuge zum Flashen. Beim ersten Bauen dauert das ein paar Minuten, danach geht es schnell.
 
-| Komponente | Zweck |
+Was dabei automatisch geladen wird:
+
+| Bibliothek | Wofür |
 | --- | --- |
-| `espressif/esp_lcd_st7701` | Panel-Treiber über MIPI-DSI |
-| `espressif/esp_lcd_touch_gt911` | Touch |
-| `lvgl/lvgl` ^9.2 | UI-Bibliothek |
-| `espressif/esp_lvgl_port` ^2.4 | getesteter LVGL-Port: Framebuffer, Rotation, tearing-freies Puffern |
-| `espressif/esp_hosted` ~2.12 + `esp_wifi_remote` | WLAN über den ESP32-C6 |
-| `components/esp_wireguard` (eingebunden) | WireGuard-Client |
+| `esp_lcd_st7701` | steuert den Bildschirm an |
+| `esp_lcd_touch_gt911` | liest den Touchscreen aus |
+| `lvgl` (Version 9) | malt Knöpfe, Kreise und Text |
+| `esp_lvgl_port` | verbindet LVGL mit diesem Chip, inklusive der Bilddrehung |
+| `esp_hosted` + `esp_wifi_remote` | WLAN über den zweiten Chip |
+| `esp_wireguard` | der VPN-Tunnel (liegt im Projekt selbst) |
+
+Das Projekt benutzt **kein Arduino**, sondern direkt das ESP-IDF von Espressif. Das ist etwas sperriger zu lesen, gibt aber Zugriff auf Dinge, die es unter Arduino nicht gibt — zum Beispiel den Hardware-JPEG-Encoder.
 
 ## Der eine Befehl
 
@@ -24,79 +25,110 @@ Verwendete Komponenten:
 pio run -e guition-p4 -t upload -t flashfs -t monitor
 ```
 
-Firmware **und** Dateisystem in einem einzigen Aufruf. Das ist keine Bequemlichkeit, sondern Voraussetzung — siehe nächster Abschnitt.
+Was die Teile bedeuten:
 
-Einzelne Ziele:
-
-| Ziel | Wirkung |
+| Teil | Bedeutung |
 | --- | --- |
-| `-t upload` | Firmware über USB flashen |
-| `-t flashfs` | SPIFFS-Image `storage.bin` an den Partitions-Offset schreiben |
-| `-t monitor` | seriellen Monitor öffnen (115200, mit Exception-Decoder) |
+| `pio run` | baue das Programm |
+| `-e guition-p4` | für dieses Gerät (es gibt noch eine alte zweite Variante) |
+| `-t upload` | schreibe das Programm über USB auf den Chip |
+| `-t flashfs` | schreibe auch das kleine Dateisystem dazu |
+| `-t monitor` | zeige danach die Meldungen des Geräts an |
 
-## Build-Zähler
+**Wichtig: bitte immer alles in einem Befehl.** Warum, steht im nächsten Abschnitt.
 
-Einzige Quelle der Wahrheit ist `version.json` im Projektwurzelverzeichnis:
+Wenn es läuft, siehst du im Monitor so etwas:
+
+```text
+I deye-display: Deye-Display booting on ESP32-P4
+I deye-display: Firmware build v1.0.57  (#146, ...)
+I deye-display: Filesystem build matches firmware (#146)
+```
+
+Zum Beenden des Monitors: `Strg + C`.
+
+## Warum die Build-Nummer so ein Thema ist
+
+Es gibt hier ein Problem, das viele Bastelprojekte haben: man ändert etwas, flasht nur einen Teil und wundert sich dann, warum sich nichts ändert. Oder schlimmer: man weiß gar nicht mehr, welche Version eigentlich auf dem Gerät läuft.
+
+Die Lösung hier ist eine **einzige Zahl für alles**. In der Datei `version.json` steht sie:
 
 ```json
 { "version": "1.0", "patch": 57, "patch_base": "1.0", "build": 146 }
 ```
 
-`scripts/build_number.py` läuft als Pre-Build-Hook, zählt **einmal pro `pio run`** hoch und schreibt dieselbe Zahl an zwei Stellen:
+Bei jedem Bauen zählt ein kleines Hilfsskript (`scripts/build_number.py`) diese Zahl **genau einmal** hoch und schreibt sie an zwei Stellen:
 
-1. `main/build_info.h` → wird in die Firmware und in die UI kompiliert
-2. `data/build.txt` → landet im SPIFFS-Image `storage.bin`
+1. in eine Datei, die ins **Programm** kompiliert wird
+2. in eine Datei, die ins **Dateisystem** wandert
 
-Beim Booten liest die Firmware `/assets/build.txt` und vergleicht:
+Beim Start liest das Gerät die Zahl aus dem Dateisystem und vergleicht sie mit der Zahl in seinem Programm. Sind sie gleich, passt alles zusammen. Unten rechts auf dem Bildschirm steht dann die Version mit einem **grünen Häkchen** dahinter.
+
+Sind sie ungleich, meldet es sich deutlich:
 
 ```text
-I deye-display: Filesystem build matches firmware (#146)
-E deye-display: BUILD MISMATCH: firmware #146 but filesystem #145 -- reflash so FW + FS + UI agree
+E deye-display: BUILD MISMATCH: firmware #146 but filesystem #145
+                -- reflash so FW + FS + UI agree
 ```
 
-Unten rechts im Hauptbildschirm steht die Version, dahinter ein **grüner Haken** bei Übereinstimmung. Über WiFi prüfbar mit `GET /ota` — `build` und `fs_build` müssen gleich sein.
+Das heißt: du hast Programm und Dateisystem getrennt geflasht, und jetzt sind sie aus dem Takt. Lösung: einfach beides nochmal in einem Befehl.
 
-Ziele, die den Zähler **nicht** hochzählen (sie erzeugen keine Firmware und dürfen das FS nicht vorlaufen lassen): `flashfs`, `uploadfs`, `buildfs`, `erase`, `monitor`, `clean`, `size`, `menuconfig` und weitere.
+Über das Netzwerk kann man das auch prüfen:
 
-## Warum eigene FS-Skripte
+```bash
+curl -s http://<ip-des-geräts>/ota
+```
 
-`scripts/fs_image.py` baut das SPIFFS-Image mit demselben `spiffsgen`, das die Plattform mitbringt, und stellt ein eigenes `flashfs`-Ziel bereit, das mit `esptool` an den Partitions-Offset schreibt.
+Dort müssen `build` und `fs_build` dieselbe Zahl zeigen.
 
-Grund: PlatformIOs eigene `buildfs`/`uploadfs`-Ziele erzwingen bei diesem reinen IDF-Projekt eine CMake-Rekonfiguration, die fehlschlägt. Und IDFs `spiffs_create_partition_image(... FLASH_IN_PROJECT)` hilft nicht, weil PlatformIO seinen eigenen Upload-Pfad fährt und IDFs `flash`-Ziel nie aufruft — das Image würde gebaut, aber nie geflasht. Deshalb steht dazu auch ein Kommentar in `CMakeLists.txt`.
+Übrigens: Befehle, die gar kein neues Programm erzeugen (nur Dateisystem schreiben, nur Monitor öffnen, aufräumen), zählen die Zahl **nicht** hoch. Sonst würde das Dateisystem dem Programm davonlaufen.
 
-Das Image wird zusätzlich nach jedem Firmware-Build automatisch erzeugt, damit `firmware.bin` und `storage.bin` immer zusammenpassen.
+## Warum es eigene Skripte für das Dateisystem gibt
 
-## Partitionslayout (16 MB)
+Kurz: weil die eingebauten Wege in diesem Fall nicht funktionieren.
 
-| Name | Typ | Offset | Größe |
-| --- | --- | --- | --- |
-| `nvs` | data/nvs | `0x9000` | 24 KB |
-| `otadata` | data/ota | `0xf000` | 8 KB |
-| `phy_init` | data/phy | `0x11000` | 4 KB |
-| `ota_0` | app | `0x20000` | 4 MB |
-| `ota_1` | app | `0x420000` | 4 MB |
-| `storage` | data/spiffs | `0x820000` | 1 MB |
+PlatformIO hat eigene Befehle, um ein Dateisystem zu bauen und zu flashen. Bei einem reinen ESP-IDF-Projekt wie diesem versuchen sie dabei aber, das Build-System neu zu konfigurieren, und scheitern.
 
-Zwei App-Slots, damit sich das Gerät selbst über WiFi flashen kann. `nvs` behält seinen Standard-Offset `0x9000`, damit gespeicherte Zugangsdaten und Konfiguration eine Neupartitionierung überleben.
+ESP-IDF hat auch einen eigenen Weg. Der baut das Dateisystem, überlässt das Flashen aber seinem eigenen Befehl — und den ruft PlatformIO nie auf. Ergebnis: das Dateisystem wird gebaut und dann nie geschrieben.
 
-## Konfigurationsbesonderheiten
+Deshalb macht `scripts/fs_image.py` das selbst: es benutzt genau dasselbe Werkzeug, das PlatformIO auch mitbringt, und bietet einen eigenen Befehl `flashfs`, der die Datei an die richtige Stelle im Speicher schreibt. Und weil es leicht zu vergessen ist, wird das Dateisystem zusätzlich nach jedem Programm-Build automatisch mit erzeugt.
 
-Auszug aus `sdkconfig.defaults` — die Einträge mit Erklärungsbedarf:
+## Wie der Speicher aufgeteilt ist
 
-| Einstellung | Grund |
+Der 16-MB-Flash-Speicher ist in Abschnitte („Partitionen") aufgeteilt:
+
+| Name | Größe | Inhalt |
+| --- | --- | --- |
+| `nvs` | 24 KB | alle Einstellungen — WLAN-Passwörter, Geräteliste, Sollwerte |
+| `otadata` | 8 KB | Merkzettel, welche Programmversion gestartet werden soll |
+| `phy_init` | 4 KB | Funk-Kalibrierdaten |
+| `ota_0` | 4 MB | Programmversion A |
+| `ota_1` | 4 MB | Programmversion B |
+| `storage` | 1 MB | das kleine Dateisystem mit der Build-Nummer |
+
+**Warum zwei Programm-Abschnitte?** Damit sich das Gerät selbst über WLAN aktualisieren kann. Es schreibt die neue Version immer in den *gerade nicht benutzten* Abschnitt. Erst wenn die vollständig und heil angekommen ist, wird umgeschaltet. Geht beim Übertragen etwas schief, läuft die alte Version einfach weiter. Mehr dazu: [OTA und Recovery](OTA-und-Recovery).
+
+Der Einstellungs-Abschnitt `nvs` liegt bewusst an der Standardstelle. Dadurch überleben gespeicherte WLAN-Passwörter und Konfiguration ein Update.
+
+## Ein paar Einstellungen, die Erklärung brauchen
+
+In `sdkconfig.defaults` stehen Optionen, die nicht offensichtlich sind. Jede davon steht dort, weil ohne sie etwas kaputt war:
+
+| Einstellung | Warum sie da ist |
 | --- | --- |
-| `CONFIG_LV_USE_CLIB_MALLOC=y` | LVGLs eigener Allokator würde ein mehrere hundert KB großes statisches Array in `.bss` legen; das passt nicht in die 320 KB internes SRAM. Über newlib-`malloc` kommt PSRAM ins Spiel. |
-| `CONFIG_LV_CACHE_DEF_SIZE=262144` | Tiny-TTF rastert Glyphen zur Laufzeit. Ohne Cache (Standard 0) fallen sie auf die Bitmap-Schrift zurück und Umlaute erscheinen als Kästchen. |
-| `CONFIG_LV_USE_SNAPSHOT=y` | Grundlage für den Web-Mirror. |
-| `CONFIG_LWIP_MAX_SOCKETS=16` | Zwei HTTP-Server, DNS, MQTT, WireGuard und persistente Modbus-TCP-Sockets brauchen mehr als die zehn Standard-Sockets. |
-| `CONFIG_LWIP_TCP_MSL=5000` | Mit 60 s MSL (= 120 s `TIME_WAIT`) sammelten geschlossene HTTP-Verbindungen sich so weit an, dass der Server keine neuen mehr annahm und große OTA-Uploads abgelehnt wurden. |
-| `CONFIG_ESP_NETIF_BRIDGE_EN=y` | Nur, um `LWIP_ESP_NETIF_DATA=1` zu setzen. Andernfalls stürzt der DHCP-Callback über das WireGuard-Netif ab. |
-| `CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192` | WiFi-Init und UI-Aufbau zusammen sprengen den Standardstack. |
+| `CONFIG_LV_USE_CLIB_MALLOC=y` | LVGL würde sonst einen mehrere hundert Kilobyte großen Speicherblock fest reservieren. Der passt nicht in die 320 KB schnellen Speicher des Chips. So benutzt LVGL den normalen Weg und landet automatisch im großen PSRAM. |
+| `CONFIG_LV_CACHE_DEF_SIZE=262144` | Die Schriftarten werden zur Laufzeit aus einer Schriftdatei berechnet. Ohne Zwischenspeicher (Standard ist 0!) scheitert das lautlos und **Umlaute erscheinen als Kästchen**. |
+| `CONFIG_LV_USE_SNAPSHOT=y` | Grundlage dafür, das Bildschirmbild abzugreifen — nötig für den [Web-Mirror](Web-Mirror). |
+| `CONFIG_LWIP_MAX_SOCKETS=16` | Zwei Webserver, DNS, MQTT, VPN und die Modbus-Verbindungen brauchen zusammen mehr Netzwerkkanäle als die zehn Standardkanäle. |
+| `CONFIG_LWIP_TCP_MSL=5000` | Beendete Netzwerkverbindungen werden normalerweise zwei Minuten lang „nachgehalten". Mit vielen kurzen Verbindungen war der Kanalvorrat dadurch erschöpft, der Webserver nahm nichts mehr an und große Updates wurden abgelehnt. Jetzt sind es 10 Sekunden. |
+| `CONFIG_ESP_NETIF_BRIDGE_EN=y` | Klingt nach Netzwerkbrücke, ist aber nur ein Trick: die Option schaltet nebenbei eine andere Einstellung um, ohne die das Gerät beim VPN-Aufbau abstürzt. |
+| `CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192` | Beim Start passiert viel gleichzeitig (WLAN hochfahren, Oberfläche bauen). Mit dem Standardwert reicht der Arbeitsplatz dafür nicht. |
 
-## Erste Installation
+## Die erste Installation, Schritt für Schritt
 
-1. Modul per USB-C anschließen (der Port bedient UART0).
+1. Modul mit dem USB-C-Kabel an den Rechner.
 2. `pio run -e guition-p4 -t upload -t flashfs -t monitor`
-3. Im Log auf `Deye-Display booting on ESP32-P4` und den Build-Vergleich achten.
-4. Es erscheint der Hauptbildschirm mit `--`-Werten und der Access Point `DeyeDisplay-XXXXXX` → weiter unter [WLAN und Captive Portal](WLAN-und-Captive-Portal).
-5. Danach über WiFi flashen — siehe [OTA und Recovery](OTA-und-Recovery).
+3. Im Monitor prüfen: Startmeldung da? Build-Nummern gleich?
+4. Auf dem Bildschirm erscheint das Energiebild — alle Werte auf `--`, weil noch keine Geräte eingerichtet sind. Das ist richtig so.
+5. Das Gerät spannt ein WLAN namens `DeyeDisplay-XXXXXX` auf. Damit weiter zu [WLAN und Captive Portal](WLAN-und-Captive-Portal).
+6. Ab jetzt brauchst du kein Kabel mehr — Updates gehen über WLAN, siehe [OTA und Recovery](OTA-und-Recovery).

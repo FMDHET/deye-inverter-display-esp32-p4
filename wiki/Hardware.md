@@ -1,72 +1,112 @@
 # Hardware
 
+## Was man braucht
+
+| Was | Warum |
+| --- | --- |
+| **GUITION JC4880P443C** Display-Modul | das eigentliche Gerät — Bildschirm und Computer in einem |
+| **2 × RS485-Transceiver** mit Auto-Direction | damit der Chip mit dem Wechselrichter über die Zweidrahtleitung reden kann |
+| USB-C-Kabel | für die erste Installation und für Fehlermeldungen |
+| Zweidrahtleitung (verdrillt), 2 × 120 Ω Widerstand | die Verbindung zum Wechselrichter |
+
+Das war es. Keine Platine löten, kein Gehäuse drucken.
+
 ## Das Display-Modul
 
-**[GUITION JC4880P443C_I_W](https://www.guition.com/esp32p4-display-module/esp32p4-display)** — ein fertig konfektioniertes Modul mit Gehäuserahmen, kein Bausatz.
+**[GUITION JC4880P443C_I_W](https://www.guition.com/esp32p4-display-module/esp32p4-display)** ist ein fertiges Modul: Bildschirm, Touch, Rechner und Rahmen in einem Stück. Man schließt es per USB-C an und kann losprogrammieren.
 
-| Merkmal | Wert |
-| --- | --- |
-| Haupt-SoC | ESP32-P4, Dual-Core RISC-V, bis 360 MHz |
-| Funk-Coprozessor | ESP32-C6 auf dem Modul (WiFi 6, BLE), über SDIO angebunden |
-| Panel | 4,3″ IPS TFT, 480 × 800, MIPI-DSI mit 2 Lanes @ 500 Mbps |
-| Panel-Treiber | ST7701 |
-| Touch | GT911, kapazitiv, I²C-Adresse `0x5D` |
-| PSRAM | 32 MB (HEX-Modus, 200 MHz) |
-| Flash | 16 MB |
-| Weiteres | microSD-Slot, GPIO-Header |
+| Merkmal | Wert | Was das bedeutet |
+| --- | --- | --- |
+| Hauptchip | ESP32-P4, 2 Kerne, bis 360 MHz | der Computer. Kein Windows, kein Linux — nur unser Programm. |
+| Funkchip | ESP32-C6 | macht WLAN und Bluetooth (siehe unten) |
+| Bildschirm | 4,3 Zoll, 480 × 800, IPS | knapp 11 cm Diagonale, gute Blickwinkel |
+| Anschluss des Bildschirms | MIPI-DSI, 2 Leitungspaare | die schnelle Verbindung zwischen Chip und Panel |
+| Bildschirmtreiber | ST7701 | der Chip direkt am Panel, der die Pixel ansteuert |
+| Touch | GT911, kapazitiv | erkennt Finger wie ein Handy-Display |
+| PSRAM | 32 MB | Arbeitsspeicher. Wichtig, weil das Bild allein 768 KB braucht. |
+| Flash | 16 MB | der „Festplattenspeicher" für Programm und Einstellungen |
+| Extras | microSD-Slot, Stiftleiste | hier hängen wir die zwei RS485-Bausteine an |
 
-Der ESP32-P4 hat **kein eigenes Funkmodul**. WLAN läuft vollständig auf dem C6: `esp_hosted` überträgt die WiFi-/Netzwerk-Schicht über SDIO, `esp_wifi_remote` leitet die gewohnte `esp_wifi`-API dorthin weiter. Aus Anwendungssicht sieht das wie normales `esp_wifi` aus.
+### Die Sache mit dem zweiten Chip
 
-> [!NOTE]
-> Die Firmware des C6 muss zur Host-Version passen. Bei einem Versatz bootet das Gerät in einer Schleife neu, sobald WLAN initialisiert wird. Hier läuft C6-Slave **2.12.8** zum Host `esp_hosted ~2.12.0`.
+Der ESP32-P4 ist schnell, hat aber **kein eigenes Funkmodul**. Deshalb sitzt auf dem Modul noch ein zweiter, kleinerer Chip: der ESP32-C6. Der macht das komplette WLAN.
 
-## Panel-Anbindung
+Die beiden reden über eine schnelle interne Verbindung (SDIO) miteinander. Damit man das beim Programmieren nicht merkt, gibt es zwei Hilfsbibliotheken: **esp_hosted** schiebt die Netzwerkdaten hin und her, **esp_wifi_remote** sorgt dafür, dass sich das im Programm anfühlt wie ein normales, eingebautes WLAN. Für uns sieht es also aus wie ein Chip — es sind aber zwei.
 
-Native Ausrichtung ist Hochformat 480 × 800. Die UI läuft im Querformat 800 × 480; die Drehung um 90° macht die **PPA-Hardwareeinheit** des P4 (`CONFIG_LVGL_PORT_ENABLE_PPA=y`), nicht die CPU.
+> [!IMPORTANT]
+> Die Programme auf beiden Chips müssen zueinander passen. Passen sie nicht, startet das Gerät in einer Endlosschleife immer neu, sobald WLAN eingeschaltet wird. Hier läuft auf dem C6 die Version **2.12.8** und dazu passend `esp_hosted` in Version 2.12.x. Wenn du eine Bootschleife hast: siehe [Fehlersuche](Fehlersuche#wlan).
 
-DSI-/DPI-Timings und LDO-Versorgung stehen in [`main/board_jc4880p443c.h`](https://github.com/FMDHET/deye-inverter-display-esp32-p4/blob/main/main/board_jc4880p443c.h):
+### Warum das Bild gedreht wird
 
-| Parameter | Wert |
+Der Bildschirm ist im Hochformat eingebaut: 480 Pixel breit, 800 hoch. Die Anzeige soll aber im Querformat laufen — 800 breit, 480 hoch.
+
+Diese Drehung um 90 Grad macht **nicht** der Hauptprozessor, sondern eine spezielle Hardware-Einheit im Chip namens **PPA**. Das ist wichtig, weil das Drehen von 384.000 Pixeln 30-mal pro Sekunde den Prozessor sonst stark belasten würde. Eingeschaltet wird das über die Einstellung `CONFIG_LVGL_PORT_ENABLE_PPA`.
+
+Die genauen Zeitwerte für die Bildschirmansteuerung (wie lange ein Zeilenwechsel dauert und so weiter) stehen in [`main/board_jc4880p443c.h`](https://github.com/FMDHET/deye-inverter-display-esp32-p4/blob/main/main/board_jc4880p443c.h). Die muss man normalerweise nie anfassen — sie sind für dieses Panel erprobt. Falls das Bild verzerrt oder gestreift aussieht, sind meist genau diese Werte das Problem.
+
+| Wert | Einstellung |
 | --- | --- |
 | Pixeltakt | 34 MHz |
-| HSYNC / HBP / HFP | 12 / 42 / 42 |
-| VSYNC / VBP / VFP | 2 / 8 / 166 |
-| MIPI-DSI-PHY-LDO | Kanal 3, 2500 mV |
-| Farbtiefe | RGB565 (16 bpp) |
+| Zeilen-Timing (HSYNC / HBP / HFP) | 12 / 42 / 42 |
+| Bild-Timing (VSYNC / VBP / VFP) | 2 / 8 / 166 |
+| Spannungsversorgung des Bildschirm-Interface | LDO-Kanal 3, 2500 mV |
+| Farbtiefe | RGB565, also 16 Bit pro Pixel |
 
-Der Framebuffer belegt 480 × 800 × 2 B = 768 KB und liegt im PSRAM — deshalb ist PSRAM zwingend aktiviert.
+## Die Anschlüsse
 
-## Pinbelegung
+Welcher Anschlussstift (GPIO) welche Aufgabe hat:
 
-| Funktion | GPIO |
+| Aufgabe | GPIO |
 | --- | --- |
-| LCD-Reset (`low` aktiv) | 5 |
-| Hintergrundbeleuchtung (LEDC-PWM) | 23 |
-| I²C SDA / SCL (Touch), 400 kHz | 7 / 8 |
-| Touch-Reset | 3 |
-| Touch-Interrupt | nicht verdrahtet |
-| RS485 Bus A — UART1 TX / RX | 52 / 51 |
-| RS485 Bus B — UART2 TX / RX | 50 / 49 |
+| Bildschirm zurücksetzen | 5 |
+| Hintergrundbeleuchtung (dimmbar) | 23 |
+| Touch-Datenleitungen (I²C) | 7 (Daten) und 8 (Takt) |
+| Touch zurücksetzen | 3 |
+| **RS485 Bus A** — senden / empfangen | 52 / 51 |
+| **RS485 Bus B** — senden / empfangen | 50 / 49 |
 
-UART0 bleibt die Konsole (115200 Baud).
+Die serielle Schnittstelle Nummer 0 bleibt frei — darüber laufen die Fehlermeldungen zum PC. Deshalb benutzen die beiden RS485-Busse die Schnittstellen 1 und 2.
 
-## RS485
+## Die RS485-Verkabelung
 
 ![RS485-Verdrahtung](https://raw.githubusercontent.com/FMDHET/deye-inverter-display-esp32-p4/main/docs/img/rs485.svg)
 
-Benötigt werden **zwei Transceiver mit Auto-Direction** — Module, die die Senderichtung selbst erkennen und keinen DE/RE-Pin brauchen (z. B. verbreitete MAX485-/MAX3485-Platinen mit Automatik). Die Firmware steuert keine Richtungsleitung.
+Ein RS485-Bus ist eine sehr einfache Sache: **zwei verdrillte Adern**, genannt A und B, an denen mehrere Geräte hängen. Alle hören mit, aber nur einer darf gleichzeitig sprechen — genau wie in einer Gruppe von Leuten, die sich abwechseln müssen.
 
-Hinweise zur Verkabelung:
+Der Mikrocontroller kann nicht direkt auf so eine Leitung sprechen; seine Signale sind zu schwach und anders geformt. Dafür gibt es die **Transceiver** — kleine Bausteine, die übersetzen. Man braucht zwei davon, für die zwei Busse.
 
-* A und B durchgehend paarweise verdrillt, Abschluss 120 Ω an den Busenden.
-* Gemeinsame Masse zwischen Display und Wechselrichter — sonst arbeiten die Transceiver ohne definierten Bezug.
-* Beide Busse sind unabhängig: welcher Bus Master und welcher Slave ist, entscheidet die Konfiguration im Tab „Mod RTU", nicht die Verdrahtung.
-* Für den Selbsttest die Busse gegeneinander verdrahten: A-TX → B-RX und A-RX → B-TX.
+Wichtig: nimm Module **mit „Auto-Direction"**. Bei billigen Modulen muss die Software zusätzlich eine Leitung umschalten, um zwischen Senden und Empfangen zu wechseln. Diese Firmware macht das nicht — sie erwartet Module, die das selbst erkennen.
 
-## Zweite Zielplatine
+### Fünf Regeln fürs Verkabeln
 
-`sdkconfig.waveshare-p4` liegt noch im Projekt (frühere Bring-up-Plattform), wird aber nicht gepflegt und ist nicht Teil des Build-Environments. Gebaut wird ausschließlich `guition-p4`.
+1. **A und B paarweise verdrillt** durchziehen. Nicht zwei Adern aus verschiedenen Paaren nehmen.
+2. **120 Ω an beiden Enden** der Leitung zwischen A und B. Ohne diese Abschlusswiderstände wird das Signal am Leitungsende reflektiert und stört sich selbst.
+3. **Gemeinsame Masse** zwischen Display und Wechselrichter. Ohne gemeinsamen Bezugspunkt „schwimmen" die Signale.
+4. **A und B nicht vertauschen.** Das ist der häufigste Verdrahtungsfehler überhaupt, und man merkt ihn nur daran, dass gar nichts geht.
+5. **Nicht neben Starkstromleitungen** verlegen, wenn es sich vermeiden lässt.
 
-## Silizium-Revision
+### Welcher Bus macht was?
 
-Einige ESP32-P4-Boards tragen ECO2-Silizium (Revision < 3.0). Standardmäßig baut ESP-IDF für Revision 3.x und erzeugt `xespv2p2`-Befehle, die ECO2 nicht dekodieren kann. `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` in `sdkconfig.defaults` hält das Binary zu beiden kompatibel — der Preis sind ein paar Optimierungen.
+Das ist **nicht** durch die Verkabelung festgelegt, sondern eine Einstellung. Jeder der beiden Busse kann entweder Fragen stellen (Master) oder Antworten geben (Slave). In der Anlage, für die das gebaut wurde, ist es so:
+
+* **Bus A = Master** — fragt den Deye nach Ladezustand und Akkuleistung und schreibt Steuerbefehle
+* **Bus B = Slave** — gibt sich als Stromzähler aus und beantwortet die Fragen des Deye
+
+Details dazu: [Modbus-RTU](Modbus-RTU).
+
+### Testen, ohne den Wechselrichter anzufassen
+
+Es gibt einen eingebauten Selbsttest. Dafür verbindest du die beiden Busse einfach gegeneinander:
+
+```text
+Bus A senden  →  Bus B empfangen
+Bus A empfangen  ←  Bus B senden
+```
+
+Dann fragt der eigene Master den eigenen Slave. Funktioniert das, weißt du: Transceiver, Verkabelung und Software sind in Ordnung. Wenn es danach mit dem Wechselrichter trotzdem nicht geht, liegt es an der Strecke dorthin oder an seinen Einstellungen. Zu finden im Menü unter „Mod RTU".
+
+## Kleinere Besonderheiten
+
+**Zwei Silizium-Generationen.** Manche ESP32-P4-Module haben einen etwas älteren Chip (genannt ECO2). Der versteht ein paar Maschinenbefehle nicht, die der Compiler standardmäßig benutzt. Damit die Firmware auf beiden Varianten läuft, steht in den Einstellungen `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y`. Kostet ein wenig Geschwindigkeit, verhindert aber, dass das Gerät bei manchen Leuten gar nicht startet.
+
+**Eine zweite Platine im Projekt.** Es liegt noch eine Konfigurationsdatei für ein Waveshare-Board herum (`sdkconfig.waveshare-p4`) — das war die erste Testplattform. Sie wird nicht mehr gepflegt. Gebaut wird nur die Variante `guition-p4`.

@@ -1,56 +1,75 @@
 # Web-Mirror und Web-Werkzeuge
 
-Das Gerät bringt zwei HTTP-Server mit:
+Das Gerät ist auch ein kleiner Webserver. Genauer gesagt: **zwei** Webserver.
 
-| Port | Aufgabe |
+| Server | Aufgabe |
 | --- | --- |
-| `:80` | Seiten, Eingaben, JSON-Schnittstellen, OTA, Captive Portal |
-| `:81` | ausschließlich der MJPEG-Strom |
+| Port 80 | Seiten, Eingaben, Datenabfragen, Updates, Ersteinrichtung |
+| Port 81 | ausschließlich das laufende Bild |
 
-Die Trennung ist Absicht: ein langlebiger Bildstrom auf demselben Server würde die Touch-Eingaben blockieren.
+Warum zwei? Weil das Bild eine Dauerverbindung ist, die niemals endet. Läge sie auf demselben Server, würde sie ihn belegen, und alle anderen Anfragen — zum Beispiel deine Fingertipps — müssten warten. Getrennt kommen sie sich nicht in die Weg.
 
-## Der Spiegel
+## Das Display im Browser
 
-`http://<ip>/` zeigt **das echte Panelbild** — keine Nachbildung der UI im Browser:
+Rufst du `http://<ip-des-geräts>/` auf, siehst du **das echte Bildschirmbild** — keinen Nachbau der Oberfläche in HTML, sondern genau das, was gerade auf dem Panel steht. Und du kannst hineinklicken, als würdest du das Display berühren.
 
-1. Der Framebuffer wird direkt aus dem Panel gelesen (kein erneutes Rendern).
-2. Der **Hardware-JPEG-Encoder** des ESP32-P4 komprimiert das Bild (Qualität 80, YUV420).
-3. Die Frames gehen als `multipart/x-mixed-replace` an den Browser, alle 120 ms — also etwa 8 Bilder pro Sekunde. Die Begrenzung hält die Konkurrenz um den LVGL-Lock klein.
+### Wie das Bild in den Browser kommt
 
-Zurück in die andere Richtung geht die Eingabe: Zeiger- und Tastaturereignisse aus dem Browser gehen über ein **zweites LVGL-Eingabegerät** in dieselbe UI. Die Webseite verhält sich damit wie der Touchscreen — inklusive Bildschirmtastatur, physischer Tastatur und Zwischenablage.
+```mermaid
+flowchart LR
+    A["Bildspeicher<br/>im Chip"] --> B["JPEG-Encoder<br/>in Hardware"]
+    B --> C["MJPEG-Strom<br/>über Port 81"]
+    C --> D["Browser"]
+```
 
-| Endpunkt | Zweck |
+Drei Schritte, jeder mit einem Trick:
+
+**1. Das Bild wird direkt aus dem Bildspeicher gelesen.** Nicht neu gezeichnet — es wird genau der Speicherbereich abgegriffen, der auch das Panel versorgt. Deshalb kostet das praktisch keine Rechenzeit, und deshalb sieht man garantiert genau das, was auf dem Gerät zu sehen ist.
+
+**2. Ein Hardware-Baustein macht daraus ein JPEG.** Der ESP32-P4 hat eine eingebaute JPEG-Einheit. Sie komprimiert das Bild, ohne den Prozessor zu belasten. Das ist der Grund, warum das überhaupt möglich ist — in Software wäre ein Mikrocontroller damit überfordert.
+
+**3. Die Bilder werden als MJPEG gesendet.** MJPEG ist die einfachste Form von Video, die es gibt: eine Folge einzelner JPEG-Bilder, hintereinander durch dieselbe Verbindung geschickt. Braucht keine Videobibliothek und läuft in jedem Browser. Hier: ein Bild alle 120 Millisekunden, also etwa **8 Bilder pro Sekunde**.
+
+Warum nur 8 und nicht 30? Weil der Bildspeicher zwischendurch gesperrt werden muss, damit sich nichts ändert, während man ihn ausliest. Bei zu vielen Bildern pro Sekunde würde man der Oberfläche zu oft in die Arbeit fahren, und die Bedienung am Gerät würde ruckeln. 8 Bilder pro Sekunde sind ein guter Kompromiss.
+
+### Wie die Eingaben zurückkommen
+
+Für die Rückrichtung gibt es einen zweiten, unsichtbaren „Finger": LVGL erlaubt mehrere Eingabegeräte gleichzeitig. Neben dem echten Touchscreen ist ein zweites angemeldet, das seine Ereignisse aus dem Netzwerk bekommt. Für die Oberfläche ist beides gleichwertig — sie kann nicht unterscheiden, ob am Gerät getippt oder im Browser geklickt wurde.
+
+| Anfrage | Wirkung |
 | --- | --- |
-| `GET /touch?x=&y=&down=` | Zeigerereignis einspeisen |
-| `GET /key?...` | Tastendruck in das fokussierte Textfeld (ASCII, 8 = Rücktaste) |
-| `POST /paste` | Text in das fokussierte Feld einfügen |
-| `GET /copy` | Inhalt des fokussierten Feldes auslesen |
+| `GET /touch?x=&y=&down=` | Klick oder Fingertipp an einer Position |
+| `GET /key?...` | Tastendruck ins gerade ausgewählte Textfeld (8 = Rücktaste) |
+| `POST /paste` | Text aus der Zwischenablage einfügen |
+| `GET /copy` | Inhalt des ausgewählten Feldes auslesen |
 
-Praktischer Nebeneffekt: WireGuard-Schlüssel oder MQTT-Passwörter lassen sich einfügen, statt sie auf einer 4,3″-Bildschirmtastatur einzutippen.
+Der praktische Nutzen wird schnell klar, wenn man einmal einen WireGuard-Schlüssel eintippen musste: 44 Zeichen aus Groß- und Kleinbuchstaben, Ziffern, Plus und Schrägstrich — auf einer 4,3-Zoll-Bildschirmtastatur. Mit Einfügen aus der Zwischenablage ist das eine Sekunde Arbeit.
 
 > [!NOTE]
-> Während eines OTA-Updates wird der Strom pausiert (`web_mirror_pause`). Das gibt den LVGL-Lock frei, das Panel bleibt statisch und flackert nicht.
+> Während eines Firmware-Updates wird der Bildstrom angehalten. Das gibt die Sperre auf dem Bildspeicher frei, das Panel bleibt stehen und flackert nicht. Details unter [OTA und Recovery](OTA-und-Recovery#kein-flackern-beim-flashen).
 
 ## Register-Werkzeug `/deye`
 
-`http://<ip>/deye` greift über den RTU-Master-Bus direkt auf die Holding-Register des Deye zu.
+Unter `http://<ip-des-geräts>/deye` liegt ein Werkzeug, mit dem man direkt in den Wechselrichter hineinschauen kann. Es benutzt dafür die Zweidrahtleitung — die Anfragen werden zwischen zwei regulären Abfragen eingeschoben, damit sich auf dem Bus nichts überschneidet.
 
-**Register-Probe** — beliebige Adressbereiche lesen (FC03), mit Klartext-Deutung bekannter Register. Ausgegeben werden Adresse, Hex, vorzeichenlos, vorzeichenbehaftet, Name und Interpretation. Nützliche Einstiegspunkte:
+**Register-Probe** — irgendeinen Adressbereich lesen. Angezeigt werden Adresse, Hexwert, der Wert als positive Zahl, der Wert mit Vorzeichen, und bei bekannten Adressen ein Name samt Deutung in Klartext. Gute Startpunkte:
 
 | Adresse / Anzahl | Zeigt |
 | --- | --- |
-| `142` / `6` | Energy Mode, Work Mode, Solar Sell |
-| `148` / `12` | TOU-Zeiten und TOU-Leistungen |
-| `166` / `12` | TOU-SoC-Sollwerte und Netzlade-Flags |
+| `142` / `6` | Betriebsart, Energy Mode, Solar Sell |
+| `148` / `12` | Zeiten und Leistungen der sechs Zeitfenster |
+| `166` / `12` | Ziel-Ladezustände und Netzlade-Freigaben |
 
-**Schreiben (FC16)** — einzelnes Register setzen.
+**Ein Register schreiben** — für Versuche mit einzelnen Adressen.
 
-**Register-Backup** — einen Adressbereich vollständig auslesen und als CSV speichern (`addr;value;hex;signed;name;interp`, in Excel öffenbar), oder eine CSV wieder einspielen. Beim Import wird immer die Spalte `signed` geschrieben; negative Werte werden korrekt nach U16 umgerechnet.
+**Sichern und Zurückschreiben** — ein Adressbereich wird komplett ausgelesen und als CSV-Datei gespeichert, die man in Excel öffnen kann (Spalten `addr;value;hex;signed;name;interp`). Dieselbe Datei lässt sich wieder einspielen; geschrieben wird dabei immer die Spalte `signed`, negative Werte werden korrekt umgerechnet.
 
 > [!CAUTION]
-> Vor dem Import die Zeilen entfernen, die nicht geschrieben werden sollen — Mess- und Statusregister sind meist nur lesbar. Und generell: erst wissen, was die Adresse tut, dann schreiben. Siehe [Deye-Steuerung](Deye-Steuerung).
+> Vor dem Zurückschreiben **die Zeilen löschen, die nicht geschrieben werden sollen.** Eine Sicherung enthält immer beides — echte Einstellungen und reine Messwerte. Messwertregister sind meist nur lesbar, und ein Schreibversuch führt zu Fehlern oder unerwartetem Verhalten. Und generell gilt: erst wissen, was eine Adresse bedeutet, dann schreiben. Siehe [Deye-Steuerung](Deye-Steuerung).
 
-## JSON-Schnittstellen
+## Werte als JSON abfragen
+
+Für eigene Dashboards oder Skripte gibt es drei Adressen, die einfach nur Daten liefern.
 
 `GET /api/live` — alles, was der Hauptbildschirm zeigt:
 
@@ -62,26 +81,30 @@ Praktischer Nebeneffekt: WireGuard-Schlüssel oder MQTT-Passwörter lassen sich 
  "ntp":1,"time":"2026-07-26 17:41:37","w":800,"h":480}
 ```
 
-`GET /api/devices` — Livewerte pro Modbus-TCP-Gerät, siehe [Modbus-TCP](Modbus-TCP#livewerte-abfragen).
+Zu lesen als: 4 Geräte eingerichtet, 4 verbunden, 3,4 Millionen Abfragen seit dem Start, 6867 W Solarleistung, 2577 W Hausverbrauch, 685 W Einspeisung, Deye lädt mit 3547 W bei 91 % Ladezustand, MQTT verbunden, Uhr gestellt.
 
-`GET /ota` — Version, Build, Slots, Laufzeit, siehe [OTA und Recovery](OTA-und-Recovery).
+`GET /api/devices` — die Werte jedes einzelnen Geräts, siehe [Modbus-TCP](Modbus-TCP#werte-von-außen-abfragen).
 
-Alle drei senden `Access-Control-Allow-Origin: *` und lassen sich damit direkt aus eigenen Dashboards abfragen.
+`GET /ota` — Version, Build-Nummer, Speicherabschnitt, Laufzeit, siehe [OTA und Recovery](OTA-und-Recovery).
 
-## Alle Endpunkte
+Alle drei setzen den Header `Access-Control-Allow-Origin: *`. Das heißt: man kann sie auch aus einer Webseite heraus abfragen, die auf einem anderen Rechner liegt — der Browser blockiert es nicht.
 
-| Methode | Pfad | Port |
+## Alle Adressen auf einen Blick
+
+| Methode | Adresse | Port |
 | --- | --- | --- |
-| `GET` | `/` — Spiegel-Seite | 80 |
-| `GET` | `/` — MJPEG-Strom | 81 |
+| `GET` | `/` — Display im Browser | 80 |
+| `GET` | `/` — Bildstrom | 81 |
 | `GET` | `/touch`, `/key`, `/copy` | 80 |
 | `POST` | `/paste` | 80 |
 | `GET` | `/api/live`, `/api/devices` | 80 |
 | `GET` | `/deye`, `/deye/read`, `/deye/write` | 80 |
 | `GET` | `/ota`, `/recovery` | 80 |
 | `POST` | `/ota`, `/ota/fs`, `/ota/reboot`, `/ota/rollback` | 80 |
-| `GET` | `/scan` · `POST /connect` | 80 |
-| `GET` | `/*` — Captive-Portal-Umleitung im AP-Betrieb | 80 |
+| `GET` | `/scan`, `POST /connect` — WLAN-Einrichtung | 80 |
+| `GET` | `/*` — Umleitung im AP-Betrieb | 80 |
 
 > [!CAUTION]
-> **Nichts davon ist authentifiziert** — weder der Spiegel, noch das Register-Werkzeug, noch OTA. Wer das Netz erreicht, kann den Wechselrichter umstellen und die Firmware ersetzen. Das Gerät gehört in ein vertrauenswürdiges Netz; für Fernzugriff den [WireGuard-Tunnel](Zeit-und-VPN) nutzen und keine Portweiterleitung einrichten.
+> **Nichts davon ist mit einem Passwort geschützt.** Nicht das Display im Browser, nicht das Register-Werkzeug, nicht das Firmware-Update. Wer dein Netz erreicht, kann den Wechselrichter umstellen und die Firmware ersetzen.
+>
+> Das ist eine bewusste Entscheidung für ein Gerät im eigenen, vertrauenswürdigen Heimnetz. Was du auf keinen Fall tun solltest: eine Portweiterleitung im Router einrichten, um von außen draufzukommen. Dafür gibt es den [WireGuard-Tunnel](Zeit-und-VPN#wireguard-tunnel).

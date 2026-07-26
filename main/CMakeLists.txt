@@ -1,0 +1,27 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "display.c"
+        "touch.c"
+        "lvgl_port.c"
+        "ui_flow.c"
+        "ui_settings.c"
+        "nvs_store.c"
+        "assets_fs.c"
+        "wifi_mgr.c"
+        "captive.c"
+        "web_mirror.c"
+        "ota.c"
+        "modbus_tcp.c"
+        "modbus_rtu.c"
+        "deye_ctrl.c"
+        "deye_web.c"
+        "mqtt_fwd.c"
+        "ntp_client.c"
+        "wg_client.c"
+        "fonts.c"
+    INCLUDE_DIRS "."
+    EMBED_TXTFILES "web_mirror.html" "recovery.html" "deye.html"
+    EMBED_FILES "montserrat_medium.ttf"
+    PRIV_REQUIRES nvs_flash esp_wifi esp_event esp_netif spiffs esp_http_server lwip esp_driver_jpeg app_update esp_driver_ledc esp_driver_uart mqtt esp_wireguard
+)

@@ -1,0 +1,97 @@
+# Deye-Display -- defaults applied on top of the board's sdkconfig.
+# Target board: GUITION JC4880P443C (ESP32-P4, 480x800 MIPI-DSI, GT911 touch).
+CONFIG_IDF_TARGET="esp32p4"
+
+# Some ESP32-P4 dev boards ship ECO2 silicon (rev < 3.0). The default IDF
+# target assumes rev 3.x and emits xespv2p2 instructions ECO2 cannot
+# decode. Pinning the lower min-rev keeps the binary compatible with both
+# ECO2 and rev3 silicon (safe lower bound, costs only minor optimizations).
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+
+# 16 MB flash.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Custom partition table -- default factory partition is only 1 MB, our
+# image with WiFi + LVGL is ~1.2 MB and growing.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+
+# 32 MB PSRAM -- required for the display framebuffer (480*800*2 = 768 KB).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# ---------------------------- LVGL 9 -------------------------------------
+# Color depth must match the panel framebuffer (RGB565).
+CONFIG_LV_COLOR_DEPTH_16=y
+
+# Enable the Montserrat sizes the Phase-1 UI uses.
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_22=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# Route lv_malloc through newlib's malloc, which on ESP-IDF picks up
+# both internal SRAM and PSRAM via heap_caps. Using LVGL's built-in
+# allocator would place a multi-hundred-KB static array in .bss, which
+# does not fit in the P4's 320 KB internal SRAM.
+# CONFIG_LV_USE_BUILTIN_MALLOC is not set
+CONFIG_LV_USE_CLIB_MALLOC=y
+
+# Use FreeRTOS-aware mutexes inside LVGL.
+CONFIG_LV_OS_FREERTOS=y
+
+# Hardware-accelerated 90° rotation via the ESP32-P4 PPA, used by
+# esp_lvgl_port for the portrait->landscape rotation.
+CONFIG_LVGL_PORT_ENABLE_PPA=y
+
+# lv_snapshot renders the live screen into a buffer; the P4 hardware JPEG
+# encoder then compresses it for the web mirror (see main/web_mirror.c).
+CONFIG_LV_USE_SNAPSHOT=y
+
+# Tiny-TTF: render the bundled Montserrat TTF at runtime so German umlauts
+# (ae/oe/ue/ss) work. The built-in bitmap montserrat fonts have no umlauts;
+# we use tiny-ttf for text and fall back to them for the FontAwesome symbols.
+CONFIG_LV_USE_TINY_TTF=y
+
+# Tiny-TTF rasterises glyphs at runtime and stores them in the LVGL cache.
+# The default cache size is 0 (disabled) -> tiny-ttf glyphs fail to render and
+# fall back to the bitmap font (umlauts show as boxes). Give it a real cache.
+CONFIG_LV_CACHE_DEF_SIZE=262144
+
+# ---------------------------- ESP-Hosted (WiFi via C6) -------------------
+# The JC4880P443C carries an ESP32-C6 on-module that does the WiFi/BT.
+# The P4 talks to it over SDIO; esp_hosted hands the standard
+# esp_wifi / esp_netif APIs through to the C6's stack.
+CONFIG_ESP_HOSTED_ENABLED=y
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+
+# Bigger main-task stack: WiFi+netif init + LVGL UI builds together at
+# boot push the default 3.5 KB main stack close to its limit.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Bigger system-event task stack: WiFi event handlers run here and the
+# default 2304 B is tight once scan-result handling is added.
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+
+# More LWIP sockets: two HTTP servers (:80 page/touch/ota, :81 MJPEG stream)
+# + DNS + Modbus-TCP need more than the default 10, or the web server starves.
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# Short TIME_WAIT: with 16 sockets shared between the two HTTP servers, MQTT,
+# WireGuard, DNS and the PERSISTENT Modbus-TCP worker sockets, a 60 s MSL (=120 s
+# TIME_WAIT) let closed HTTP connections (web-mirror touch polling, /api churn)
+# pile up and starve the pool until httpd stopped accepting (and large OTA
+# uploads got refused). 5 s MSL (=10 s TIME_WAIT) frees sockets fast; safe on LAN.
+CONFIG_LWIP_TCP_MSL=5000
+
+# Enable bridge support purely to flip LWIP_ESP_NETIF_DATA=1, so esp_netif stores
+# its handle in lwIP client-data (not netif->state). Required so the WireGuard
+# raw lwIP netif (state = wireguard_device) doesn't crash esp_netif's DHCP
+# ext-callback (Load access fault in esp_netif_internal_dhcpc_cb). See wg_client.
+CONFIG_ESP_NETIF_BRIDGE_EN=y

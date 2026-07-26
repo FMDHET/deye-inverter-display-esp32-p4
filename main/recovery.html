@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Deye Display &ndash; Recovery</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#0b0d10;color:#e5e7eb;margin:0;padding:18px;max-width:620px;margin:0 auto}
+  h1{font-size:21px;margin:.2em 0}
+  h2{font-size:15px;color:#9aa0a8;margin:1.4em 0 .4em;font-weight:600}
+  .card{background:#1c1f24;border:1px solid #2a2e35;border-radius:10px;padding:14px;margin:10px 0}
+  .kv{display:flex;justify-content:space-between;font-size:14px;padding:2px 0}
+  .kv span:first-child{color:#9aa0a8}
+  input[type=file]{width:100%;font-size:14px;margin:6px 0;color:#e5e7eb}
+  button{font-size:15px;padding:11px 14px;border-radius:9px;border:none;width:100%;margin:6px 0;color:#fff;font-weight:600;cursor:pointer}
+  .primary{background:#4ea8ff}.warn{background:#f5a23a}.danger{background:#e0564f}.ghost{background:#2a2e35}
+  .bar{height:10px;background:#2a2e35;border-radius:6px;overflow:hidden;margin:6px 0;display:none}
+  .bar>div{height:100%;width:0;background:#4cd97b;transition:width .15s}
+  #status{font-size:14px;color:#9aa0a8;min-height:1.2em;margin-top:8px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+  <h1>&#128295; Deye Display &ndash; Recovery</h1>
+
+  <div class="card" id="info">
+    <div class="kv"><span>Version</span><b id="ver">&hellip;</b></div>
+    <div class="kv"><span>Laufender Slot</span><b id="run">&hellip;</b></div>
+    <div class="kv"><span>Ziel-Slot (OTA)</span><b id="tgt">&hellip;</b></div>
+    <div class="kv"><span>Laufzeit</span><b id="upt">&hellip;</b></div>
+    <div class="kv"><span>IDF</span><b id="idf">&hellip;</b></div>
+  </div>
+
+  <h2>Firmware (firmware.bin)</h2>
+  <input type="file" id="fw" accept=".bin">
+  <div class="bar" id="fwbar"><div></div></div>
+  <button class="primary" onclick="flash('fw','/ota','fwbar')">Firmware flashen</button>
+
+  <h2>Dateisystem (storage.bin)</h2>
+  <input type="file" id="fs" accept=".bin">
+  <div class="bar" id="fsbar"><div></div></div>
+  <button class="primary" onclick="flash('fs','/ota/fs','fsbar')">Dateisystem flashen</button>
+
+  <h2>Aktionen</h2>
+  <button class="warn"   onclick="act('/ota/rollback','Auf vorigen Slot wechseln und neu starten?')">&#8634; Auf vorigen Slot wechseln (Rollback)</button>
+  <button class="ghost"  onclick="act('/ota/reboot','Neu starten?')">Neustart</button>
+
+  <div id="status"></div>
+
+<script>
+  var S = document.getElementById('status');
+  function setStatus(t){ S.textContent = t; }
+
+  function fmtUptime(s){
+    s = s|0;
+    var d = (s/86400)|0; s -= d*86400;
+    var h = (s/3600)|0;  s -= h*3600;
+    var m = (s/60)|0;    var sec = s - m*60;
+    function p(n){ return (n<10?'0':'')+n; }
+    return d + ' T  ' + p(h) + ' Std  ' + p(m) + ' Min  ' + p(sec) + ' Sek';
+  }
+
+  function loadInfo(){
+    fetch('/ota').then(function(r){return r.json();}).then(function(j){
+      document.getElementById('ver').textContent = j.version + ' (#' + j.build + ')';
+      document.getElementById('run').textContent = j.running;
+      document.getElementById('tgt').textContent = j.target_slot;
+      document.getElementById('upt').textContent = (j.uptime != null) ? fmtUptime(j.uptime) : '-';
+      document.getElementById('idf').textContent = j.idf;
+    }).catch(function(){ setStatus('Geraet nicht erreichbar.'); });
+  }
+
+  function flash(inputId, url, barId){
+    var f = document.getElementById(inputId).files[0];
+    if(!f){ setStatus('Bitte zuerst eine Datei waehlen.'); return; }
+    var bar = document.getElementById(barId), fill = bar.firstElementChild;
+    bar.style.display='block'; fill.style.width='0';
+    setStatus('Lade ' + f.name + ' (' + Math.round(f.size/1024) + ' KB) hoch …');
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.upload.onprogress = function(e){
+      if(e.lengthComputable){ fill.style.width = (e.loaded/e.total*100) + '%'; }
+    };
+    xhr.onload = function(){ setStatus(xhr.responseText || ('Fertig (HTTP ' + xhr.status + ')')); setTimeout(loadInfo, 4000); };
+    xhr.onerror = function(){ setStatus('Verbindung getrennt – das Geraet startet vermutlich neu. Seite gleich neu laden.'); };
+    xhr.setRequestHeader('Content-Type','application/octet-stream');
+    xhr.send(f);
+  }
+
+  function act(url, confirmMsg){
+    if(!confirm(confirmMsg)) return;
+    setStatus('…');
+    fetch(url, {method:'POST'}).then(function(r){return r.text();})
+      .then(function(t){ setStatus(t); })
+      .catch(function(){ setStatus('Befehl gesendet, Geraet startet neu …'); });
+  }
+
+  loadInfo();
+</script>
+</body>
+</html>

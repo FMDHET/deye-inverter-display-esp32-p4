@@ -1,0 +1,24 @@
+.pio
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+sdkconfig.waveshare-p4
+managed_components
+dependencies.lock
+.DS_Store
+
+# Generated each build by scripts/build_number.py (version.json is the
+# tracked source of truth; these are derived artifacts).
+main/build_info.h
+data/build.txt
+scripts/__pycache__
+
+# Local working material -- screenshots, ad-hoc register dumps. The dumps that
+# document the charge/discharge registers are kept in docs/register-dumps/.
+input/
+Debug/
+
+# Vendor documents (Fronius register maps). Not ours to redistribute; download
+# them from Fronius if you need them.
+register tables/*.xlsx

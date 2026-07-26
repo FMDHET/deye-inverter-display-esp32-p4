@@ -1,0 +1,1179 @@
+{
+  "deviceTypeId": "953fecc4-839f-494a-906c-0330ec007419",
+  "name": "DSZ16DZ(E)",
+  "version": 3,
+  "manufacturer_reg_number": 464515,
+  "meter_type_reg_number": 464525,
+  "serial_no_reg_number": 464513,
+  "identification_registers": [
+    {
+      "register_number": 464515,
+      "value": [
+        13
+      ]
+    },
+    {
+      "register_number": 464525,
+      "value": [
+        3
+      ]
+    },
+    {
+      "register_number": 464513
+    }
+  ],
+  "default_RTU_registers": [
+    30001,
+    30003,
+    30005,
+    30007,
+    30009,
+    30011,
+    30053,
+    30073,
+    30075
+  ],
+  "default_MQTT_registers": [
+    30053,
+    30073,
+    30075
+  ],
+  "default_history_registers": [
+    30053,
+    30073,
+    30075
+  ],
+  "registers": [
+    {
+      "number": 30001,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Voltage of L1 to N"
+        }
+      ],
+      "unit": "Volt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 0,
+      "length": 2
+    },
+    {
+      "number": 30003,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Voltage of L2 to N"
+        }
+      ],
+      "unit": "Volt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 2,
+      "length": 2
+    },
+    {
+      "number": 30005,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Voltage of L3 to N"
+        }
+      ],
+      "unit": "Volt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 4,
+      "length": 2
+    },
+    {
+      "number": 30007,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L1 Current"
+        }
+      ],
+      "unit": "A",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 6,
+      "length": 2
+    },
+    {
+      "number": 30009,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L2 Current"
+        }
+      ],
+      "unit": "A",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 8,
+      "length": 2
+    },
+    {
+      "number": 30011,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L3 Current"
+        }
+      ],
+      "unit": "A",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 10,
+      "length": 2
+    },
+    {
+      "number": 30013,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L1 active power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 12,
+      "length": 2
+    },
+    {
+      "number": 30015,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L2 active power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 14,
+      "length": 2
+    },
+    {
+      "number": 30017,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L3 active power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 16,
+      "length": 2
+    },
+    {
+      "number": 30019,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L1 apparent power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 18,
+      "length": 2
+    },
+    {
+      "number": 30021,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L2 apparent power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 20,
+      "length": 2
+    },
+    {
+      "number": 30023,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L3 apparent power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 22,
+      "length": 2
+    },
+    {
+      "number": 30025,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L1 reactive power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 24,
+      "length": 2
+    },
+    {
+      "number": 30027,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L2 reactive power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 26,
+      "length": 2
+    },
+    {
+      "number": 30029,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L3 reactive power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 28,
+      "length": 2
+    },
+    {
+      "number": 30031,
+      "scaling_factor": 1000,
+      "description": [
+        {
+          "en": "L1 power factor"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 30,
+      "length": 2
+    },
+    {
+      "number": 30033,
+      "scaling_factor": 1000,
+      "description": [
+        {
+          "en": "L2 power factor"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 32,
+      "length": 2
+    },
+    {
+      "number": 30035,
+      "scaling_factor": 1000,
+      "description": [
+        {
+          "en": "L3 power factor"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 34,
+      "length": 2
+    },
+    {
+      "number": 30037,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L1 cos(phi)"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 36,
+      "length": 2
+    },
+    {
+      "number": 30039,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L2 cos(phi)"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 38,
+      "length": 2
+    },
+    {
+      "number": 30041,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L3 cos(phi)"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 40,
+      "length": 2
+    },
+    {
+      "number": 30053,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Total active power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 52,
+      "length": 2
+    },
+    {
+      "number": 30055,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Total apparent power"
+        }
+      ],
+      "unit": "VA",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 54,
+      "length": 2
+    },
+    {
+      "number": 30057,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Total reactive power"
+        }
+      ],
+      "unit": "Var",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 56,
+      "length": 2
+    },
+    {
+      "number": 30063,
+      "scaling_factor": 1000,
+      "description": [
+        {
+          "en": "Total power factor"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 62,
+      "length": 2
+    },
+    {
+      "number": 30065,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total cos(phi)"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 64,
+      "length": 2
+    },
+    {
+      "number": 30071,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Frequency"
+        }
+      ],
+      "unit": "Hz",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 70,
+      "length": 2
+    },
+    {
+      "number": 30073,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total imported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 72,
+      "length": 2
+    },
+    {
+      "number": 30075,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total exported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 74,
+      "length": 2
+    },
+    {
+      "number": 30077,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total imported active energy tariff 2"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 76,
+      "length": 2
+    },
+    {
+      "number": 30081,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Current at N conductor"
+        }
+      ],
+      "unit": "A",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 80,
+      "length": 2
+    },
+    {
+      "number": 30083,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total reactive energy"
+        }
+      ],
+      "unit": "kvarh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 82,
+      "length": 2
+    },
+    {
+      "number": 30085,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total neg. reactive energy"
+        }
+      ],
+      "unit": "kvarh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 84,
+      "length": 2
+    },
+    {
+      "number": 30087,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Voltage of L1 to L2"
+        }
+      ],
+      "unit": "Volt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 86,
+      "length": 2
+    },
+    {
+      "number": 30089,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Voltage of L2 to L3"
+        }
+      ],
+      "unit": "Volt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 88,
+      "length": 2
+    },
+    {
+      "number": 30091,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Voltage of L3 to L1"
+        }
+      ],
+      "unit": "Volt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 90,
+      "length": 2
+    },
+    {
+      "number": 30097,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Resettable total imported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 96,
+      "length": 2
+    },
+    {
+      "number": 30099,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Resettable total exported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 98,
+      "length": 2
+    },
+    {
+      "number": 30101,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total imported active energy tariff 2"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 100,
+      "length": 2
+    },
+    {
+      "number": 30103,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total imported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 102,
+      "length": 2
+    },
+    {
+      "number": 30105,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total exported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 104,
+      "length": 2
+    },
+    {
+      "number": 30107,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total imported active energy tariff 2"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 106,
+      "length": 2
+    },
+    {
+      "number": 30109,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total imported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 108,
+      "length": 2
+    },
+    {
+      "number": 30111,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total exported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 110,
+      "length": 2
+    },
+    {
+      "number": 30113,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total imported active energy tariff 2"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 112,
+      "length": 2
+    },
+    {
+      "number": 30115,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total imported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 114,
+      "length": 2
+    },
+    {
+      "number": 30117,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Imported active energy tariff 3"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 116,
+      "length": 2
+    },
+    {
+      "number": 30119,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Resettable imported active energy tariff 3"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 118,
+      "length": 2
+    },
+    {
+      "number": 30121,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Exported active energy tariff 3"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 120,
+      "length": 2
+    },
+    {
+      "number": 30123,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Resettable exported active energy tariff 3"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 122,
+      "length": 2
+    },
+    {
+      "number": 30133,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Imported active energy tariff 4"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 132,
+      "length": 2
+    },
+    {
+      "number": 30135,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Resettable imported active energy tariff 4"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 134,
+      "length": 2
+    },
+    {
+      "number": 30137,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Exported active energy tariff 4"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 136,
+      "length": 2
+    },
+    {
+      "number": 30139,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Resettable exported active energy tariff 4"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 138,
+      "length": 2
+    },
+    {
+      "number": 30141,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L1 total imported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 140,
+      "length": 2
+    },
+    {
+      "number": 30143,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L2 total imported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 142,
+      "length": 2
+    },
+    {
+      "number": 30145,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L3 total imported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 144,
+      "length": 2
+    },
+    {
+      "number": 30147,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L1 total exported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 146,
+      "length": 2
+    },
+    {
+      "number": 30149,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L2 total exported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 148,
+      "length": 2
+    },
+    {
+      "number": 30151,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L3 total exported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 150,
+      "length": 2
+    },
+    {
+      "number": 40019,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Modbus parameters"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 18,
+      "length": 2
+    },
+    {
+      "number": 40021,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Modbus address"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 20,
+      "length": 2
+    },
+    {
+      "number": 40029,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Modbus baudrate"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 28,
+      "length": 2
+    },
+    {
+      "number": 40031,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Data format"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 30,
+      "length": 2
+    },
+    {
+      "number": 40087,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "S0 pulse width for import"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 86,
+      "length": 2
+    },
+    {
+      "number": 40089,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "S0 pulse width for export"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 88,
+      "length": 2
+    },
+    {
+      "number": 40091,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Selected tariff"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 90,
+      "length": 2
+    },
+    {
+      "number": 40093,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Reset total imported active energy"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 92,
+      "length": 2
+    },
+    {
+      "number": 40095,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Reset total exported active energy"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 94,
+      "length": 2
+    },
+    {
+      "number": 40097,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Reset total imported active energy tariff 1"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 96,
+      "length": 2
+    },
+    {
+      "number": 40099,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Reset total exported active energy tariff 1"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 98,
+      "length": 2
+    },
+    {
+      "number": 40101,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Reset total imported active energy tariff 2"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 100,
+      "length": 2
+    },
+    {
+      "number": 40103,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Reset total exported active energy tariff 2"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 102,
+      "length": 2
+    },
+    {
+      "number": 40105,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Reset total imported active energy tariff 3"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 104,
+      "length": 2
+    },
+    {
+      "number": 40107,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Reset total exported active energy tariff 3"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 106,
+      "length": 2
+    },
+    {
+      "number": 40109,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Reset total imported active energy tariff 4"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 108,
+      "length": 2
+    },
+    {
+      "number": 40111,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Reset total exported active energy tariff 4"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 110,
+      "length": 2
+    },
+    {
+      "number": 463761,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "S0 pulse conversion for import active energy"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 63760,
+      "length": 2
+    },
+    {
+      "number": 463763,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "S0 pulse conversion for export active energy"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 63762,
+      "length": 2
+    },
+    {
+      "number": 463765,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "CT ratio"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 63764,
+      "length": 2
+    },
+    {
+      "number": 463767,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Measurement direction"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 63766,
+      "length": 2
+    },
+    {
+      "number": 464513,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Serial number"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 64512,
+      "length": 2
+    },
+    {
+      "number": 464515,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Manufacturing code"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 64514,
+      "length": 2
+    },
+    {
+      "number": 464521,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Manufacturer name 1"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 64520,
+      "length": 2
+    },
+    {
+      "number": 464523,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Manufacturer name 2"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 64522,
+      "length": 2
+    },
+    {
+      "number": 464525,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Meter type"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 64524,
+      "length": 2
+    },
+    {
+      "number": 464527,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "FW version"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 64526,
+      "length": 2
+    }
+  ]
+}

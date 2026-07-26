@@ -1,0 +1,12 @@
+# Name,   Type, SubType, Offset,    Size,     Flags
+# OTA layout for the 16 MB flash on the JC4880P443C: two 4 MB app slots so the
+# device can flash itself over WiFi (POST /ota -> esp_ota). NVS keeps its
+# 0x9000 offset so saved WiFi credentials survive the repartition.
+nvs,      data, nvs,     0x9000,    0x6000
+otadata,  data, ota,     0xf000,    0x2000
+phy_init, data, phy,     0x11000,   0x1000
+ota_0,    app,  ota_0,   0x20000,   0x400000
+ota_1,    app,  ota_1,   0x420000,  0x400000
+# Versioned read-only asset filesystem (build.txt + future UI assets).
+# Image built by scripts/fs_image.py, flashed via `-t flashfs`.
+storage,  data, spiffs,  0x820000,  0x100000

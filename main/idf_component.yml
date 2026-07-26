@@ -1,0 +1,27 @@
+## Component dependencies for Deye-Display
+## Fetched automatically by the ESP-IDF Component Manager on first build.
+dependencies:
+  idf:
+    version: ">=5.3,<6.0"
+
+  ## MIPI-DSI panel driver. ST7701 is the controller on the GUITION
+  ## JC4880P443C 4.3" 480x800 IPS panel.
+  espressif/esp_lcd_st7701: "^2.0.0"
+
+  ## Capacitive touch driver for GT911 (I2C, addr 0x5D default).
+  espressif/esp_lcd_touch_gt911: "^1.1.0"
+
+  ## LVGL 9. All build options come from menuconfig / sdkconfig.defaults
+  ## (CONFIG_LV_*), so no custom lv_conf.h is required.
+  lvgl/lvgl: "^9.2.0"
+
+  ## Espressif's tested LVGL port. Handles MIPI-DSI frame buffers,
+  ## rotation, and tear-free buffering on the ESP32-P4 -- replaces the
+  ## hand-rolled flush/rotation path that produced stride artifacts.
+  espressif/esp_lvgl_port: "^2.4.0"
+
+  ## WiFi via the on-module ESP32-C6: P4 has no built-in radio, so
+  ## esp_hosted runs the WiFi/network stack on the C6 over SDIO and
+  ## esp_wifi_remote forwards the standard esp_wifi API to it.
+  espressif/esp_hosted:        "~2.12.0"
+  espressif/esp_wifi_remote:   "*"

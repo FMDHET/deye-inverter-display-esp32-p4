@@ -1,0 +1,101 @@
+{
+  "deviceTypeId": "b6e2a1c7-3d4f-4a8b-9c1e-7f2a5d8e0c31",
+  "name": "Deye SUN-xK-SG04LP3 (Hybrid)",
+  "version": 1,
+  "manufacturer_reg_number": 0,
+  "meter_type_reg_number": 0,
+  "serial_no_reg_number": 3,
+  "identification_registers": [
+    { "register_number": 3 }
+  ],
+  "default_RTU_registers": [
+    588, 590, 619, 625, 636, 653, 672, 673, 587, 591
+  ],
+  "default_MQTT_registers": [
+    588, 590, 619, 653, 672, 673
+  ],
+  "default_history_registers": [
+    529, 526, 520, 521, 514, 515
+  ],
+  "_notes": "Holding registers (FC03), transport-independent (RTU or TCP). Map from the 'Modbus Deye - MQTT HA' project (include/config.h). scaling_factor divides the raw value (e.g. 10 => raw/10). 'address' equals 'number' (0-based). Sign + U32 layout noted per entry; U32 = 2 registers, low word first.",
+  "registers": [
+    { "number": 3,   "scaling_factor": 1,   "description": [{ "en": "Serial number (10 ASCII bytes)" }],            "unit": "",     "reg_type": "MB_PARAM_HOLDING", "address": 3,   "length": 5 },
+
+    { "number": 142, "scaling_factor": 1,   "description": [{ "en": "Work mode (0=SellFirst 1=ZeroExportLoad 2=ZeroExportCT)" }], "unit": "", "reg_type": "MB_PARAM_HOLDING", "address": 142, "length": 1 },
+    { "number": 148, "scaling_factor": 1,   "description": [{ "en": "TOU time slot 0 (HH*100+MM); 6 slots from 148" }], "unit": "", "reg_type": "MB_PARAM_HOLDING", "address": 148, "length": 1 },
+    { "number": 154, "scaling_factor": 1,   "description": [{ "en": "TOU power slot 0 (W); 6 slots from 154" }],     "unit": "W",  "reg_type": "MB_PARAM_HOLDING", "address": 154, "length": 1 },
+    { "number": 166, "scaling_factor": 1,   "description": [{ "en": "TOU target SOC slot 0 (%); 6 slots from 166" }], "unit": "%", "reg_type": "MB_PARAM_HOLDING", "address": 166, "length": 1 },
+    { "number": 172, "scaling_factor": 1,   "description": [{ "en": "TOU grid-charge slot 0 (0/1); 6 slots from 172" }], "unit": "", "reg_type": "MB_PARAM_HOLDING", "address": 172, "length": 1 },
+
+    { "number": 500, "scaling_factor": 1,   "description": [{ "en": "Run state (0=standby 1=selfcheck 2=normal 3=fault)" }], "unit": "", "reg_type": "MB_PARAM_HOLDING", "address": 500, "length": 1 },
+    { "number": 502, "scaling_factor": 10,  "description": [{ "en": "Day active energy (S16)" }],                     "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 502, "length": 1 },
+    { "number": 506, "scaling_factor": 10,  "description": [{ "en": "Total active energy (U32, low word first)" }],  "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 506, "length": 2 },
+    { "number": 514, "scaling_factor": 10,  "description": [{ "en": "Day battery charge" }],                          "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 514, "length": 1 },
+    { "number": 515, "scaling_factor": 10,  "description": [{ "en": "Day battery discharge" }],                       "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 515, "length": 1 },
+    { "number": 516, "scaling_factor": 10,  "description": [{ "en": "Total battery charge (U32)" }],                  "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 516, "length": 2 },
+    { "number": 518, "scaling_factor": 10,  "description": [{ "en": "Total battery discharge (U32)" }],               "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 518, "length": 2 },
+    { "number": 520, "scaling_factor": 10,  "description": [{ "en": "Day grid import" }],                             "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 520, "length": 1 },
+    { "number": 521, "scaling_factor": 10,  "description": [{ "en": "Day grid export" }],                             "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 521, "length": 1 },
+    { "number": 522, "scaling_factor": 10,  "description": [{ "en": "Total grid import (U32)" }],                     "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 522, "length": 2 },
+    { "number": 524, "scaling_factor": 10,  "description": [{ "en": "Total grid export (U32)" }],                     "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 524, "length": 2 },
+    { "number": 526, "scaling_factor": 10,  "description": [{ "en": "Day load energy" }],                            "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 526, "length": 1 },
+    { "number": 527, "scaling_factor": 10,  "description": [{ "en": "Total load energy (U32)" }],                     "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 527, "length": 2 },
+    { "number": 529, "scaling_factor": 10,  "description": [{ "en": "Day PV energy" }],                              "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 529, "length": 1 },
+    { "number": 534, "scaling_factor": 10,  "description": [{ "en": "Total PV energy (U32)" }],                       "unit": "kWh", "reg_type": "MB_PARAM_HOLDING", "address": 534, "length": 2 },
+
+    { "number": 540, "scaling_factor": 10,  "description": [{ "en": "DC transformer temp (S16, raw/10 - 100 = degC)" }], "unit": "degC", "reg_type": "MB_PARAM_HOLDING", "address": 540, "length": 1 },
+    { "number": 541, "scaling_factor": 10,  "description": [{ "en": "AC/IGBT radiator temp (S16, raw/10 - 100 = degC)" }], "unit": "degC", "reg_type": "MB_PARAM_HOLDING", "address": 541, "length": 1 },
+    { "number": 552, "scaling_factor": 1,   "description": [{ "en": "Relay status bits (bit0 INV, bit2 grid)" }],    "unit": "",    "reg_type": "MB_PARAM_HOLDING", "address": 552, "length": 1 },
+    { "number": 555, "scaling_factor": 1,   "description": [{ "en": "Fault word 1" }],                               "unit": "",    "reg_type": "MB_PARAM_HOLDING", "address": 555, "length": 1 },
+    { "number": 556, "scaling_factor": 1,   "description": [{ "en": "Fault word 2" }],                               "unit": "",    "reg_type": "MB_PARAM_HOLDING", "address": 556, "length": 1 },
+    { "number": 557, "scaling_factor": 1,   "description": [{ "en": "Fault word 3" }],                               "unit": "",    "reg_type": "MB_PARAM_HOLDING", "address": 557, "length": 1 },
+    { "number": 558, "scaling_factor": 1,   "description": [{ "en": "Fault word 4" }],                               "unit": "",    "reg_type": "MB_PARAM_HOLDING", "address": 558, "length": 1 },
+
+    { "number": 586, "scaling_factor": 10,  "description": [{ "en": "Battery temperature (S16, raw/10 [-100 on some FW])" }], "unit": "degC", "reg_type": "MB_PARAM_HOLDING", "address": 586, "length": 1 },
+    { "number": 587, "scaling_factor": 100, "description": [{ "en": "Battery voltage (U16)" }],                       "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 587, "length": 1 },
+    { "number": 588, "scaling_factor": 1,   "description": [{ "en": "Battery SOC" }],                                 "unit": "%",   "reg_type": "MB_PARAM_HOLDING", "address": 588, "length": 1 },
+    { "number": 590, "scaling_factor": 1,   "description": [{ "en": "Battery power (S16, + discharge / - charge)" }], "unit": "W",  "reg_type": "MB_PARAM_HOLDING", "address": 590, "length": 1 },
+    { "number": 591, "scaling_factor": 100, "description": [{ "en": "Battery current (S16)" }],                       "unit": "A",   "reg_type": "MB_PARAM_HOLDING", "address": 591, "length": 1 },
+
+    { "number": 598, "scaling_factor": 10,  "description": [{ "en": "Grid voltage L1" }],                            "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 598, "length": 1 },
+    { "number": 599, "scaling_factor": 10,  "description": [{ "en": "Grid voltage L2" }],                            "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 599, "length": 1 },
+    { "number": 600, "scaling_factor": 10,  "description": [{ "en": "Grid voltage L3" }],                            "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 600, "length": 1 },
+    { "number": 609, "scaling_factor": 100, "description": [{ "en": "Grid frequency" }],                             "unit": "Hz",  "reg_type": "MB_PARAM_HOLDING", "address": 609, "length": 1 },
+    { "number": 616, "scaling_factor": 1,   "description": [{ "en": "External CT power L1 (S16)" }],                  "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 616, "length": 1 },
+    { "number": 617, "scaling_factor": 1,   "description": [{ "en": "External CT power L2 (S16)" }],                  "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 617, "length": 1 },
+    { "number": 618, "scaling_factor": 1,   "description": [{ "en": "External CT power L3 (S16)" }],                  "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 618, "length": 1 },
+    { "number": 619, "scaling_factor": 1,   "description": [{ "en": "External CT total power (S16, + import / - export) -> GRID/Netz" }], "unit": "W", "reg_type": "MB_PARAM_HOLDING", "address": 619, "length": 1 },
+    { "number": 622, "scaling_factor": 1,   "description": [{ "en": "Grid power L1 internal (S16)" }],                "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 622, "length": 1 },
+    { "number": 623, "scaling_factor": 1,   "description": [{ "en": "Grid power L2 internal (S16)" }],                "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 623, "length": 1 },
+    { "number": 624, "scaling_factor": 1,   "description": [{ "en": "Grid power L3 internal (S16)" }],                "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 624, "length": 1 },
+    { "number": 625, "scaling_factor": 1,   "description": [{ "en": "Grid total power internal (S16)" }],             "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 625, "length": 1 },
+
+    { "number": 627, "scaling_factor": 10,  "description": [{ "en": "Inverter voltage L1" }],                        "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 627, "length": 1 },
+    { "number": 628, "scaling_factor": 10,  "description": [{ "en": "Inverter voltage L2" }],                        "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 628, "length": 1 },
+    { "number": 629, "scaling_factor": 10,  "description": [{ "en": "Inverter voltage L3" }],                        "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 629, "length": 1 },
+    { "number": 630, "scaling_factor": 100, "description": [{ "en": "Inverter current L1 (S16)" }],                   "unit": "A",   "reg_type": "MB_PARAM_HOLDING", "address": 630, "length": 1 },
+    { "number": 631, "scaling_factor": 100, "description": [{ "en": "Inverter current L2 (S16)" }],                   "unit": "A",   "reg_type": "MB_PARAM_HOLDING", "address": 631, "length": 1 },
+    { "number": 632, "scaling_factor": 100, "description": [{ "en": "Inverter current L3 (S16)" }],                   "unit": "A",   "reg_type": "MB_PARAM_HOLDING", "address": 632, "length": 1 },
+    { "number": 633, "scaling_factor": 1,   "description": [{ "en": "Inverter power L1 (S16)" }],                     "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 633, "length": 1 },
+    { "number": 634, "scaling_factor": 1,   "description": [{ "en": "Inverter power L2 (S16)" }],                     "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 634, "length": 1 },
+    { "number": 635, "scaling_factor": 1,   "description": [{ "en": "Inverter power L3 (S16)" }],                     "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 635, "length": 1 },
+    { "number": 636, "scaling_factor": 1,   "description": [{ "en": "Inverter total power (S16)" }],                  "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 636, "length": 1 },
+    { "number": 638, "scaling_factor": 100, "description": [{ "en": "Inverter frequency" }],                          "unit": "Hz",  "reg_type": "MB_PARAM_HOLDING", "address": 638, "length": 1 },
+
+    { "number": 644, "scaling_factor": 10,  "description": [{ "en": "Load voltage L1" }],                            "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 644, "length": 1 },
+    { "number": 645, "scaling_factor": 10,  "description": [{ "en": "Load voltage L2" }],                            "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 645, "length": 1 },
+    { "number": 646, "scaling_factor": 10,  "description": [{ "en": "Load voltage L3" }],                            "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 646, "length": 1 },
+    { "number": 650, "scaling_factor": 1,   "description": [{ "en": "Load power L1 (S16)" }],                         "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 650, "length": 1 },
+    { "number": 651, "scaling_factor": 1,   "description": [{ "en": "Load power L2 (S16)" }],                         "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 651, "length": 1 },
+    { "number": 652, "scaling_factor": 1,   "description": [{ "en": "Load power L3 (S16)" }],                         "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 652, "length": 1 },
+    { "number": 653, "scaling_factor": 1,   "description": [{ "en": "Load total power (S16) -> HAUS/house" }],        "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 653, "length": 1 },
+    { "number": 655, "scaling_factor": 100, "description": [{ "en": "Load frequency" }],                             "unit": "Hz",  "reg_type": "MB_PARAM_HOLDING", "address": 655, "length": 1 },
+
+    { "number": 672, "scaling_factor": 1,   "description": [{ "en": "PV1 power -> PV" }],                            "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 672, "length": 1 },
+    { "number": 673, "scaling_factor": 1,   "description": [{ "en": "PV2 power -> PV" }],                            "unit": "W",   "reg_type": "MB_PARAM_HOLDING", "address": 673, "length": 1 },
+    { "number": 676, "scaling_factor": 10,  "description": [{ "en": "PV1 voltage" }],                               "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 676, "length": 1 },
+    { "number": 677, "scaling_factor": 10,  "description": [{ "en": "PV1 current" }],                               "unit": "A",   "reg_type": "MB_PARAM_HOLDING", "address": 677, "length": 1 },
+    { "number": 678, "scaling_factor": 10,  "description": [{ "en": "PV2 voltage" }],                               "unit": "V",   "reg_type": "MB_PARAM_HOLDING", "address": 678, "length": 1 },
+    { "number": 679, "scaling_factor": 10,  "description": [{ "en": "PV2 current" }],                               "unit": "A",   "reg_type": "MB_PARAM_HOLDING", "address": 679, "length": 1 }
+  ]
+}

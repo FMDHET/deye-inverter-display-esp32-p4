@@ -1,0 +1,840 @@
+<!DOCTYPE html><html lang="de"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deye Modbus Register</title>
+<style>
+  :root { --bg:#0f1115; --fg:#e6e6e6; --mut:#8a8f99; --acc:#3aa675; --warn:#d4823b;
+          --err:#d44b3b; --tbg:#171a21; --bd:#2a2f3a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;
+         color:var(--fg); background:var(--bg); padding:16px; }
+  h1 { margin:0 0 4px; font-size:18px; }
+  h2 { margin:0 0 8px; font-size:14px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; }
+  h3 { margin:0 0 6px; font-size:13px; color:var(--mut); }
+  .sub { color:var(--mut); margin:0 0 14px; font-size:12px; }
+  .card { background:var(--tbg); border:1px solid var(--bd); border-radius:8px; padding:12px; margin-bottom:14px; }
+  .card > summary { cursor:pointer; }
+  .card > .body { padding-top:8px; }
+  .hint { color:var(--mut); font-size:12px; }
+  code { color:#9bb1d1; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--bd); font-variant-numeric:tabular-nums; }
+  th { color:var(--mut); font-weight:500; font-size:12px; position:sticky; top:0; background:var(--tbg); z-index:2; box-shadow:inset 0 -1px 0 var(--bd); }
+  .tscroll { max-height:60vh; overflow:auto; }
+  #probeResult { table-layout:fixed; width:max-content; min-width:100%; }
+  #probeResult td { white-space:normal; overflow-wrap:anywhere; vertical-align:top; }
+  #probeResult th { user-select:none; }
+  #probeResult th .grip { position:absolute; top:0; right:0; width:8px; height:100%;
+                          cursor:col-resize; }
+  #probeResult th .grip:hover { background:var(--acc); opacity:.6; }
+  button { background:#2a2f3a; color:var(--fg); border:1px solid var(--bd); border-radius:5px;
+           padding:5px 12px; cursor:pointer; font-size:12px; }
+  button.primary { background:var(--acc); color:#021; border-color:var(--acc); font-weight:600; }
+  input { background:#222632; color:var(--fg); border:1px solid var(--bd); border-radius:5px;
+          padding:4px 8px; font-size:13px; font-variant-numeric:tabular-nums; }
+  .formrow { display:flex; gap:12px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+  .formrow label { color:var(--mut); font-size:12px; }
+</style></head>
+<body>
+<h1>Deye Modbus Register</h1>
+<p class="sub">Holding-Register (FC03) des Wechselrichters lesen/schreiben — über den RTU-Master-Bus.</p>
+    <p class="hint" style="margin:0 0 10px 0;">
+      Liest beliebige Holding-Register (FC03) vom Deye. Hilft beim Verifizieren ob
+      TOU-Writes "gestickt" sind und welche Adressen welchen Wert haben.
+      Tipp: <code>148</code>/12 zeigt TOU-Time + TOU-Power, <code>166</code>/12 SOC + Charge-Bit,
+      <code>142</code>/6 Energy-Mode + Work-Mode + Solar-Sell.
+    </p>
+    <div class="formrow">
+      <label for="probeAddr">Adresse</label>
+      <input type="number" id="probeAddr" min="0" max="65535" step="1" value="142" style="width:100px;">
+      <label style="min-width:0;">Anzahl</label>
+      <input type="number" id="probeCount" min="1" max="2000" step="1" value="12" style="width:80px;">
+      <button class="primary" onclick="probeRead()">Lesen</button>
+      <span id="probeStatus" style="color:var(--mut);font-size:12px;"></span>
+    </div>
+    <div class="tscroll" style="margin-top:10px;">
+    <table id="probeResult">
+      <thead><tr>
+        <th style="width:56px;">Adr</th><th style="width:92px;">Hex</th>
+        <th style="width:84px;">Dez (U16)</th><th style="width:84px;">Dez (S16)</th>
+        <th style="width:230px;">Bedeutung</th><th style="width:320px;">Interpretation</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+    <div class="formrow" style="margin-top:14px;">
+      <label for="wrAddr">Schreiben (Adr/Wert)</label>
+      <input type="number" id="wrAddr" min="0" max="65535" step="1" style="width:100px;">
+      <input type="number" id="wrVal" min="0" max="65535" step="1" style="width:100px;">
+      <button onclick="probeWrite()">Schreiben (FC16)</button>
+      <span class="hint">&#9888; vorher genau wissen was die Adresse tut!</span>
+    </div>
+
+    <hr style="border:0;border-top:1px solid var(--bd);margin:16px 0;">
+    <h3 style="margin:0 0 6px 0;font-size:13px;color:var(--mut);">Register-Backup (Excel-Export / Import)</h3>
+    <p class="hint" style="margin:0 0 10px 0;">
+      <b>Export:</b> liest den Adressbereich komplett aus (FC03) und speichert ihn als
+      CSV (in Excel oeffnenbar). Spalten: <code>addr;value;hex;signed;name;interp</code>
+      (<code>interp</code> = Klartext-Bedeutung wie im Probe-Tool).<br>
+      <b>Import:</b> schreibt genau die Zeilen aus der Datei per FC16 in den
+      Wechselrichter &ndash; als Wert wird immer die Spalte <code>signed</code>
+      genommen (negative Werte werden korrekt auf U16 umgerechnet).
+      &#9888; In Excel vorher die Zeilen entfernen, die NICHT geschrieben werden
+      sollen (Mess-/Statusregister sind meist nur lesbar).
+    </p>
+    <div class="formrow">
+      <label for="expFrom">Bereich (von / bis)</label>
+      <input type="number" id="expFrom" min="0" max="65535" step="1" value="0" style="width:90px;">
+      <span style="color:var(--mut);">bis</span>
+      <input type="number" id="expTo" min="0" max="65535" step="1" value="749" style="width:90px;">
+      <button class="primary" onclick="exportRegs()">&#11015; Export (CSV)</button>
+      <button onclick="document.getElementById('impFile').click()">&#11014; Import &hellip;</button>
+      <input type="file" id="impFile" accept=".csv,.txt" style="display:none;" onchange="importRegs(this)">
+    </div>
+    <div class="formrow" style="margin-top:6px;">
+      <span id="ioStatus" style="color:var(--mut);font-size:12px;"></span>
+    </div>
+<script>
+const REG_INFO = (() => {
+  const i = {};
+  const opt    = (addr, name, options) => { i[addr] = {name, options}; };
+  const scaled = (addr, name, factor, unit, dec) => {
+    i[addr] = {name, format: (x) => (x * factor).toFixed(dec || 0) + ' ' + unit};
+  };
+  // Deye-Temperatur: raw * 0.1 - 100. Raw 1247 -> 24,7 C.
+  const tempK = (addr, name) => {
+    i[addr] = {name, format: (x) => (x * 0.1 - 100).toFixed(1) + ' °C'};
+  };
+
+  // Batterie-Lade-Voltages (LFP 16S typische Werte)
+  scaled(100, 'Battery Absorption V',     0.01, 'V', 2);
+  scaled(101, 'Battery Float V',          0.01, 'V', 2);
+  scaled(108, 'Battery Max Charge Current',    1, 'A');
+  scaled(109, 'Battery Max Discharge Current', 1, 'A');
+  scaled(118, 'Battery Shutdown V',       0.01, 'V', 2);
+  scaled(119, 'Battery Restart V',        0.01, 'V', 2);
+  scaled(120, 'Battery Low V Warn',       0.01, 'V', 2);
+
+  // Gen Charge Block
+  // Hinweis: Doc nennt 123 'Gen Charge Start Voltage' (0.01V); evtl. abweichend auf realer HW
+  scaled(123, 'Gen Charge Start Voltage', 0.01, 'V', 2);
+  scaled(124, 'Gen Charge Start SOC',     1, '%');
+  scaled(125, 'Gen Charge Max Current',   1, 'A');
+
+  // Grid Charge Block
+  // Hinweis: Doc nennt 126 'Grid Charge Start Voltage' (0.01V), aber empirisch verifiziert als Max Power
+  scaled(126, 'Grid Charge Max Power',    1, 'W');
+  scaled(127, 'Grid Charge Start SOC',    1, '%');
+  scaled(128, 'Grid Charge Max Current',  1, 'A');
+
+  // Enables
+  opt(129, 'Gen Charge Enable',  {0: 'aus', 1: 'an'});
+  opt(130, 'Grid Charge Enable', {0: 'aus', 1: 'an'});
+
+  // AC-Couple + Smart Load Schwellen
+  scaled(131, 'AC Couple Freq Upper',   0.01, 'Hz', 2);
+  scaled(134, 'Smart Load Off Voltage', 0.01, 'V', 2);
+  scaled(136, 'Smart Load On Voltage',  0.01, 'V', 2);
+  opt(138,    'Lithium Battery Enable', {0: 'aus', 1: 'an'});
+  scaled(139, 'Battery Capacity',       1, 'Ah');
+
+  // Signal Source
+  opt(140, 'Signal Source', {0: 'beide aus', 1: 'Grid Signal an', 2: 'Gen Signal an', 3: 'beide an'});
+
+  // System
+  opt(142, 'System Work Mode', {0: 'Self Use', 1: 'Zero Export to Load', 2: 'Zero Export to CT', 3: 'Selling First'});
+  scaled(143, 'Max Sell Power', 1, 'W');
+  i[146] = {name: 'TOU Day-Mask / Enable', format: (x) => '0x' + x.toString(16).padStart(2,'0') + ' (Bitmask)'};
+
+  // TOU-Bloecke (Slots 1..6)
+  for (let s = 0; s < 6; ++s) {
+    i[148 + s] = {name: 'TOU Time Slot ' + (s+1),
+                  format: (x) => Math.floor(x/100).toString().padStart(2,'0') + ':' + (x%100).toString().padStart(2,'0')};
+    scaled(154 + s, 'TOU Power Slot ' + (s+1), 1, 'W');
+    i[160 + s]   = {name: 'TOU Voltage Slot ' + (s+1),
+                    format: (x) => (x * 0.01).toFixed(2) + ' V'};
+    scaled(166 + s, 'TOU SOC Slot ' + (s+1),   1, '%');
+    opt(172 + s,    'TOU GridCharge ' + (s+1), {0: 'nein', 1: 'ja'});
+  }
+
+  // ──────────── Geräte-Info ────────────
+  opt(0,  'Device Type',     {2:'String Inverter', 3:'1-Phase Hybrid', 4:'Micro Inverter', 5:'3-Phase LV Hybrid', 6:'3-Phase HV Hybrid'});
+  scaled(2,  'Protokoll-Version', 1, '');
+  // Reg 3-7: Seriennummer (10 ASCII-Bytes)
+
+  // ──────────── System / Inverter ────────────
+  opt(80,    'Inverter enabled',                {0:'aus', 1:'an'});
+  scaled(99, 'Battery Equalization Voltage', 0.01, 'V', 2);
+
+  // ──────────── Battery Setup ────────────
+  scaled(102, 'Battery Capacity (current)',      1, 'Ah');
+  scaled(103, 'Battery Empty Voltage',     0.01, 'V', 2);
+  scaled(104, 'System Zero-Export Power',        1, 'W');
+  scaled(105, 'Battery Equalization Days',       1, 'd');
+  scaled(106, 'Battery Equalization Hours',      1, 'h');
+  opt(111,    'Battery Type',                    {0:'Use Battery Voltage', 1:'Lithium (BMS)', 2:'No Battery'});
+  opt(112,    'Battery Wake Up',                 {0:'Disabled', 1:'Enabled'});
+  scaled(113, 'Battery Resistance',              1, 'mOhm');
+  scaled(114, 'Battery Charge Efficiency',     0.1, '%', 1);
+  scaled(115, 'Battery Shutdown Capacity',       1, '%');
+  scaled(116, 'Battery Restart Capacity',        1, '%');
+  scaled(117, 'Battery Low Capacity',            1, '%');
+
+  // ──────────── Generator Settings ────────────
+  scaled(121, 'Generator Max Operating Time', 0.1, 'h', 1);
+  scaled(122, 'Generator Cooling Time',       0.1, 'h', 1);
+  opt(132,    'Force Generator as Load',         {0:'aus', 1:'an'});
+  opt(133,    'Generator Port Usage',            {0:'Generator', 1:'Smartload', 2:'Micro Inverter'});
+  scaled(135, 'Smart Load Off SOC',              1, '%');
+  scaled(137, 'Smart Load On SOC',               1, '%');
+
+  // ──────────── System Mode / Prioritäten ────────────
+  i[141] = {name: 'Energy Mgmt Mode (Bitmask)',
+            format: (x) => '0x' + x.toString(16).padStart(4,'0') +
+                          ' (Bit0-1: 0=BatFirst/1=LoadFirst, Bit2-3 passive, Bit4-5 active grid balance)'};
+  opt(145, 'Solar Export',   {0:'aus', 1:'an'});
+
+  // ──────────── Function & Grid Standards ────────────
+  // Reg 178: paired bits (10=disable, 11=enable)
+  i[178] = {name: 'Function Flags 1 (Bitmask)',
+            format: (x) => '0x' + x.toString(16).padStart(4,'0').toUpperCase() +
+                          ' (Bit0-1: MicroInv Export Cutoff, Bit2-3: Gen Peak Shave, Bit4-5: Grid Peak Shave, Bit6-7: On-Grid Always On)'};
+  // Reg 179: Bit0-1 External CT auto direction check, Bit2-3 Forced off-grid
+  i[179] = {name: 'Function Flags 2 (Bitmask)',
+            format: (x) => '0x' + x.toString(16).padStart(4,'0').toUpperCase() +
+                          ' (Bit0-1: ExtCT auto-dir, Bit2-3: Forced Off-Grid)'};
+  opt(182,    'Grid Standard',     {0:'Generic',1:'IEEE1547',2:'RULE21',3:'SRD_UL1741',4:'CEI_0_21',5:'EN50549_CZ',6:'AS4777_A',7:'AS4777_B',8:'AS4777_C',9:'AS4777_NZ',10:'VDE4105',11:'OVE_R25',12:'EN50549_CZ_L16A'});
+  opt(183,    'Grid Frequency Config', {0:'50 Hz', 1:'60 Hz'});
+  opt(184,    'Grid Type',              {0:'Single-Phase 220-240V', 1:'Split-Phase 120/240V', 2:'3-Phase 208V', 3:'Single-Phase 120V'});
+  opt(189,    'Gen connected to Grid Input', {0:'aus', 1:'an'});
+  scaled(191, 'Grid Peak Shaving Power',     1, 'W');
+
+  // ──────────── UPS / BMS ────────────
+  scaled(209, 'UPS Delay Time',                1, 's');
+  scaled(210, 'BMS Charge Voltage',         0.01, 'V', 2);
+  scaled(211, 'BMS Discharge Voltage',      0.01, 'V', 2);
+  scaled(212, 'BMS Charge Current Limit',      1, 'A');
+  scaled(213, 'BMS Discharge Current Limit',   1, 'A');
+  scaled(214, 'BMS SOC',                       1, '%');
+  scaled(215, 'BMS Voltage',                0.01, 'V', 2);
+  scaled(216, 'BMS Current',                0.01, 'A', 2);
+  tempK(217,  'BMS Temperatur');
+  scaled(218, 'BMS Max Charge Current',        1, 'A');
+  scaled(219, 'BMS Max Discharge Current',     1, 'A');
+  i[220] = {name: 'BMS Alarm Flags',           format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  opt(229,    'Battery 1 Manufacturer', {0:'HereYin',1:'PYLON',2:'SOLAX',3:'DYNESS_L',4:'CCGX',5:'Alpha_ESS',6:'SUNGO_CAN',7:'VISION_CAN',8:'WATTSONIC_CAN',9:'KUNLAN',10:'GSEnergy',11:'GS_HUB',12:'BYD_LV',13:'AOBO',14:'DEYE',15:'CFE',16:'DMEGC',17:'UZENERGY',18:'GROWATT'});
+  opt(235,    'Track Grid Phase',              {0:'aus', 1:'an'});
+
+  // ──────────── Parallel / Solar ────────────
+  i[336]  = {name: 'Parallel Bitfeld', format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  scaled(340, 'Max Solar Power',         1, 'W');
+
+  // ──────────── Status / Betriebsmodus ────────────
+  opt(500,    'Running Status',          {0:'Standby', 1:'Selfcheck', 2:'Normal', 3:'Alarm', 4:'Fault'});
+  tempK(540,  'DC Transformer Temp');
+  tempK(541,  'Radiator Temp');
+  scaled(544, 'DRM Code Bitmaske',       1, '');
+  i[552]  = {name: 'AC Relay Status (Bitmask)',
+             format: (x) => '0x' + x.toString(16).padStart(4,'0') +
+                           ' (Bit0=INV, Bit2=Grid, Bit3=Gen, Bit4=GridSupply)'};
+
+  // ──────────── Fehlercodes (4×U16 = 2×U32) ────────────
+  scaled(555, 'Fault Code 1 (low)',  1, '');
+  scaled(556, 'Fault Code 1 (high)', 1, '');
+  scaled(557, 'Fault Code 2 (low)',  1, '');
+  scaled(558, 'Fault Code 2 (high)', 1, '');
+
+  // ──────────── Tages-Energie-Zähler ────────────
+  scaled(501, 'Day Active Energy',     0.1, 'kWh',   1);
+  scaled(502, 'Day Reactive Energy',   0.1, 'kVarh', 1);
+  scaled(503, 'Day Grid Conn. Time',     1, 's');
+  scaled(514, 'Day Battery Charge',   0.1, 'kWh', 1);
+  scaled(515, 'Day Battery Discharge',0.1, 'kWh', 1);
+  scaled(520, 'Day Grid Import',      0.1, 'kWh', 1);
+  scaled(521, 'Day Grid Export',      0.1, 'kWh', 1);
+  scaled(526, 'Day Load Energy',      0.1, 'kWh', 1);
+  scaled(529, 'Day PV Energy',        0.1, 'kWh', 1);
+
+  // ──────────── Gesamt-Energie-Zähler (Lo+Hi je U32) ────────────
+  scaled(504, 'Total Active Energy (low)',     0.1, 'kWh',   1);
+  scaled(505, 'Total Active Energy (high)',    0.1, 'kWh',   1);
+  scaled(506, 'Total Reactive Energy (low)',   0.1, 'kVarh', 1);
+  scaled(507, 'Total Reactive Energy (high)',  0.1, 'kVarh', 1);
+  scaled(516, 'Total Battery Charge (low)',    0.1, 'kWh', 1);
+  scaled(517, 'Total Battery Charge (high)',   0.1, 'kWh', 1);
+  scaled(518, 'Total Battery Discharge (low)', 0.1, 'kWh', 1);
+  scaled(519, 'Total Battery Discharge (high)',0.1, 'kWh', 1);
+  scaled(522, 'Total Grid Import (low)',       0.1, 'kWh', 1);
+  scaled(523, 'Total Grid Import (high)',      0.1, 'kWh', 1);
+  scaled(524, 'Total Grid Export (low)',       0.1, 'kWh', 1);
+  scaled(525, 'Total Grid Export (high)',      0.1, 'kWh', 1);
+  scaled(527, 'Total Load Energy (low)',       0.1, 'kWh', 1);
+  scaled(528, 'Total Load Energy (high)',      0.1, 'kWh', 1);
+  scaled(534, 'Total PV Energy (low)',         0.1, 'kWh', 1);
+  scaled(535, 'Total PV Energy (high)',        0.1, 'kWh', 1);
+
+  // ──────────── Batterie Live ────────────
+  tempK(586,  'Battery Temperatur');
+  scaled(587, 'Battery Voltage',             0.01,'V', 2);
+  scaled(588, 'Battery SOC',                 1,   '%');
+  scaled(590, 'Battery Power',               1,   'W');
+  scaled(591, 'Battery Current',             0.02,'A', 2);
+
+  // ──────────── Grid Live ────────────
+  scaled(598, 'Grid L1 Voltage',             0.1, 'V', 1);
+  scaled(599, 'Grid L2 Voltage',             0.1, 'V', 1);
+  scaled(600, 'Grid L3 Voltage',             0.1, 'V', 1);
+  scaled(604, 'Grid Inner A Power',          1,   'W');
+  scaled(605, 'Grid Inner B Power',          1,   'W');
+  scaled(606, 'Grid Inner C Power',          1,   'W');
+  scaled(607, 'Grid Inner Total Active',     1,   'W');
+  scaled(608, 'Grid Inner Apparent',         1,   'VA');
+  scaled(609, 'Grid Frequency',              0.01,'Hz', 2);
+  scaled(610, 'Grid Current L1',             0.01,'A', 2);
+  scaled(611, 'Grid Current L2',             0.01,'A', 2);
+  scaled(612, 'Grid Current L3',             0.01,'A', 2);
+  scaled(613, 'Grid CT Current L1',          0.01,'A', 2);
+  scaled(614, 'Grid CT Current L2',          0.01,'A', 2);
+  scaled(615, 'Grid CT Current L3',          0.01,'A', 2);
+  scaled(616, 'Grid CT L1 Power',            1,   'W');
+  scaled(617, 'Grid CT L2 Power',            1,   'W');
+  scaled(618, 'Grid CT L3 Power',            1,   'W');
+  scaled(619, 'Grid CT Total Power',         1,   'W');
+  scaled(622, 'Grid L1 Power',               1,   'W');
+  scaled(623, 'Grid L2 Power',               1,   'W');
+  scaled(624, 'Grid L3 Power',               1,   'W');
+  scaled(625, 'Grid Total Power',            1,   'W');
+
+  // ──────────── Inverter Output Live ────────────
+  scaled(627, 'Inverter L1 Voltage',         0.1, 'V', 1);
+  scaled(628, 'Inverter L2 Voltage',         0.1, 'V', 1);
+  scaled(629, 'Inverter L3 Voltage',         0.1, 'V', 1);
+  scaled(630, 'Inverter L1 Current',         0.01,'A', 2);
+  scaled(631, 'Inverter L2 Current',         0.01,'A', 2);
+  scaled(632, 'Inverter L3 Current',         0.01,'A', 2);
+  scaled(633, 'Inverter L1 Power',           1,   'W');
+  scaled(634, 'Inverter L2 Power',           1,   'W');
+  scaled(635, 'Inverter L3 Power',           1,   'W');
+  scaled(636, 'Inverter Total Power',        1,   'W');
+  scaled(638, 'Inverter Frequency',          0.01,'Hz', 2);
+
+  // ──────────── UPS / Backup Load ────────────
+  scaled(640, 'UPS Load L1 Power',           1,   'W');
+  scaled(641, 'UPS Load L2 Power',           1,   'W');
+  scaled(642, 'UPS Load L3 Power',           1,   'W');
+  scaled(643, 'UPS Load Total Power',        1,   'W');
+
+  // ──────────── Load Live ────────────
+  scaled(644, 'Load L1 Voltage',             0.1, 'V', 1);
+  scaled(645, 'Load L2 Voltage',             0.1, 'V', 1);
+  scaled(646, 'Load L3 Voltage',             0.1, 'V', 1);
+  scaled(650, 'Load L1 Power',               1,   'W');
+  scaled(651, 'Load L2 Power',               1,   'W');
+  scaled(652, 'Load L3 Power',               1,   'W');
+  scaled(653, 'Load Total Power',            1,   'W');
+  scaled(655, 'Load Frequency',              0.01,'Hz', 2);
+
+  // ──────────── Generator Live ────────────
+  scaled(661, 'Gen L1 Voltage',              0.1, 'V', 1);
+  scaled(662, 'Gen L2 Voltage',              0.1, 'V', 1);
+  scaled(663, 'Gen L3 Voltage',              0.1, 'V', 1);
+  scaled(664, 'Gen L1 Power',                1,   'W');
+  scaled(665, 'Gen L2 Power',                1,   'W');
+  scaled(666, 'Gen L3 Power',                1,   'W');
+  scaled(667, 'Gen Total Power',             1,   'W');
+  scaled(671, 'Gen L1 Current',              0.01,'A', 2);
+
+  // ──────────── PV / MPPT ────────────
+  scaled(672, 'PV1 Power',                   1,   'W');
+  scaled(673, 'PV2 Power',                   1,   'W');
+  scaled(674, 'PV3 Power',                   1,   'W');
+  scaled(675, 'PV4 Power',                   1,   'W');
+  scaled(676, 'PV1 Voltage',                 0.1, 'V', 1);
+  scaled(677, 'PV1 Current',                 0.1, 'A', 1);
+  scaled(678, 'PV2 Voltage',                 0.1, 'V', 1);
+  scaled(679, 'PV2 Current',                 0.1, 'A', 1);
+  scaled(680, 'PV3 Voltage',                 0.1, 'V', 1);
+  scaled(681, 'PV3 Current',                 0.1, 'A', 1);
+  scaled(682, 'PV4 Voltage',                 0.1, 'V', 1);
+  scaled(683, 'PV4 Current',                 0.1, 'A', 1);
+
+  // ──────────── Identifikation / Versionen ────────────
+  scaled(1,  'Modbus Address',               1, '');
+  scaled(8,  'Rated Power',                  1, '');
+  i[11] = {name: 'Assistant Prog Version',   format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  scaled(14, 'Ctrl FW Version Seg2',         1, '');
+  scaled(15, 'Ctrl FW Master Version',       1, '');
+  scaled(16, 'Comm FW Version Seg1',         1, '');
+  scaled(17, 'Comm FW Version Seg2',         1, '');
+  scaled(18, 'Comm FW Master Version',       1, '');
+  scaled(19, 'Safety Type',                  1, '');
+  scaled(20, 'Rated Power (low)',          0.1, 'W', 1);
+  scaled(21, 'Rated Power (high)',         0.1, 'W', 1);
+  i[22] = {name: 'MPPT Num & Phases',        format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  opt(23,    'Rated Grid Voltage',           {0:'127/220V', 1:'220/380V'});
+
+  // ──────────── Steuerung / Selbsttest ────────────
+  opt(60,    'Remote Lock',                  {0:'turn on', 2:'turn off'});
+  scaled(61, 'Self-Check Time (boot)',       1, 's');
+  scaled(62, 'System Time Byte01 (Year)',    1, 'y');
+  scaled(63, 'System Time Byte03 (Day)',     1, 'd');
+  scaled(64, 'System Time Byte05 (Min)',     1, 'min');
+  scaled(65, 'Insulation Impedance',       0.1, 'kΩ', 1);
+  scaled(74, 'Communication Address',        1, '');
+  scaled(75, 'Communication Baudrate',       1, '');
+  scaled(77, 'Active Power Regulation',    0.1, '%', 1);
+  scaled(78, 'Reactive Power Regulation',  0.1, '%', 1);
+  scaled(79, 'Apparent Power Regulation',  0.1, '%', 1);
+
+  // ──────────── Schutz / Enables ────────────
+  opt(81,    'Factory Reset Enable',         {0:'disable', 1:'enable'});
+  scaled(82, 'Self-Checking Time',           1, 's');
+  opt(83,    'Island Protection Enable',     {0:'disable', 1:'enable'});
+  opt(84,    'MPPT Number Enable',           {0:'disable', 1:'enable'});
+  opt(85,    'GFDI Enable',                  {0:'disable', 1:'enable'});
+  opt(87,    'RISO Enable',                  {0:'disable', 1:'enable'});
+  opt(88,    'Grid Standard (old)',          {1:'China', 2:'Brazil', 3:'India'});
+  opt(90,    'Low Voltage Ride Through',     {0:'disable', 1:'enable'});
+  opt(91,    'MCU EEPROM Init',              {0:'work normal', 1:'init eeprom'});
+  opt(92,    'Comm EEPROM Init',             {0:'work normal', 1:'init eeprom'});
+  scaled(96, 'PowerWH Factor',              0.01, '', 2);
+  opt(98,    'Battery Control Mode',         {0:'Lead-Battery 4-stage', 1:'Lithium'});
+  scaled(107,'Temp Compensation',            1, 'mV/°C');
+
+  // ──────────── Sonstige Setup ────────────
+  i[144] = {name: 'External CT Clamp Phase', format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  opt(147,   'Grid Phase Sequence',          {0:'0/120/240', 1:'0/240/120'});
+
+  // ──────────── Grid Schutz / Fenster ────────────
+  scaled(180,'Restore Connection Time',      1, 's');
+  opt(181,   'Solar Arc Fault Mode',         {0:'aus', 1:'an'});
+  scaled(185,'Grid Voltage High Limit',    0.1, 'V', 1);
+  scaled(186,'Grid Voltage Low Limit',     0.1, 'V', 1);
+  scaled(187,'Grid Frequency High Limit', 0.01, 'Hz', 2);
+  scaled(188,'Grid Frequency Low Limit',  0.01, 'Hz', 2);
+  scaled(190,'Gen Peak Shaving Power',       1, 'W');
+  scaled(192,'Smart Load Open Delay',        1, 'min');
+  scaled(193,'Output PF Setting',           0.1, '%', 1);
+  i[194] = {name: 'External Relay Bits',     format: (x) => '0x' + x.toString(16).padStart(4,'0') + ' (Bit0-8 = 8 Relays)'};
+
+  // ──────────── ARC-Factory Diagnostik (high/low je 16 bit) ────────────
+  scaled(195,'ARC_factory_B High',           1, '');
+  scaled(196,'ARC_factory_B Low',            1, '');
+  scaled(197,'ARC_factory_I High',           1, '');
+  scaled(198,'ARC_factory_I Low',            1, '');
+  scaled(199,'ARC_factory_F High',           1, '');
+  scaled(200,'ARC_factory_F Low',            1, '');
+  scaled(201,'ARC_factory_D High',           1, '');
+  scaled(202,'ARC_factory_D Low',            1, '');
+  scaled(203,'ARC_factory_T High',           1, '');
+  scaled(204,'ARC_factory_T Low',            1, '');
+  scaled(205,'ARC_factory_C High',           1, '');
+  scaled(206,'ARC_factory_C Low',            1, '');
+  scaled(207,'ARC_factory_Frz High',         1, '');
+  scaled(208,'ARC_factory_Frz Low',          1, '');
+
+  // ──────────── Lithium Bat Flags ────────────
+  i[221] = {name: 'Li Battery Fault Bits',   format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  i[222] = {name: 'Li Battery Flag 2',       format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  opt(223,   'Lithium Battery Protocol',     {0:'PYLON/SOLAX (CAN)', 1:'Tianbangda RS485', 2:'KOK', 3:'Keith', 4:'Topai', 5:'Pylon 485', 6:'Jielisi 485', 7:'Xinwangda 485', 8:'Xinruineng 485', 9:'Tianbangda 485', 10:'Shenggao CAN'});
+  scaled(224,'Lithium Battery SOH',          1, '%');
+  opt(227,   'Upgrade LCD Test',             {0:'aus', 1:'an'});
+  i[228] = {name: 'Comm Board Setup Bits',   format: (x) => '0x' + x.toString(16).padStart(4,'0') + ' (time/beep/ampm)'};
+
+  // ──────────── Solar/Wind & BMS-Zellen ────────────
+  i[310] = {name: 'Solar makes Wind Input',  format: (x) => '0x' + x.toString(16).padStart(4,'0') + ' (Bit0=S1, Bit1=S2)'};
+  for (let n = 0; n < 12; ++n) scaled(311 + n, 'Cell Voltage ' + (n+1), 0.1, 'V', 1);
+  for (let n = 0; n < 12; ++n) scaled(323 + n, 'Cell Current ' + (n+1), 0.1, 'A', 1);
+
+  // ──────────── Grid Check / CT ────────────
+  i[344] = {name: 'Grid Check Mode',         format: (x) => (x & 1) ? 'Meter' : 'CT'};
+  scaled(347,'External CT Ratio',            1, ':1');
+  scaled(348,'Meter CT Ratio',               1, ':1');
+  scaled(350,'Charge Slew Rate (pos)',       1, 'W');
+  scaled(351,'Charge Slew Rate (neg)',       1, 'W');
+
+  // ──────────── CA LHVRT (Voltage Ride-Through) ────────────
+  opt(380,   'CA_LHVRT Enable',              {0:'disable', 1:'enable'});
+  scaled(381,'CA_HV2',                     0.1, 'V', 1);
+  scaled(382,'CA_HV1',                     0.1, 'V', 1);
+  scaled(383,'CA_LV1',                     0.1, 'V', 1);
+  scaled(384,'CA_LV2',                     0.1, 'V', 1);
+  scaled(385,'CA_LV3',                     0.1, 'V', 1);
+  scaled(386,'CA_HV2 Time',                0.01,'s', 2);
+  scaled(387,'CA_HV1 Time',                0.01,'s', 2);
+  scaled(388,'CA_LV1 Time',                0.01,'s', 2);
+  scaled(389,'CA_LV2 Time',                0.01,'s', 2);
+  scaled(390,'CA_LV3 Time',                0.01,'s', 2);
+
+  // ──────────── CA LHFRT (Frequency Ride-Through) ────────────
+  opt(391,   'CA_LHFRT Enable',              {0:'disable', 1:'enable'});
+  scaled(392,'CA_HF2',                     0.01,'Hz', 2);
+  scaled(393,'CA_HF1',                     0.01,'Hz', 2);
+  scaled(394,'CA_LF1',                     0.01,'Hz', 2);
+  scaled(395,'CA_LF2',                     0.01,'Hz', 2);
+  scaled(396,'CA_HF2 Time',                0.01,'s', 2);
+  scaled(397,'CA_HF1 Time',                0.01,'s', 2);
+  scaled(398,'CA_LF1 Time',                0.01,'s', 2);
+  scaled(399,'CA_LF2 Time',                0.01,'s', 2);
+
+  // ──────────── CA QV/FW/VW (Volt-VAR / Freq-Watt / Volt-Watt) ────────────
+  opt(400,   'CA_QV Enable',                 {0:'disable', 1:'enable'});
+  scaled(401,'CA_QV_V1',                   0.1, 'V', 1);
+  scaled(402,'CA_QV_V2',                   0.1, 'V', 1);
+  scaled(403,'CA_QV_V3',                   0.1, 'V', 1);
+  scaled(404,'CA_QV_V4',                   0.01,'', 2);
+  scaled(405,'CA_QV_Q1',                     1, '');
+  scaled(406,'CA_QV_Q2',                     1, '');
+  scaled(407,'CA_QV_Q3',                     1, '');
+  scaled(408,'CA_QV_Q4',                     1, '');
+  opt(409,   'CA_FW Enable',                 {0:'disable', 1:'enable'});
+  scaled(410,'CA_F Start',                 0.01,'Hz', 2);
+  scaled(411,'CA_F Stop',                  0.01,'Hz', 2);
+  opt(412,   'CA_VW Enable',                 {0:'disable', 1:'enable'});
+  scaled(413,'CA_V Start',                 0.1, 'V', 1);
+  scaled(414,'CA_V Stop',                  0.1, 'V', 1);
+  scaled(415,'Normal Up Slope',              1, '%');
+  scaled(416,'Soft Start Rise Rate',         1, '%');
+  scaled(417,'QV Response Time',             1, 's');
+  scaled(418,'VW Response Time',             1, 's');
+  scaled(419,'FW Response Time',             1, 's');
+
+  // ──────────── Energie / Tageswerte (zusätzlich) ────────────
+  i[508] = {name: 'Inverter Status Flag 1',  format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  i[509] = {name: 'Inverter Status Flag 2',  format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  scaled(530,'Day PV-1 Energy',            0.1, 'kWh', 1);
+  scaled(531,'Day PV-2 Energy',            0.1, 'kWh', 1);
+  scaled(532,'Day PV-3 Energy',            0.1, 'kWh', 1);
+  scaled(533,'Day PV-4 Energy',            0.1, 'kWh', 1);
+  scaled(539,'Gen Working Hours / Day',    0.1, 'h', 1);
+
+  // ──────────── Temperaturen (zusätzlich) ────────────
+  tempK(542, 'Reserved Temp 1');
+  tempK(543, 'Reserved Temp 2');
+
+  // ──────────── Diagnose-Status / Warnungen ────────────
+  i[548] = {name: 'Comm Board Fault Status', format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  i[549] = {name: 'MCU Test Flag',           format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  i[550] = {name: 'LCD Test Flag',           format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+  i[551] = {name: 'Turn Off/On Status',      format: (x) => (x & 0xF) ? 'power on' : 'power off'};
+  i[553] = {name: 'Warning Word 1',
+            format: (x) => '0x' + x.toString(16).padStart(4,'0') +
+                          ' (Bit1=FAN_WARN, Bit2=GridPhaseWrong)'};
+  i[554] = {name: 'Warning Word 2',          format: (x) => '0x' + x.toString(16).padStart(4,'0')};
+
+  // ──────────── Batterie (zusätzlich) ────────────
+  scaled(592,'Battery Corrected AH',         1, 'Ah');
+
+  // ──────────── Grid Linienspannungen / Apparent / PF ────────────
+  scaled(601,'Grid Line Voltage AB',       0.1, 'V', 1);
+  scaled(602,'Grid Line Voltage BC',       0.1, 'V', 1);
+  scaled(603,'Grid Line Voltage CA',       0.1, 'V', 1);
+  scaled(620,'Grid Ext Total Apparent',      1, 'VA');
+  scaled(621,'Grid Power Factor',         0.001,'', 3);
+  scaled(637,'Inverter Total Apparent',      1, 'VA');
+
+  // ──────────── Load Phase Currents / Apparent ────────────
+  scaled(647,'Load Current L1',            0.01,'A', 2);
+  scaled(648,'Load Current L2',            0.01,'A', 2);
+  scaled(649,'Load Current L3',            0.01,'A', 2);
+  scaled(654,'Load Total Apparent',          1, 'VA');
+
+  // ──────────── Gen Currents (zusätzlich) ────────────
+  // 671 ist bereits abgedeckt (Gen L1 Current)
+
+  // ──────────── Erweitert ────────────
+  i[1000] = {name: 'Grid Power Check Mode',  format: (x) => (x & 1) ? 'Meter' : 'CT'};
+
+  return i;
+})();
+
+// Render-Helfer: erzeugt entweder einen einfachen interpretierten Text
+// oder ein <details>-Element mit ausklappbarer Optionen-Tabelle.
+function renderInterp(info, v) {
+  if (info.format) return info.format(v);
+  if (info.options) {
+    const cur = info.options[v];
+    const summary = (cur !== undefined ? cur : '? (' + v + ')');
+    let rows = '';
+    for (const k of Object.keys(info.options)) {
+      const active = (+k === v);
+      const bg = active ? 'background:#3aa67533;color:#3aa675;font-weight:600;' : 'color:#9bb1d1;';
+      rows += '<tr style="' + bg + '"><td style="padding:1px 6px;">' + k + '</td>'
+            + '<td style="padding:1px 6px;">' + info.options[k] + '</td></tr>';
+    }
+    return '<details style="display:inline-block;"><summary style="cursor:pointer;color:#3aa675;">'
+         + summary + '</summary>'
+         + '<table style="margin-top:4px;font-size:11px;border-collapse:collapse;">'
+         + '<thead><tr style="color:#6a7a90;"><th style="text-align:left;padding:1px 6px;">Wert</th>'
+         + '<th style="text-align:left;padding:1px 6px;">Bedeutung</th></tr></thead>'
+         + '<tbody>' + rows + '</tbody></table></details>';
+  }
+  return '';
+}
+
+async function probeRead(){
+  const startAddr = +document.getElementById('probeAddr').value;
+  const totalCount = +document.getElementById('probeCount').value;
+  const status = document.getElementById('probeStatus');
+  const tbody  = document.querySelector('#probeResult tbody');
+  status.textContent = 'lese...'; status.style.color = '#d4823b';
+  tbody.innerHTML = '';
+
+  const CHUNK = 50;   // Bloecke -> werden zusammengefuegt (Backend-Limit 64)
+  const allData = [];
+  let curAddr = startAddr;
+  let remaining = totalCount;
+  let chunkIdx = 0;
+  const totalChunks = Math.ceil(totalCount / CHUNK);
+
+  try {
+    while (remaining > 0) {
+      const cnt = Math.min(CHUNK, remaining);
+      if (totalChunks > 1) {
+        status.textContent = 'lese Block ' + (++chunkIdx) + '/' + totalChunks + ' (Adr ' + curAddr + ', ' + cnt + ' Reg)';
+      }
+      const r = await fetch('/deye/read?addr=' + curAddr + '&count=' + cnt, {cache:'no-store'});
+      const j = await r.json();
+      if (!j.ok) {
+        status.textContent = 'FEHLER bei Adresse ' + curAddr + ' (bereits ' + allData.length + ' gelesen)';
+        status.style.color = '#d44b3b';
+        break;
+      }
+      for (const v of j.data) allData.push(v);
+      curAddr  += j.data.length;
+      remaining -= j.data.length;
+      if (j.data.length === 0) break;   // safety
+    }
+
+    let html = '';
+    for (let i = 0; i < allData.length; ++i){
+      const a = startAddr + i;
+      const v = allData[i];
+      const s = (v & 0x8000) ? v - 0x10000 : v;
+      const info = REG_INFO[a];
+      const name = info ? info.name : '';
+      const interp = info ? renderInterp(info, v) : '';
+      const rowStyle = info ? ' style="background:#11332244;"' : '';
+      html += '<tr' + rowStyle + '>'
+            + '<td>' + a + '</td>'
+            + '<td><code>0x' + v.toString(16).padStart(4,'0').toUpperCase() + '</code></td>'
+            + '<td>' + v + '</td>'
+            + '<td>' + s + '</td>'
+            + '<td style="color:#9bb1d1;font-size:12px;">' + name + '</td>'
+            + '<td style="color:#3aa675;font-size:12px;">' + interp + '</td>'
+            + '</tr>';
+    }
+    tbody.innerHTML = html;
+
+    if (allData.length === totalCount) {
+      const known = Object.keys(REG_INFO).filter(a => a >= startAddr && a < startAddr + allData.length).length;
+      status.textContent = allData.length + ' Register gelesen (' + known + ' bekannt' + (totalChunks > 1 ? ', ' + totalChunks + ' Bloecke' : '') + ')';
+      status.style.color = '#3aa675';
+    }
+  } catch (e){
+    status.textContent = 'Fehler: ' + e;
+    status.style.color = '#d44b3b';
+  }
+}
+
+async function probeWrite(){
+  const addr = +document.getElementById('wrAddr').value;
+  const val  = +document.getElementById('wrVal').value;
+  // Einzel-Register: ohne Rueckfrage direkt schreiben (Massen-Import fragt weiter).
+  const status = document.getElementById('probeStatus');
+  status.textContent = 'schreibe...'; status.style.color = '#d4823b';
+  try {
+    const r = await fetch('/deye/write?addr=' + addr + '&val=' + val);
+    const j = await r.json();
+    status.textContent = j.ok ? ('OK -> Adr ' + addr + ' = ' + val) : 'FEHLER';
+    status.style.color = j.ok ? '#3aa675' : '#d44b3b';
+  } catch (e){
+    status.textContent = 'Fehler: ' + e;
+    status.style.color = '#d44b3b';
+  }
+}
+
+// ---- Register-Backup: Export (CSV) / Import (FC16) ----
+function csvEsc(s){
+  s = (s==null ? '' : String(s));
+  return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+// Plain-Text-Variante der Probe-Interpretationsspalte (renderInterp liefert HTML).
+// Options-Register -> aktuelles Label; format-Register -> formatierter Wert ohne Tags.
+function interpText(info, v){
+  if (!info) return '';
+  try {
+    if (info.options){
+      const cur = info.options[v];
+      return cur !== undefined ? cur : ('? (' + v + ')');
+    }
+    if (info.format){
+      return String(info.format(v))
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/g,' ').replace(/&amp;/g,'&')
+        .replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+        .replace(/\s+/g,' ').trim();
+    }
+  } catch(e){}
+  return '';
+}
+async function readChunkRaw(addr, n){
+  try{
+    const r = await fetch('/deye/read?addr=' + addr + '&count=' + n, {cache:'no-store'});
+    const j = await r.json();
+    if (j.ok && Array.isArray(j.data) && j.data.length) return j.data;
+  }catch(e){}
+  return null;
+}
+// Liest [from..to] adaptiv: faellt ein Block aus (eine Adresse darin ist nicht
+// lesbar -> ganzer FC03-Block scheitert), wird er halbiert (bis runter zu 8),
+// damit einzelne tote Adressen nicht ganze 64er-Bloecke kosten.
+async function readRangeAdaptive(from, to, onProg){
+  const rows = [];
+  const MIN = 8;
+  async function rec(a, n){
+    if (n <= 0) return;
+    const data = await readChunkRaw(a, n);
+    if (data){
+      for (let i=0;i<data.length;i++) rows.push({addr:a+i, val:data[i]});
+      if (data.length < n) await rec(a + data.length, n - data.length);
+    } else if (n > MIN){
+      const half = (n >> 1);
+      await rec(a, half);
+      await rec(a + half, n - half);
+    } else {
+      for (let i=0;i<n;i++) rows.push({addr:a+i, val:null});
+    }
+  }
+  for (let a=from; a<=to; a+=50){
+    const n = Math.min(50, to - a + 1);
+    await rec(a, n);
+    if (onProg) onProg(Math.min(a + 64, to + 1));
+  }
+  rows.sort((x,y)=>x.addr-y.addr);
+  return rows;
+}
+async function exportRegs(){
+  const from = +document.getElementById('expFrom').value;
+  const to   = +document.getElementById('expTo').value;
+  const st   = document.getElementById('ioStatus');
+  if (!Number.isInteger(from) || !Number.isInteger(to) || to < from || from < 0 || to > 65535){
+    st.textContent = 'Bereich ungueltig'; st.style.color = '#d44b3b'; return;
+  }
+  st.style.color = '#d4823b';
+  const total = to - from + 1;
+  try{
+    const rows = await readRangeAdaptive(from, to, (done)=>{
+      st.textContent = 'lese ' + Math.min(done - from, total) + '/' + total + ' Register ...';
+    });
+    let csv = '\uFEFF' + 'addr;value;hex;signed;name;interp\r\n';   // BOM -> Excel zeigt Umlaute
+    let readN = 0;
+    for (const row of rows){
+      const name = (REG_INFO[row.addr] || {}).name || '';
+      if (row.val == null){ csv += row.addr + ';;;;' + csvEsc(name) + ';\r\n'; continue; }
+      readN++;
+      const v = row.val & 0xffff;
+      const s = (v & 0x8000) ? v - 0x10000 : v;
+      const interp = interpText(REG_INFO[row.addr], v);
+      csv += row.addr + ';' + v + ';0x' + v.toString(16).padStart(4,'0').toUpperCase()
+           + ';' + s + ';' + csvEsc(name) + ';' + csvEsc(interp) + '\r\n';
+    }
+    const d = new Date(), pad = n => String(n).padStart(2,'0');
+    const fname = 'deye-register-' + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate())
+                + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.csv';
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname; document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1500);
+    st.textContent = 'Export: ' + readN + '/' + total + ' Register gelesen -> ' + fname;
+    st.style.color = '#3aa675';
+  }catch(e){
+    st.textContent = 'Export-Fehler: ' + e; st.style.color = '#d44b3b';
+  }
+}
+async function importRegs(input){
+  const st = document.getElementById('ioStatus');
+  const file = input.files && input.files[0];
+  input.value = '';                       // erlaubt erneutes Waehlen derselben Datei
+  if (!file) return;
+  let text;
+  try{ text = await file.text(); }catch(e){ st.textContent='Datei-Fehler: '+e; st.style.color='#d44b3b'; return; }
+
+  let lines = text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(l => l.trim().length && l[0] !== '#');
+  if (!lines.length){ st.textContent='Datei leer'; st.style.color='#d44b3b'; return; }
+  const sep = (lines[0].indexOf(';') >= 0) ? ';' : ',';
+  let addrIdx = 0, valIdx = 1, start = 0;
+  const head = lines[0].split(sep).map(s => s.trim().toLowerCase());
+  if (head.some(h => !/^-?\d+$/.test(h))){           // Kopfzeile vorhanden
+    start = 1;
+    const fa = head.findIndex(h => ['addr','adresse','register','reg'].includes(h));
+    // Wert IMMER aus der signed-Spalte nehmen (User-Wunsch); negative Werte
+    // werden unten per Zweierkomplement auf U16 normalisiert. Nur falls keine
+    // signed-Spalte da ist -> auf value/u16 zurueckfallen.
+    let fv = head.findIndex(h => ['signed','s16','vorzeichen'].includes(h));
+    if (fv < 0) fv = head.findIndex(h => ['value','u16','dec','wert'].includes(h));
+    if (fa >= 0) addrIdx = fa;
+    if (fv >= 0) valIdx = fv;
+  }
+  const items = [];
+  for (let i=start;i<lines.length;i++){
+    const c = lines[i].split(sep);
+    if (c.length <= Math.max(addrIdx, valIdx)) continue;
+    const addr = parseInt(String(c[addrIdx]).trim(), 10);
+    const raw  = String(c[valIdx]).trim();
+    if (raw === '') continue;              // nicht gelesene Adresse -> ueberspringen
+    const val  = /^0x/i.test(raw) ? parseInt(raw,16) : parseInt(raw,10);
+    if (!Number.isFinite(addr) || !Number.isFinite(val)) continue;
+    if (addr < 0 || addr > 65535) continue;
+    items.push({addr, val: ((val % 65536) + 65536) % 65536});
+  }
+  if (!items.length){ st.textContent='Keine gueltigen Zeilen gefunden (Spalten addr / signed?)'; st.style.color='#d44b3b'; return; }
+
+  if (!confirm('ACHTUNG: ' + items.length + ' Register werden per FC16 in den Wechselrichter GESCHRIEBEN.\n'
+             + 'Falsche Werte koennen den WR fehlkonfigurieren.\n\nFortfahren?')){
+    st.textContent='Import abgebrochen'; st.style.color='#8a8f99'; return;
+  }
+  st.style.color = '#d4823b';
+  let okN=0, failN=0;
+  for (let i=0;i<items.length;i++){
+    const it = items[i];
+    st.textContent = 'schreibe ' + (i+1) + '/' + items.length + '  Adr ' + it.addr + ' = ' + it.val
+                   + '   (ok ' + okN + ', Fehler ' + failN + ')';
+    try{
+      const r = await fetch('/deye/write?addr=' + it.addr + '&val=' + it.val);
+      const j = await r.json();
+      if (j.ok) okN++; else failN++;
+    }catch(e){ failN++; }
+    await new Promise(res => setTimeout(res, 50));   // RS485 etwas Luft lassen
+  }
+  st.textContent = 'Import fertig: ' + okN + ' geschrieben, ' + failN + ' Fehler (von ' + items.length
+                 + ') — zur Kontrolle erneut exportieren.';
+  st.style.color = failN ? '#d4823b' : '#3aa675';
+}
+
+// ---- ziehbare Spaltenbreiten (Probe-Tabelle) ----
+(function enableColResize(){
+  const table = document.getElementById('probeResult');
+  if (!table) return;
+  table.querySelectorAll('thead th').forEach(th => {
+    const grip = document.createElement('span');
+    grip.className = 'grip';
+    th.appendChild(grip);
+    let startX = 0, startW = 0;
+    grip.addEventListener('pointerdown', e => {
+      startX = e.clientX; startW = th.offsetWidth;
+      grip.setPointerCapture(e.pointerId);
+      const move = ev => { th.style.width = Math.max(40, startW + ev.clientX - startX) + 'px'; };
+      const up = () => {
+        grip.releasePointerCapture(e.pointerId);
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+      e.preventDefault(); e.stopPropagation();
+    });
+  });
+})();
+</script>
+</body></html>

@@ -1,0 +1,373 @@
+{
+  "deviceTypeId": "7f439b45-b3af-424f-9521-3ae00f0ad6d3",
+  "name": "DSZ15DZMOD",
+  "version": 1,
+  "manufacturer_reg_number": 464515,
+  "meter_type_reg_number": 464525,
+  "serial_no_reg_number": 464513,
+  "identification_registers": [
+    {
+      "register_number": 464515,
+      "value": [
+        13
+      ]
+    },
+    {
+      "register_number": 464525,
+      "value": [
+        1
+      ]
+    },
+    {
+      "register_number": 464513
+    }
+  ],
+  "default_RTU_registers": [
+    30001,
+    30003,
+    30005,
+    30007,
+    30009,
+    30011,
+    30053,
+    30073,
+    30075
+  ],
+  "default_MQTT_registers": [
+    30053,
+    30073,
+    30075
+  ],
+  "default_history_registers": [
+    30053,
+    30073,
+    30075
+  ],
+  "registers": [
+    {
+      "number": 30001,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Voltage of L1 to N"
+        }
+      ],
+      "unit": "Volt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 0,
+      "length": 2
+    },
+    {
+      "number": 30003,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Voltage of L2 to N"
+        }
+      ],
+      "unit": "Volt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 2,
+      "length": 2
+    },
+    {
+      "number": 30005,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Voltage of L3 to N"
+        }
+      ],
+      "unit": "Volt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 4,
+      "length": 2
+    },
+    {
+      "number": 30007,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L1 Current"
+        }
+      ],
+      "unit": "A",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 6,
+      "length": 2
+    },
+    {
+      "number": 30009,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L2 Current"
+        }
+      ],
+      "unit": "A",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 8,
+      "length": 2
+    },
+    {
+      "number": 30011,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "L3 Current"
+        }
+      ],
+      "unit": "A",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 10,
+      "length": 2
+    },
+    {
+      "number": 30013,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L1 active power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 12,
+      "length": 2
+    },
+    {
+      "number": 30015,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L2 active power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 14,
+      "length": 2
+    },
+    {
+      "number": 30017,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "L3 active power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 16,
+      "length": 2
+    },
+    {
+      "number": 30031,
+      "scaling_factor": 1000,
+      "description": [
+        {
+          "en": "L1 power factor"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 30,
+      "length": 2
+    },
+    {
+      "number": 30033,
+      "scaling_factor": 1000,
+      "description": [
+        {
+          "en": "L2 power factor"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 32,
+      "length": 2
+    },
+    {
+      "number": 30035,
+      "scaling_factor": 1000,
+      "description": [
+        {
+          "en": "L3 power factor"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 34,
+      "length": 2
+    },
+    {
+      "number": 30053,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Total active power"
+        }
+      ],
+      "unit": "Watt",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 52,
+      "length": 2
+    },
+    {
+      "number": 30063,
+      "scaling_factor": 1000,
+      "description": [
+        {
+          "en": "Total power factor"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 62,
+      "length": 2
+    },
+    {
+      "number": 30073,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total imported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 72,
+      "length": 2
+    },
+    {
+      "number": 30075,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Total exported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 74,
+      "length": 2
+    },
+    {
+      "number": 30097,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Resettable total imported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 96,
+      "length": 2
+    },
+    {
+      "number": 30099,
+      "scaling_factor": 100,
+      "description": [
+        {
+          "en": "Resettable total exported active energy"
+        }
+      ],
+      "unit": "kWh",
+      "reg_type": "MB_PARAM_INPUT",
+      "address": 98,
+      "length": 2
+    },
+    {
+      "number": 40019,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Modbus parameters"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 18,
+      "length": 2
+    },
+    {
+      "number": 40021,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Modbus address"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 20,
+      "length": 2
+    },
+    {
+      "number": 40029,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Modbus baudrate"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 28,
+      "length": 2
+    },
+    {
+      "number": 464513,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Serial number"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 64512,
+      "length": 2
+    },
+    {
+      "number": 464515,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Manufacturing code"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 64514,
+      "length": 2
+    },
+    {
+      "number": 464525,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "Meter type"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 64524,
+      "length": 2
+    },
+    {
+      "number": 464527,
+      "scaling_factor": 1,
+      "description": [
+        {
+          "en": "FW version"
+        }
+      ],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 64526,
+      "length": 2
+    }
+  ]
+}

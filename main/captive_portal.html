@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Deye Display &ndash; WLAN</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#0b0d10;color:#e5e7eb;margin:0;padding:18px;max-width:560px;margin:0 auto}
+  h1{font-size:20px;margin:.2em 0 .1em}
+  p.muted{color:#9aa0a8;font-size:13px;margin:.3em 0}
+  .net{padding:13px 14px;border:1px solid #2a2e35;border-radius:10px;margin:8px 0;background:#1c1f24;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+  .net:active{background:#2a2e35}
+  .net b{font-weight:600}
+  input,button{font-size:16px;padding:12px;border-radius:10px;border:1px solid #2a2e35;width:100%;box-sizing:border-box;margin:8px 0}
+  input{background:#1c1f24;color:#e5e7eb}
+  button.primary{background:#4ea8ff;color:#fff;border:none;font-weight:600}
+  button.ghost{background:#2a2e35;color:#e5e7eb;border:none}
+</style>
+</head>
+<body>
+  <h1>Deye Display</h1>
+  <p class="muted">W&auml;hle dein WLAN, um das Display mit deinem Netzwerk zu verbinden.</p>
+  <div id="list"><p class="muted">Suche Netzwerke &hellip;</p></div>
+
+  <form id="f" style="display:none">
+    <p class="muted">Netzwerk: <b id="sel"></b></p>
+    <input id="psk" type="password" placeholder="WLAN-Passwort" autocomplete="off">
+    <button type="submit" class="primary">Verbinden</button>
+  </form>
+
+  <button class="ghost" onclick="scan()">&#8635; Erneut suchen</button>
+
+<script>
+function esc(s){return String(s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+
+function scan(){
+  document.getElementById('list').innerHTML = "<p class='muted'>Suche &hellip;</p>";
+  fetch('/scan').then(function(r){return r.json();}).then(function(aps){
+    if(!aps.length){
+      document.getElementById('list').innerHTML = "<p class='muted'>Keine Netzwerke gefunden.</p>";
+      return;
+    }
+    var h = '';
+    aps.forEach(function(n){
+      var lock = n.open ? '&#128275;' : '&#128274;';
+      h += "<div class='net' data-ssid='" + encodeURIComponent(n.ssid) + "'>" +
+           "<b>" + esc(n.ssid) + "</b>" +
+           "<span class='muted'>" + n.rssi + " dBm " + lock + "</span></div>";
+    });
+    var box = document.getElementById('list');
+    box.innerHTML = h;
+    Array.prototype.forEach.call(box.children, function(el){
+      el.onclick = function(){ pick(decodeURIComponent(el.getAttribute('data-ssid'))); };
+    });
+  }).catch(function(){
+    document.getElementById('list').innerHTML = "<p class='muted'>Scan fehlgeschlagen.</p>";
+  });
+}
+
+function pick(ssid){
+  document.getElementById('sel').textContent = ssid;
+  var f = document.getElementById('f');
+  f.style.display = 'block';
+  f.dataset.ssid = ssid;
+  document.getElementById('psk').focus();
+}
+
+document.getElementById('f').addEventListener('submit', function(e){
+  e.preventDefault();
+  var body = 'ssid=' + encodeURIComponent(this.dataset.ssid) +
+             '&psk='  + encodeURIComponent(document.getElementById('psk').value);
+  fetch('/connect', {method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:body})
+    .then(function(r){return r.text();})
+    .then(function(t){ document.open(); document.write(t); document.close(); });
+});
+
+scan();
+</script>
+</body>
+</html>

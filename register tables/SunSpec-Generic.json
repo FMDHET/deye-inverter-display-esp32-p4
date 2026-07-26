@@ -1,0 +1,490 @@
+{
+  "deviceTypeId": "e7c1d2b3-f4a5-4b7c-8d9e-0f1a2b3c4d5e",
+  "name": "SunSpec (generic)",
+  "version": 1,
+  "manufacturer_reg_number": 40004,
+  "meter_type_reg_number": 40020,
+  "serial_no_reg_number": 40052,
+  "identification_registers": [
+    {
+      "register_number": 40000,
+      "value": [1400204883]
+    },
+    {
+      "register_number": 40002,
+      "value": [1]
+    }
+  ],
+  "default_RTU_registers": [
+    40004, 40020, 40044, 40052, 40068,
+    40070, 40071, 40072, 40076, 40080, 40081, 40082, 40084, 40086, 40094, 40108
+  ],
+  "default_MQTT_registers": [
+    40072, 40076, 40080, 40084, 40086, 40094, 40108
+  ],
+  "default_history_registers": [
+    40094, 40076, 40086
+  ],
+  "registers": [
+    {
+      "number": 40000,
+      "scaling_factor": 1,
+      "description": [{ "en": "SunSpec ID (must read 'SunS' = 0x53756E53)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40000,
+      "length": 2
+    },
+    {
+      "number": 40002,
+      "scaling_factor": 1,
+      "description": [{ "en": "Common Block: Model ID (= 1)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40002,
+      "length": 1
+    },
+    {
+      "number": 40003,
+      "scaling_factor": 1,
+      "description": [{ "en": "Common Block: Length (= 65)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40003,
+      "length": 1
+    },
+    {
+      "number": 40004,
+      "scaling_factor": 1,
+      "description": [{ "en": "Manufacturer (32-char ASCII)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40004,
+      "length": 16
+    },
+    {
+      "number": 40020,
+      "scaling_factor": 1,
+      "description": [{ "en": "Model (32-char ASCII)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40020,
+      "length": 16
+    },
+    {
+      "number": 40036,
+      "scaling_factor": 1,
+      "description": [{ "en": "Options (16-char ASCII)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40036,
+      "length": 8
+    },
+    {
+      "number": 40044,
+      "scaling_factor": 1,
+      "description": [{ "en": "Version (16-char ASCII)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40044,
+      "length": 8
+    },
+    {
+      "number": 40052,
+      "scaling_factor": 1,
+      "description": [{ "en": "Serial Number (32-char ASCII)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40052,
+      "length": 16
+    },
+    {
+      "number": 40068,
+      "scaling_factor": 1,
+      "description": [{ "en": "Modbus Device Address" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40068,
+      "length": 1
+    },
+    {
+      "number": 40069,
+      "scaling_factor": 1,
+      "description": [{ "en": "Common Block padding" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40069,
+      "length": 1
+    },
+
+    {
+      "number": 40070,
+      "scaling_factor": 1,
+      "description": [{ "en": "Model 103 ID (= 103, three-phase inverter, integer)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40070,
+      "length": 1
+    },
+    {
+      "number": 40071,
+      "scaling_factor": 1,
+      "description": [{ "en": "Model 103 Length (= 50)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40071,
+      "length": 1
+    },
+    {
+      "number": 40072,
+      "scaling_factor": 1,
+      "description": [{ "en": "AC Total Current (A · A_SF)" }],
+      "unit": "A",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40072,
+      "length": 1
+    },
+    {
+      "number": 40073,
+      "scaling_factor": 1,
+      "description": [{ "en": "AC Current Phase A (A · A_SF)" }],
+      "unit": "A",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40073,
+      "length": 1
+    },
+    {
+      "number": 40074,
+      "scaling_factor": 1,
+      "description": [{ "en": "AC Current Phase B (A · A_SF)" }],
+      "unit": "A",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40074,
+      "length": 1
+    },
+    {
+      "number": 40075,
+      "scaling_factor": 1,
+      "description": [{ "en": "AC Current Phase C (A · A_SF)" }],
+      "unit": "A",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40075,
+      "length": 1
+    },
+    {
+      "number": 40076,
+      "scaling_factor": 1,
+      "description": [{ "en": "A_SF: AC Current scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40076,
+      "length": 1
+    },
+    {
+      "number": 40077,
+      "scaling_factor": 1,
+      "description": [{ "en": "Phase Voltage AB (V · V_SF)" }],
+      "unit": "V",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40077,
+      "length": 1
+    },
+    {
+      "number": 40078,
+      "scaling_factor": 1,
+      "description": [{ "en": "Phase Voltage BC (V · V_SF)" }],
+      "unit": "V",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40078,
+      "length": 1
+    },
+    {
+      "number": 40079,
+      "scaling_factor": 1,
+      "description": [{ "en": "Phase Voltage CA (V · V_SF)" }],
+      "unit": "V",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40079,
+      "length": 1
+    },
+    {
+      "number": 40080,
+      "scaling_factor": 1,
+      "description": [{ "en": "Phase Voltage AN (V · V_SF)" }],
+      "unit": "V",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40080,
+      "length": 1
+    },
+    {
+      "number": 40081,
+      "scaling_factor": 1,
+      "description": [{ "en": "Phase Voltage BN (V · V_SF)" }],
+      "unit": "V",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40081,
+      "length": 1
+    },
+    {
+      "number": 40082,
+      "scaling_factor": 1,
+      "description": [{ "en": "Phase Voltage CN (V · V_SF)" }],
+      "unit": "V",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40082,
+      "length": 1
+    },
+    {
+      "number": 40083,
+      "scaling_factor": 1,
+      "description": [{ "en": "V_SF: AC Voltage scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40083,
+      "length": 1
+    },
+    {
+      "number": 40084,
+      "scaling_factor": 1,
+      "description": [{ "en": "AC Power (W · W_SF, signed)" }],
+      "unit": "W",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40084,
+      "length": 1
+    },
+    {
+      "number": 40085,
+      "scaling_factor": 1,
+      "description": [{ "en": "W_SF: AC Power scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40085,
+      "length": 1
+    },
+    {
+      "number": 40086,
+      "scaling_factor": 1,
+      "description": [{ "en": "AC Frequency (Hz · Hz_SF)" }],
+      "unit": "Hz",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40086,
+      "length": 1
+    },
+    {
+      "number": 40087,
+      "scaling_factor": 1,
+      "description": [{ "en": "Hz_SF: Frequency scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40087,
+      "length": 1
+    },
+    {
+      "number": 40088,
+      "scaling_factor": 1,
+      "description": [{ "en": "Apparent Power (VA · VA_SF, signed)" }],
+      "unit": "VA",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40088,
+      "length": 1
+    },
+    {
+      "number": 40089,
+      "scaling_factor": 1,
+      "description": [{ "en": "VA_SF: Apparent Power scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40089,
+      "length": 1
+    },
+    {
+      "number": 40090,
+      "scaling_factor": 1,
+      "description": [{ "en": "Reactive Power (var · var_SF, signed)" }],
+      "unit": "var",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40090,
+      "length": 1
+    },
+    {
+      "number": 40091,
+      "scaling_factor": 1,
+      "description": [{ "en": "var_SF: Reactive Power scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40091,
+      "length": 1
+    },
+    {
+      "number": 40092,
+      "scaling_factor": 1,
+      "description": [{ "en": "Power Factor (% · PF_SF, signed)" }],
+      "unit": "%",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40092,
+      "length": 1
+    },
+    {
+      "number": 40093,
+      "scaling_factor": 1,
+      "description": [{ "en": "PF_SF: Power Factor scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40093,
+      "length": 1
+    },
+    {
+      "number": 40094,
+      "scaling_factor": 1,
+      "description": [{ "en": "AC Lifetime Energy (Wh · Wh_SF, U32)" }],
+      "unit": "Wh",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40094,
+      "length": 2
+    },
+    {
+      "number": 40096,
+      "scaling_factor": 1,
+      "description": [{ "en": "Wh_SF: Energy scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40096,
+      "length": 1
+    },
+    {
+      "number": 40097,
+      "scaling_factor": 1,
+      "description": [{ "en": "DC Current (A · DCA_SF)" }],
+      "unit": "A",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40097,
+      "length": 1
+    },
+    {
+      "number": 40098,
+      "scaling_factor": 1,
+      "description": [{ "en": "DCA_SF: DC Current scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40098,
+      "length": 1
+    },
+    {
+      "number": 40099,
+      "scaling_factor": 1,
+      "description": [{ "en": "DC Voltage (V · DCV_SF)" }],
+      "unit": "V",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40099,
+      "length": 1
+    },
+    {
+      "number": 40100,
+      "scaling_factor": 1,
+      "description": [{ "en": "DCV_SF: DC Voltage scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40100,
+      "length": 1
+    },
+    {
+      "number": 40101,
+      "scaling_factor": 1,
+      "description": [{ "en": "DC Power (W · DCW_SF, signed)" }],
+      "unit": "W",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40101,
+      "length": 1
+    },
+    {
+      "number": 40102,
+      "scaling_factor": 1,
+      "description": [{ "en": "DCW_SF: DC Power scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40102,
+      "length": 1
+    },
+    {
+      "number": 40103,
+      "scaling_factor": 1,
+      "description": [{ "en": "Cabinet Temperature (°C · Tmp_SF, signed)" }],
+      "unit": "°C",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40103,
+      "length": 1
+    },
+    {
+      "number": 40104,
+      "scaling_factor": 1,
+      "description": [{ "en": "Heat Sink Temperature (°C · Tmp_SF, signed)" }],
+      "unit": "°C",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40104,
+      "length": 1
+    },
+    {
+      "number": 40105,
+      "scaling_factor": 1,
+      "description": [{ "en": "Transformer Temperature (°C · Tmp_SF, signed)" }],
+      "unit": "°C",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40105,
+      "length": 1
+    },
+    {
+      "number": 40106,
+      "scaling_factor": 1,
+      "description": [{ "en": "Other Temperature (°C · Tmp_SF, signed)" }],
+      "unit": "°C",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40106,
+      "length": 1
+    },
+    {
+      "number": 40107,
+      "scaling_factor": 1,
+      "description": [{ "en": "Tmp_SF: Temperature scale factor (signed)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40107,
+      "length": 1
+    },
+    {
+      "number": 40108,
+      "scaling_factor": 1,
+      "description": [{ "en": "Operating State (1=Off, 2=Sleeping, 3=Starting, 4=MPPT, 5=Throttled, 6=Shutting Down, 7=Fault, 8=Standby)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40108,
+      "length": 1
+    },
+    {
+      "number": 40109,
+      "scaling_factor": 1,
+      "description": [{ "en": "Vendor-specific operating state" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40109,
+      "length": 1
+    },
+    {
+      "number": 40110,
+      "scaling_factor": 1,
+      "description": [{ "en": "Event flags 1 (U32 bitfield)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40110,
+      "length": 2
+    },
+    {
+      "number": 40112,
+      "scaling_factor": 1,
+      "description": [{ "en": "Event flags 2 (U32 bitfield, reserved)" }],
+      "unit": "",
+      "reg_type": "MB_PARAM_HOLDING",
+      "address": 40112,
+      "length": 2
+    }
+  ]
+}

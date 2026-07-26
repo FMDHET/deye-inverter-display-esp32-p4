@@ -1,0 +1,374 @@
+﻿addr;name;type;unit;scale;detail
+0;Device Type;enum;;;2=String Inverter | 3=1-Phase Hybrid | 4=Micro Inverter | 5=3-Phase LV Hybrid | 6=3-Phase HV Hybrid
+1;Modbus Address;value;;1;
+2;Protokoll-Version;value;;1;
+3;Serial number (10 ASCII bytes);ascii;;;5 regs, 2 ASCII chars each
+8;Rated Power;value;;1;
+11;Assistant Prog Version;format;;;0x
+14;Ctrl FW Version Seg2;value;;1;
+15;Ctrl FW Master Version;value;;1;
+16;Comm FW Version Seg1;value;;1;
+17;Comm FW Version Seg2;value;;1;
+18;Comm FW Master Version;value;;1;
+19;Safety Type;value;;1;
+20;Rated Power (low);value;W;0.1;
+21;Rated Power (high);value;W;0.1;
+22;MPPT Num & Phases;format;;;0x
+23;Rated Grid Voltage;enum;;;0=127/220V | 1=220/380V
+60;Remote Lock;enum;;;0=turn on | 2=turn off
+61;Self-Check Time (boot);value;s;1;
+62;System Time Byte01 (Year);value;y;1;
+63;System Time Byte03 (Day);value;d;1;
+64;System Time Byte05 (Min);value;min;1;
+65;Insulation Impedance;value;kΩ;0.1;
+74;Communication Address;value;;1;
+75;Communication Baudrate;value;;1;
+77;Active Power Regulation;value;%;0.1;
+78;Reactive Power Regulation;value;%;0.1;
+79;Apparent Power Regulation;value;%;0.1;
+80;Inverter enabled;enum;;;0=aus | 1=an
+81;Factory Reset Enable;enum;;;0=disable | 1=enable
+82;Self-Checking Time;value;s;1;
+83;Island Protection Enable;enum;;;0=disable | 1=enable
+84;MPPT Number Enable;enum;;;0=disable | 1=enable
+85;GFDI Enable;enum;;;0=disable | 1=enable
+87;RISO Enable;enum;;;0=disable | 1=enable
+88;Grid Standard (old);enum;;;1=China | 2=Brazil | 3=India
+90;Low Voltage Ride Through;enum;;;0=disable | 1=enable
+91;MCU EEPROM Init;enum;;;0=work normal | 1=init eeprom
+92;Comm EEPROM Init;enum;;;0=work normal | 1=init eeprom
+96;PowerWH Factor;value;;0.01;
+98;Battery Control Mode;enum;;;0=Lead-Battery 4-stage | 1=Lithium
+99;Battery Equalization Voltage;value;V;0.01;
+100;Battery Absorption V;value;V;0.01;
+101;Battery Float V;value;V;0.01;
+102;Battery Capacity (current);value;Ah;1;
+103;Battery Empty Voltage;value;V;0.01;
+104;System Zero-Export Power;value;W;1;
+105;Battery Equalization Days;value;d;1;
+106;Battery Equalization Hours;value;h;1;
+107;Temp Compensation;value;mV/°C;1;
+108;Battery Max Charge Current;value;A;1;
+109;Battery Max Discharge Current;value;A;1;
+111;Battery Type;enum;;;0=Use Battery Voltage | 1=Lithium (BMS) | 2=No Battery
+112;Battery Wake Up;enum;;;0=Disabled | 1=Enabled
+113;Battery Resistance;value;mOhm;1;
+114;Battery Charge Efficiency;value;%;0.1;
+115;Battery Shutdown Capacity;value;%;1;
+116;Battery Restart Capacity;value;%;1;
+117;Battery Low Capacity;value;%;1;
+118;Battery Shutdown V;value;V;0.01;
+119;Battery Restart V;value;V;0.01;
+120;Battery Low V Warn;value;V;0.01;
+121;Generator Max Operating Time;value;h;0.1;
+122;Generator Cooling Time;value;h;0.1;
+123;Gen Charge Start Voltage;value;V;0.01;
+124;Gen Charge Start SOC;value;%;1;
+125;Gen Charge Max Current;value;A;1;
+126;Grid Charge Max Power;value;W;1;
+127;Grid Charge Start SOC;value;%;1;
+128;Grid Charge Max Current;value;A;1;
+129;Gen Charge Enable;enum;;;0=aus | 1=an
+130;Grid Charge Enable;enum;;;0=aus | 1=an
+131;AC Couple Freq Upper;value;Hz;0.01;
+132;Force Generator as Load;enum;;;0=aus | 1=an
+133;Generator Port Usage;enum;;;0=Generator | 1=Smartload | 2=Micro Inverter
+134;Smart Load Off Voltage;value;V;0.01;
+135;Smart Load Off SOC;value;%;1;
+136;Smart Load On Voltage;value;V;0.01;
+137;Smart Load On SOC;value;%;1;
+138;Lithium Battery Enable;enum;;;0=aus | 1=an
+139;Battery Capacity;value;Ah;1;
+140;Signal Source;enum;;;0=beide aus | 1=Grid Signal an | 2=Gen Signal an | 3=beide an
+141;Energy Mgmt Mode (Bitmask);format;;;(Bit0-1: 0=BatFirst/1=LoadFirst, Bit2-3 passive, Bit4-5 active grid balance)
+142;System Work Mode;enum;;;0=Self Use | 1=Zero Export to Load | 2=Zero Export to CT | 3=Selling First
+143;Max Sell Power;value;W;1;
+144;External CT Clamp Phase;format;;;0x
+145;Solar Export;enum;;;0=aus | 1=an
+146;TOU Day-Mask / Enable;format;;;(Bitmask)
+147;Grid Phase Sequence;enum;;;0=0/120/240 | 1=0/240/120
+148;TOU Time Slot 1;format;;;HH:MM (x/100 : x%100)
+149;TOU Time Slot 2;format;;;HH:MM (x/100 : x%100)
+150;TOU Time Slot 3;format;;;HH:MM (x/100 : x%100)
+151;TOU Time Slot 4;format;;;HH:MM (x/100 : x%100)
+152;TOU Time Slot 5;format;;;HH:MM (x/100 : x%100)
+153;TOU Time Slot 6;format;;;HH:MM (x/100 : x%100)
+154;TOU Power Slot 1;value;W;1;
+155;TOU Power Slot 2;value;W;1;
+156;TOU Power Slot 3;value;W;1;
+157;TOU Power Slot 4;value;W;1;
+158;TOU Power Slot 5;value;W;1;
+159;TOU Power Slot 6;value;W;1;
+160;TOU Voltage Slot 1;value;V;0.01;
+161;TOU Voltage Slot 2;value;V;0.01;
+162;TOU Voltage Slot 3;value;V;0.01;
+163;TOU Voltage Slot 4;value;V;0.01;
+164;TOU Voltage Slot 5;value;V;0.01;
+165;TOU Voltage Slot 6;value;V;0.01;
+166;TOU SOC Slot 1;value;%;1;
+167;TOU SOC Slot 2;value;%;1;
+168;TOU SOC Slot 3;value;%;1;
+169;TOU SOC Slot 4;value;%;1;
+170;TOU SOC Slot 5;value;%;1;
+171;TOU SOC Slot 6;value;%;1;
+172;TOU GridCharge 1;enum;;;0=nein | 1=ja
+173;TOU GridCharge 2;enum;;;0=nein | 1=ja
+174;TOU GridCharge 3;enum;;;0=nein | 1=ja
+175;TOU GridCharge 4;enum;;;0=nein | 1=ja
+176;TOU GridCharge 5;enum;;;0=nein | 1=ja
+177;TOU GridCharge 6;enum;;;0=nein | 1=ja
+178;Function Flags 1 (Bitmask);format;;;(Bit0-1: MicroInv Export Cutoff, Bit2-3: Gen Peak Shave, Bit4-5: Grid Peak Shave, Bit6-7: On-Grid Always On)
+179;Function Flags 2 (Bitmask);format;;;(Bit0-1: ExtCT auto-dir, Bit2-3: Forced Off-Grid)
+180;Restore Connection Time;value;s;1;
+181;Solar Arc Fault Mode;enum;;;0=aus | 1=an
+182;Grid Standard;enum;;;0=Generic | 1=IEEE1547 | 2=RULE21 | 3=SRD_UL1741 | 4=CEI_0_21 | 5=EN50549_CZ | 6=AS4777_A | 7=AS4777_B | 8=AS4777_C | 9=AS4777_NZ | 10=VDE4105 | 11=OVE_R25 | 12=EN50549_CZ_L16A
+183;Grid Frequency Config;enum;;;0=50 Hz | 1=60 Hz
+184;Grid Type;enum;;;0=Single-Phase 220-240V | 1=Split-Phase 120/240V | 2=3-Phase 208V | 3=Single-Phase 120V
+185;Grid Voltage High Limit;value;V;0.1;
+186;Grid Voltage Low Limit;value;V;0.1;
+187;Grid Frequency High Limit;value;Hz;0.01;
+188;Grid Frequency Low Limit;value;Hz;0.01;
+189;Gen connected to Grid Input;enum;;;0=aus | 1=an
+190;Gen Peak Shaving Power;value;W;1;
+191;Grid Peak Shaving Power;value;W;1;
+192;Smart Load Open Delay;value;min;1;
+193;Output PF Setting;value;%;0.1;
+194;External Relay Bits;format;;;(Bit0-8 = 8 Relays)
+195;ARC_factory_B High;value;;1;
+196;ARC_factory_B Low;value;;1;
+197;ARC_factory_I High;value;;1;
+198;ARC_factory_I Low;value;;1;
+199;ARC_factory_F High;value;;1;
+200;ARC_factory_F Low;value;;1;
+201;ARC_factory_D High;value;;1;
+202;ARC_factory_D Low;value;;1;
+203;ARC_factory_T High;value;;1;
+204;ARC_factory_T Low;value;;1;
+205;ARC_factory_C High;value;;1;
+206;ARC_factory_C Low;value;;1;
+207;ARC_factory_Frz High;value;;1;
+208;ARC_factory_Frz Low;value;;1;
+209;UPS Delay Time;value;s;1;
+210;BMS Charge Voltage;value;V;0.01;
+211;BMS Discharge Voltage;value;V;0.01;
+212;BMS Charge Current Limit;value;A;1;
+213;BMS Discharge Current Limit;value;A;1;
+214;BMS SOC;value;%;1;
+215;BMS Voltage;value;V;0.01;
+216;BMS Current;value;A;0.01;
+217;BMS Temperatur;temp;°C;0.1;raw*0.1-100
+218;BMS Max Charge Current;value;A;1;
+219;BMS Max Discharge Current;value;A;1;
+220;BMS Alarm Flags;format;;;0x
+221;Li Battery Fault Bits;format;;;0x
+222;Li Battery Flag 2;format;;;0x
+223;Lithium Battery Protocol;enum;;;0=PYLON/SOLAX (CAN) | 1=Tianbangda RS485 | 2=KOK | 3=Keith | 4=Topai | 5=Pylon 485 | 6=Jielisi 485 | 7=Xinwangda 485 | 8=Xinruineng 485 | 9=Tianbangda 485 | 10=Shenggao CAN
+224;Lithium Battery SOH;value;%;1;
+227;Upgrade LCD Test;enum;;;0=aus | 1=an
+228;Comm Board Setup Bits;format;;;(time/beep/ampm)
+229;Battery 1 Manufacturer;enum;;;0=HereYin | 1=PYLON | 2=SOLAX | 3=DYNESS_L | 4=CCGX | 5=Alpha_ESS | 6=SUNGO_CAN | 7=VISION_CAN | 8=WATTSONIC_CAN | 9=KUNLAN | 10=GSEnergy | 11=GS_HUB | 12=BYD_LV | 13=AOBO | 14=DEYE | 15=CFE | 16=DMEGC | 17=UZENERGY | 18=GROWATT
+235;Track Grid Phase;enum;;;0=aus | 1=an
+310;Solar makes Wind Input;format;;;(Bit0=S1, Bit1=S2)
+311;Cell Voltage 1;value;V;0.1;
+312;Cell Voltage 2;value;V;0.1;
+313;Cell Voltage 3;value;V;0.1;
+314;Cell Voltage 4;value;V;0.1;
+315;Cell Voltage 5;value;V;0.1;
+316;Cell Voltage 6;value;V;0.1;
+317;Cell Voltage 7;value;V;0.1;
+318;Cell Voltage 8;value;V;0.1;
+319;Cell Voltage 9;value;V;0.1;
+320;Cell Voltage 10;value;V;0.1;
+321;Cell Voltage 11;value;V;0.1;
+322;Cell Voltage 12;value;V;0.1;
+323;Cell Current 1;value;A;0.1;
+324;Cell Current 2;value;A;0.1;
+325;Cell Current 3;value;A;0.1;
+326;Cell Current 4;value;A;0.1;
+327;Cell Current 5;value;A;0.1;
+328;Cell Current 6;value;A;0.1;
+329;Cell Current 7;value;A;0.1;
+330;Cell Current 8;value;A;0.1;
+331;Cell Current 9;value;A;0.1;
+332;Cell Current 10;value;A;0.1;
+333;Cell Current 11;value;A;0.1;
+334;Cell Current 12;value;A;0.1;
+336;Parallel Bitfeld;format;;;0x
+340;Max Solar Power;value;W;1;
+344;Grid Check Mode;format;;;Meter
+347;External CT Ratio;value;:1;1;
+348;Meter CT Ratio;value;:1;1;
+350;Charge Slew Rate (pos);value;W;1;
+351;Charge Slew Rate (neg);value;W;1;
+380;CA_LHVRT Enable;enum;;;0=disable | 1=enable
+381;CA_HV2;value;V;0.1;
+382;CA_HV1;value;V;0.1;
+383;CA_LV1;value;V;0.1;
+384;CA_LV2;value;V;0.1;
+385;CA_LV3;value;V;0.1;
+386;CA_HV2 Time;value;s;0.01;
+387;CA_HV1 Time;value;s;0.01;
+388;CA_LV1 Time;value;s;0.01;
+389;CA_LV2 Time;value;s;0.01;
+390;CA_LV3 Time;value;s;0.01;
+391;CA_LHFRT Enable;enum;;;0=disable | 1=enable
+392;CA_HF2;value;Hz;0.01;
+393;CA_HF1;value;Hz;0.01;
+394;CA_LF1;value;Hz;0.01;
+395;CA_LF2;value;Hz;0.01;
+396;CA_HF2 Time;value;s;0.01;
+397;CA_HF1 Time;value;s;0.01;
+398;CA_LF1 Time;value;s;0.01;
+399;CA_LF2 Time;value;s;0.01;
+400;CA_QV Enable;enum;;;0=disable | 1=enable
+401;CA_QV_V1;value;V;0.1;
+402;CA_QV_V2;value;V;0.1;
+403;CA_QV_V3;value;V;0.1;
+404;CA_QV_V4;value;;0.01;
+405;CA_QV_Q1;value;;1;
+406;CA_QV_Q2;value;;1;
+407;CA_QV_Q3;value;;1;
+408;CA_QV_Q4;value;;1;
+409;CA_FW Enable;enum;;;0=disable | 1=enable
+410;CA_F Start;value;Hz;0.01;
+411;CA_F Stop;value;Hz;0.01;
+412;CA_VW Enable;enum;;;0=disable | 1=enable
+413;CA_V Start;value;V;0.1;
+414;CA_V Stop;value;V;0.1;
+415;Normal Up Slope;value;%;1;
+416;Soft Start Rise Rate;value;%;1;
+417;QV Response Time;value;s;1;
+418;VW Response Time;value;s;1;
+419;FW Response Time;value;s;1;
+500;Running Status;enum;;;0=Standby | 1=Selfcheck | 2=Normal | 3=Alarm | 4=Fault
+501;Day Active Energy;value;kWh;0.1;
+502;Day Reactive Energy;value;kVarh;0.1;
+503;Day Grid Conn. Time;value;s;1;
+504;Total Active Energy (low);value;kWh;0.1;
+505;Total Active Energy (high);value;kWh;0.1;
+506;Total Reactive Energy (low);value;kVarh;0.1;
+507;Total Reactive Energy (high);value;kVarh;0.1;
+508;Inverter Status Flag 1;format;;;0x
+509;Inverter Status Flag 2;format;;;0x
+514;Day Battery Charge;value;kWh;0.1;
+515;Day Battery Discharge;value;kWh;0.1;
+516;Total Battery Charge (low);value;kWh;0.1;
+517;Total Battery Charge (high);value;kWh;0.1;
+518;Total Battery Discharge (low);value;kWh;0.1;
+519;Total Battery Discharge (high);value;kWh;0.1;
+520;Day Grid Import;value;kWh;0.1;
+521;Day Grid Export;value;kWh;0.1;
+522;Total Grid Import (low);value;kWh;0.1;
+523;Total Grid Import (high);value;kWh;0.1;
+524;Total Grid Export (low);value;kWh;0.1;
+525;Total Grid Export (high);value;kWh;0.1;
+526;Day Load Energy;value;kWh;0.1;
+527;Total Load Energy (low);value;kWh;0.1;
+528;Total Load Energy (high);value;kWh;0.1;
+529;Day PV Energy;value;kWh;0.1;
+530;Day PV-1 Energy;value;kWh;0.1;
+531;Day PV-2 Energy;value;kWh;0.1;
+532;Day PV-3 Energy;value;kWh;0.1;
+533;Day PV-4 Energy;value;kWh;0.1;
+534;Total PV Energy (low);value;kWh;0.1;
+535;Total PV Energy (high);value;kWh;0.1;
+539;Gen Working Hours / Day;value;h;0.1;
+540;DC Transformer Temp;temp;°C;0.1;raw*0.1-100
+541;Radiator Temp;temp;°C;0.1;raw*0.1-100
+542;Reserved Temp 1;temp;°C;0.1;raw*0.1-100
+543;Reserved Temp 2;temp;°C;0.1;raw*0.1-100
+544;DRM Code Bitmaske;value;;1;
+548;Comm Board Fault Status;format;;;0x
+549;MCU Test Flag;format;;;0x
+550;LCD Test Flag;format;;;0x
+551;Turn Off/On Status;format;;;power off
+552;AC Relay Status (Bitmask);format;;;(Bit0=INV, Bit2=Grid, Bit3=Gen, Bit4=GridSupply)
+553;Warning Word 1;format;;;(Bit1=FAN_WARN, Bit2=GridPhaseWrong)
+554;Warning Word 2;format;;;0x
+555;Fault Code 1 (low);value;;1;
+556;Fault Code 1 (high);value;;1;
+557;Fault Code 2 (low);value;;1;
+558;Fault Code 2 (high);value;;1;
+586;Battery Temperatur;temp;°C;0.1;raw*0.1-100
+587;Battery Voltage;value;V;0.01;
+588;Battery SOC;value;%;1;
+590;Battery Power;value;W;1;
+591;Battery Current;value;A;0.02;
+592;Battery Corrected AH;value;Ah;1;
+598;Grid L1 Voltage;value;V;0.1;
+599;Grid L2 Voltage;value;V;0.1;
+600;Grid L3 Voltage;value;V;0.1;
+601;Grid Line Voltage AB;value;V;0.1;
+602;Grid Line Voltage BC;value;V;0.1;
+603;Grid Line Voltage CA;value;V;0.1;
+604;Grid Inner A Power;value;W;1;
+605;Grid Inner B Power;value;W;1;
+606;Grid Inner C Power;value;W;1;
+607;Grid Inner Total Active;value;W;1;
+608;Grid Inner Apparent;value;VA;1;
+609;Grid Frequency;value;Hz;0.01;
+610;Grid Current L1;value;A;0.01;
+611;Grid Current L2;value;A;0.01;
+612;Grid Current L3;value;A;0.01;
+613;Grid CT Current L1;value;A;0.01;
+614;Grid CT Current L2;value;A;0.01;
+615;Grid CT Current L3;value;A;0.01;
+616;Grid CT L1 Power;value;W;1;
+617;Grid CT L2 Power;value;W;1;
+618;Grid CT L3 Power;value;W;1;
+619;Grid CT Total Power;value;W;1;
+620;Grid Ext Total Apparent;value;VA;1;
+621;Grid Power Factor;value;;0.001;
+622;Grid L1 Power;value;W;1;
+623;Grid L2 Power;value;W;1;
+624;Grid L3 Power;value;W;1;
+625;Grid Total Power;value;W;1;
+627;Inverter L1 Voltage;value;V;0.1;
+628;Inverter L2 Voltage;value;V;0.1;
+629;Inverter L3 Voltage;value;V;0.1;
+630;Inverter L1 Current;value;A;0.01;
+631;Inverter L2 Current;value;A;0.01;
+632;Inverter L3 Current;value;A;0.01;
+633;Inverter L1 Power;value;W;1;
+634;Inverter L2 Power;value;W;1;
+635;Inverter L3 Power;value;W;1;
+636;Inverter Total Power;value;W;1;
+637;Inverter Total Apparent;value;VA;1;
+638;Inverter Frequency;value;Hz;0.01;
+640;UPS Load L1 Power;value;W;1;
+641;UPS Load L2 Power;value;W;1;
+642;UPS Load L3 Power;value;W;1;
+643;UPS Load Total Power;value;W;1;
+644;Load L1 Voltage;value;V;0.1;
+645;Load L2 Voltage;value;V;0.1;
+646;Load L3 Voltage;value;V;0.1;
+647;Load Current L1;value;A;0.01;
+648;Load Current L2;value;A;0.01;
+649;Load Current L3;value;A;0.01;
+650;Load L1 Power;value;W;1;
+651;Load L2 Power;value;W;1;
+652;Load L3 Power;value;W;1;
+653;Load Total Power;value;W;1;
+654;Load Total Apparent;value;VA;1;
+655;Load Frequency;value;Hz;0.01;
+661;Gen L1 Voltage;value;V;0.1;
+662;Gen L2 Voltage;value;V;0.1;
+663;Gen L3 Voltage;value;V;0.1;
+664;Gen L1 Power;value;W;1;
+665;Gen L2 Power;value;W;1;
+666;Gen L3 Power;value;W;1;
+667;Gen Total Power;value;W;1;
+671;Gen L1 Current;value;A;0.01;
+672;PV1 Power;value;W;1;
+673;PV2 Power;value;W;1;
+674;PV3 Power;value;W;1;
+675;PV4 Power;value;W;1;
+676;PV1 Voltage;value;V;0.1;
+677;PV1 Current;value;A;0.1;
+678;PV2 Voltage;value;V;0.1;
+679;PV2 Current;value;A;0.1;
+680;PV3 Voltage;value;V;0.1;
+681;PV3 Current;value;A;0.1;
+682;PV4 Voltage;value;V;0.1;
+683;PV4 Current;value;A;0.1;
+1000;Grid Power Check Mode;format;;;Meter

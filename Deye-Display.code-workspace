@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "Deye-Display",
+			"path": "."
+		},
+		{
+			"name": "Modbus Deye - MQTT HA",
+			"path": "../Modbus Deye - MQTT HA"
+		}
+	],
+	"settings": {}
+}

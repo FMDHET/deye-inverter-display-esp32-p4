@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Deye Display</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  #scr{aspect-ratio:800/480;max-width:100vw;max-height:100vh;background:#0b0d10;
+       cursor:pointer;touch-action:none;user-select:none;-webkit-user-select:none;
+       -webkit-touch-callout:none}
+</style>
+</head>
+<body>
+  <div id="wrap"><img id="scr" draggable="false" alt="Deye Display"></div>
+<script>
+  var W = 800, H = 480;
+  var img = document.getElementById('scr');
+
+  function streamUrl() { return 'http://' + location.hostname + ':81/?t=' + Date.now(); }
+  img.src = streamUrl();
+  img.onerror = function () { setTimeout(function () { img.src = streamUrl(); }, 1500); };
+
+  // The device can be rotated (Einstellungen > Display > Ausrichtung), which
+  // changes the frame between 800x480 landscape and 480x800 portrait. Track the
+  // live size so the box aspect and touch scaling stay correct.
+  function applySize(w, h) {
+    if (w > 0 && h > 0 && (w !== W || h !== H)) {
+      W = w; H = h;
+      img.style.aspectRatio = w + ' / ' + h;
+    }
+  }
+  function pollSize() {
+    fetch('/api/live').then(function (r) { return r.json(); }).then(function (d) {
+      if (d && d.w && d.h) applySize(d.w, d.h);
+    }).catch(function () {});
+  }
+  pollSize();
+  setInterval(pollSize, 2000);
+
+  function send(clientX, clientY, down) {
+    var r = img.getBoundingClientRect();
+    var x = Math.round((clientX - r.left) / r.width  * W);
+    var y = Math.round((clientY - r.top)  / r.height * H);
+    x = Math.max(0, Math.min(W - 1, x));
+    y = Math.max(0, Math.min(H - 1, y));
+    fetch('/touch?x=' + x + '&y=' + y + '&down=' + (down ? 1 : 0)).catch(function () {});
+  }
+
+  var pressing = false;
+  img.addEventListener('pointerdown', function (e) {
+    pressing = true;
+    try { img.setPointerCapture(e.pointerId); } catch (_) {}
+    send(e.clientX, e.clientY, 1); e.preventDefault();
+  });
+  img.addEventListener('pointermove', function (e) {
+    if (pressing) { send(e.clientX, e.clientY, 1); e.preventDefault(); }
+  });
+  function up(e) {
+    if (!pressing) return;
+    pressing = false;
+    send(e.clientX, e.clientY, 0); e.preventDefault();
+  }
+  img.addEventListener('pointerup', up);
+  img.addEventListener('pointercancel', up);
+
+  // Forward the physical keyboard to the device's focused text field.
+  document.addEventListener('keydown', function (e) {
+    // Clipboard shortcuts: let them reach the paste/copy handlers and NEVER
+    // forward them as literal characters (Cmd+V must not also type a "v").
+    if (e.metaKey || e.ctrlKey || e.altKey) {
+      if (e.key === 'c' || e.key === 'C') {        // copy device field -> PC
+        fetch('/copy').then(function (r) { return r.text(); }).then(function (t) {
+          if (t && navigator.clipboard) navigator.clipboard.writeText(t).catch(function () {});
+        }).catch(function () {});
+      }
+      return;
+    }
+    var c = 0;
+    if (e.key === 'Backspace')      c = 8;
+    else if (e.key === 'Enter')     c = 13;
+    else if (e.key.length === 1)    c = e.key.charCodeAt(0);
+    else return;                    // ignore F-keys, arrows, etc.
+    fetch('/key?c=' + c).catch(function () {});
+    if (e.key === 'Backspace') e.preventDefault();
+  });
+
+  // PC clipboard -> device's focused text field (Cmd/Ctrl+V).
+  document.addEventListener('paste', function (e) {
+    var t = (e.clipboardData || window.clipboardData).getData('text');
+    if (t) fetch('/paste', { method: 'POST', body: t }).catch(function () {});
+    e.preventDefault();
+  });
+</script>
+</body>
+</html>

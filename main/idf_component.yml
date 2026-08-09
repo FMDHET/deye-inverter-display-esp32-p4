@@ -23,5 +23,14 @@ dependencies:
   ## WiFi via the on-module ESP32-C6: P4 has no built-in radio, so
   ## esp_hosted runs the WiFi/network stack on the C6 over SDIO and
   ## esp_wifi_remote forwards the standard esp_wifi API to it.
-  espressif/esp_hosted:        "~2.12.0"
+  ## PINNED, not a range. "~2.12.0" floated up to 2.12.12, and that build
+  ## asserted during SDIO transport init -- before app_main, so with no screen,
+  ## no WiFi and therefore no OTA to undo it:
+  ##     assert failed: sdio_mempool_create sdio_drv.c:258 (buf_mp_g)
+  ## 2.12.8 is the version matching the C6 co-processor firmware flashed on this
+  ## module (see DEYE_ENABLE_WIFI in main.c) and the one every working build so
+  ## far used. Host and co-processor are a matched pair here -- raise this only
+  ## together with the C6 firmware, and flash the first build of a new version
+  ## over USB with a serial monitor attached, never blind over OTA.
+  espressif/esp_hosted:        "==2.12.8"
   espressif/esp_wifi_remote:   "*"

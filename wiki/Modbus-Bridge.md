@@ -78,7 +78,9 @@ Ein Fehler, den der **Deye selbst** schickt (etwa „Register gibt es nicht"), w
 
 Gleichzeitig offen sein dürfen **zwei** Verbindungen. Das ist fest eingebaut und nicht einstellbar. Wer darüber hinaus anklopft, wird sofort abgewiesen statt hingehalten.
 
-Warum so knapp? Jede Verbindung belegt einen Netzwerkkanal, und davon gibt es im Gerät nur eine feste Anzahl — die teilen sich Webserver, Web-Mirror, MQTT, VPN und die Modbus-Abfragen (siehe [Bauen und Flashen](Bauen-und-Flashen#ein-paar-einstellungen-die-erklärung-brauchen)). Diese Anzahl lässt sich **nicht** einfach erhöhen: der Versuch hat dem WLAN-Baustein den Speicher weggenommen, den er zum Starten braucht, und das Gerät kam gar nicht mehr hoch. Zu viele Modbus-Verbindungen würden also die Weboberfläche aushungern.
+Warum so knapp? Jede Verbindung belegt einen Netzwerkkanal, und davon gibt es im Gerät nur 16 — die teilen sich Webserver, Web-Mirror, MQTT, VPN und die Modbus-Abfragen (siehe [Bauen und Flashen](Bauen-und-Flashen#ein-paar-einstellungen-die-erklärung-brauchen)). Zu viele Modbus-Verbindungen würden die Weboberfläche aushungern.
+
+Die Brücke ist deshalb absichtlich so bemessen, dass sie in dieses Budget passt und man die Zahl gar nicht erst anfassen muss. Verloren geht dabei nichts: auf der Zweidrahtleitung wird ohnehin nacheinander gearbeitet, mehr gleichzeitige Verbindungen würden sich nur gegenseitig in die Warteschlange stellen.
 
 Auf der Leitung selbst wird ohnehin **nacheinander** gearbeitet: RS485 lässt nur einen sprechen. Fragen mehrere Programme gleichzeitig, stehen sie kurz an. Für Abfragen im Sekundentakt spielt das keine Rolle.
 

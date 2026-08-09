@@ -22,6 +22,11 @@ extern "C" {
 /* Register the GET/POST /ota routes on an existing HTTP server (:80). */
 void ota_register_routes(httpd_handle_t server);
 
+/* Confirm the running image so the bootloader keeps it (no-op unless it is
+ * awaiting verification). Call once the device is remotely rescuable again --
+ * see the comment on the implementation for why that is the criterion. */
+void ota_mark_app_valid(void);
+
 #ifdef __cplusplus
 }
 #endif

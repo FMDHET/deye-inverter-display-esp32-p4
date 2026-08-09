@@ -58,11 +58,11 @@ typedef struct {
 #define MB_GW_DEFAULT_TIMEOUT_MS 800
 /* Client slots are LWIP sockets out of a pool (CONFIG_LWIP_MAX_SOCKETS = 16)
  * shared with two HTTP servers, DNS, MQTT, WireGuard and the Modbus-TCP poll
- * workers. That pool CANNOT be grown -- raising it starves the DMA-capable
- * internal RAM that esp_hosted's SDIO transport needs and the device no longer
- * boots (see the note in sdkconfig.defaults). So keep the bridge frugal: it is
- * off by default, and even fully loaded it takes at most 1 listener + 4
- * clients. RS485 is serial anyway, so more clients would only queue. */
+ * workers -- so the bridge stays frugal: off by default, and even fully loaded
+ * it takes at most 1 listener + 4 clients. That costs nothing in practice,
+ * because RS485 is serial and extra clients would only queue behind each other.
+ * Growing the pool is possible but untested on this board (see the note in
+ * sdkconfig.defaults); sizing the bridge to fit avoids the question. */
 #define MB_GW_DEFAULT_CLIENTS    2
 #define MB_GW_MAX_CLIENTS        4      /* hard ceiling for gw_max_clients   */
 

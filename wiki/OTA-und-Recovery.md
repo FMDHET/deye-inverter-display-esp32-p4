@@ -19,6 +19,26 @@ Geschrieben wird immer in den, der gerade **nicht** läuft. Erst wenn die neue V
 
 Und wenn die neue Version zwar startet, sich aber falsch verhält? Dann gibt es den **Rollback**: zurück auf den anderen Abschnitt, wo die alte Version noch unangetastet liegt.
 
+## Der automatische Rückfall
+
+Es gibt einen Fall, den das Zwei-Abschnitte-Prinzip allein nicht abfängt: die neue Firmware kommt **vollständig und heil** an, startet aber nicht. Dann ist der Merkzettel längst umgestellt, das Gerät bootet immer wieder in die kaputte Version — und weil es dabei nie ins WLAN kommt, ist auch die Notfallseite weg. Übrig bleibt nur das USB-Kabel.
+
+Genau dafür gibt es einen Wachhund im Bootloader. Er funktioniert so:
+
+```mermaid
+flowchart LR
+    A["Neustart in<br/>neue Firmware"] --> B{"meldet sie sich<br/>binnen eines Starts<br/>gesund?"}
+    B -->|ja| C["Version wird<br/>behalten"]
+    B -->|nein| D["Bootloader schaltet<br/>auf die vorige zurück"]
+```
+
+Frisch geflashte Firmware gilt zunächst als **auf Bewährung**. Sie muss sich aktiv gesundmelden, sonst nimmt der Bootloader sie beim nächsten Start zurück. Stürzt sie vorher ab — oder kommt sie gar nicht so weit — passiert die Rückkehr von selbst, ohne Kabel und ohne Zutun.
+
+Entscheidend ist, **woran** „gesund" festgemacht wird. Hier gilt sie als gesund, sobald `/ota` wieder erreichbar ist. Die Begründung: solange das Gerät sich aus der Ferne neu flashen lässt, ist jede schlechte Version reparierbar — und mehr muss der Wachhund nicht garantieren. Strengere Kriterien wären ein Eigentor: würde man etwa eine bestehende WLAN-Verbindung zum Router verlangen, würde ein Router-Neustart eine völlig intakte Firmware zurückrollen.
+
+> [!IMPORTANT]
+> Diese Funktion sitzt im **Bootloader**, und ein Update über WLAN tauscht nur das Programm aus. Sie wird deshalb erst wirksam, nachdem der Bootloader einmal **per USB** geschrieben wurde. Bis dahin verhält sich das Gerät wie vorher: eine nicht startende Firmware bleibt liegen.
+
 ## Die Adressen
 
 | Methode | Adresse | Wirkung |

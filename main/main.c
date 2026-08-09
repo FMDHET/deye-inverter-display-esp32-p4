@@ -10,6 +10,7 @@
 #include "wifi_mgr.h"
 #include "captive.h"
 #include "web_mirror.h"
+#include "ota.h"
 #include "modbus_tcp.h"
 #include "modbus_rtu.h"
 #include "modbus_gw.h"
@@ -88,6 +89,11 @@ void app_main(void)
         err = captive_start();
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "captive_start failed: %s", esp_err_to_name(err));
+        } else {
+            /* The captive portal's HTTP server is what serves /ota, so this is
+             * the exact moment a bad build could still be replaced remotely.
+             * Confirm the image here and nowhere earlier -- see ota.c. */
+            ota_mark_app_valid();
         }
         /* Poll the Deye inverter over Modbus-TCP and feed the energy-flow UI. */
         err = modbus_tcp_start();
@@ -124,6 +130,10 @@ void app_main(void)
     }
 #else
     ESP_LOGW(TAG, "WiFi disabled");
+    /* No network by design, so there is no remote-rescue milestone to wait for.
+     * Confirm immediately, otherwise every USB-flashed debug build would be
+     * reverted by the bootloader on its second boot. */
+    ota_mark_app_valid();
 #endif
 
     /* Build the settings UI now -- AFTER every backend *_start() has run its

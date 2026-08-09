@@ -272,6 +272,39 @@ static esp_err_t recovery_page_handler(httpd_req_t *req)
     return httpd_resp_send(req, recovery_html_start, HTTPD_RESP_USE_STRLEN);
 }
 
+/* Confirm the running image so the bootloader stops watching it.
+ *
+ * With CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE a freshly OTA'd image boots in
+ * state PENDING_VERIFY and is kept only once the app reports itself healthy.
+ * Miss that call -- crash, hang, or simply never getting this far -- and the
+ * bootloader reverts to the previous slot on the next boot.
+ *
+ * That is the safety net for the failure mode this project actually hit: a
+ * firmware that asserts before app_main answers on no interface at all, so
+ * neither /recovery nor OTA can undo it and only a USB cable helps.
+ *
+ * "Healthy" is deliberately defined as "the /ota endpoint is up again": if the
+ * device can still be reflashed over the network, a bad build is recoverable
+ * without physical access, which is the whole point. Demanding more (STA
+ * associated, MQTT connected, Deye responding) would make a router outage or an
+ * unplugged RS485 line look like a broken firmware and revert a good one. */
+void ota_mark_app_valid(void)
+{
+    const esp_partition_t *run = esp_ota_get_running_partition();
+    esp_ota_img_states_t   state;
+
+    if (!run || esp_ota_get_state_partition(run, &state) != ESP_OK) return;
+    if (state != ESP_OTA_IMG_PENDING_VERIFY) return;   /* nothing to confirm */
+
+    esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    if (err == ESP_OK) {
+        ESP_LOGW(TAG, "image on '%s' confirmed -- rollback cancelled", run->label);
+    } else {
+        ESP_LOGE(TAG, "mark_app_valid failed: %s -- this boot may be reverted",
+                 esp_err_to_name(err));
+    }
+}
+
 void ota_register_routes(httpd_handle_t server)
 {
     httpd_uri_t info     = { .uri = "/ota",          .method = HTTP_GET,  .handler = ota_info_handler };

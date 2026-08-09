@@ -11,6 +11,17 @@ CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
 # 16 MB flash.
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
+# Automatic OTA rollback. A freshly flashed image boots in state
+# PENDING_VERIFY and is kept only after the firmware confirms itself via
+# ota_mark_app_valid() (main.c, once /ota is reachable again). A build that dies
+# before that -- e.g. asserting inside esp_hosted before app_main, which has
+# happened here -- is reverted to the previous slot by the bootloader on the
+# next boot, instead of leaving a device that only a USB cable can rescue.
+#
+# NOTE: this lives in the BOOTLOADER. OTA only replaces the app, so the option
+# takes effect only after the bootloader itself has been flashed over USB once.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 # Custom partition table -- default factory partition is only 1 MB, our
 # image with WiFi + LVGL is ~1.2 MB and growing.
 CONFIG_PARTITION_TABLE_CUSTOM=y
@@ -82,13 +93,19 @@ CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 # More LWIP sockets: two HTTP servers (:80 page/touch/ota, :81 MJPEG stream)
 # + DNS + Modbus-TCP need more than the default 10, or the web server starves.
 #
-# DO NOT RAISE THIS. 24 was tried for the Modbus bridge and bricked the device:
-# the extra lwIP pools eat DMA-capable internal RAM, and esp_hosted's SDIO
-# transport then failed to allocate its buffer pool at boot ->
-#   assert failed: sdio_mempool_create sdio_drv.c:258 (buf_mp_g)
-# -> reboot loop before WiFi (and therefore before OTA) ever came up, so the
-# only way out was a USB flash. The bridge lives within these 16 instead: it is
-# off by default and capped at MB_GW_MAX_CLIENTS (4) sockets when enabled.
+# 16 is the value this board is known to run with. 24 was tried for the Modbus
+# bridge and the device stopped booting -- but that turned out to be a RED
+# HERRING: the same firmware rebuilt with 16 failed identically, and the serial
+# log showed app_main was never reached at all. The real trigger was the ESP-IDF
+# version (5.5.5 asserts in esp_hosted's SDIO init, 5.5.4 boots) -- see the
+# framework pin in platformio.ini.
+#
+# So this is NOT a hard ceiling, it is simply the untested-vs-proven line: 24 has
+# never been shown to boot on this board. If the bridge ever needs more sockets,
+# raising it is fair game -- but flash that build over USB with a serial monitor
+# attached, because a boot failure here happens before WiFi and therefore before
+# OTA can rescue it. The bridge is sized to not need it: off by default, capped
+# at MB_GW_MAX_CLIENTS (4) sockets.
 CONFIG_LWIP_MAX_SOCKETS=16
 
 # Short TIME_WAIT: with the 16 sockets above shared between the two HTTP

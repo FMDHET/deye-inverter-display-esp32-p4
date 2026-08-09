@@ -119,10 +119,32 @@ In `sdkconfig.defaults` stehen Optionen, die nicht offensichtlich sind. Jede dav
 | `CONFIG_LV_USE_CLIB_MALLOC=y` | LVGL würde sonst einen mehrere hundert Kilobyte großen Speicherblock fest reservieren. Der passt nicht in die 320 KB schnellen Speicher des Chips. So benutzt LVGL den normalen Weg und landet automatisch im großen PSRAM. |
 | `CONFIG_LV_CACHE_DEF_SIZE=262144` | Die Schriftarten werden zur Laufzeit aus einer Schriftdatei berechnet. Ohne Zwischenspeicher (Standard ist 0!) scheitert das lautlos und **Umlaute erscheinen als Kästchen**. |
 | `CONFIG_LV_USE_SNAPSHOT=y` | Grundlage dafür, das Bildschirmbild abzugreifen — nötig für den [Web-Mirror](Web-Mirror). |
-| `CONFIG_LWIP_MAX_SOCKETS=16` | Zwei Webserver, DNS, MQTT, VPN und die Modbus-Verbindungen brauchen zusammen mehr Netzwerkkanäle als die zehn Standardkanäle. **Höher darf der Wert nicht.** Mit 24 fehlte dem WLAN-Baustein beim Start der Speicher, den er für seine Übertragung braucht: Neustartschleife noch vor dem WLAN — und damit auch vor der Update-Funktion, rettbar nur per USB-Kabel. Die Modbus-Brücke bleibt deshalb bewusst sparsam: aus im Auslieferungszustand, und höchstens zwei gleichzeitige Verbindungen. |
+| `CONFIG_LWIP_MAX_SOCKETS=16` | Zwei Webserver, DNS, MQTT, VPN und die Modbus-Verbindungen brauchen zusammen mehr Netzwerkkanäle als die zehn Standardkanäle. 16 ist der Wert, mit dem dieses Gerät erprobt läuft; 24 wurde probiert, ist aber nie zum Laufen gekommen (die Ursache lag woanders, siehe unten). Die Modbus-Brücke ist deshalb so bemessen, dass sie in dieses Budget passt: aus im Auslieferungszustand, höchstens zwei gleichzeitige Verbindungen. |
 | `CONFIG_LWIP_TCP_MSL=5000` | Beendete Netzwerkverbindungen werden normalerweise zwei Minuten lang „nachgehalten". Mit vielen kurzen Verbindungen war der Kanalvorrat dadurch erschöpft, der Webserver nahm nichts mehr an und große Updates wurden abgelehnt. Jetzt sind es 10 Sekunden. |
 | `CONFIG_ESP_NETIF_BRIDGE_EN=y` | Klingt nach Netzwerkbrücke, ist aber nur ein Trick: die Option schaltet nebenbei eine andere Einstellung um, ohne die das Gerät beim VPN-Aufbau abstürzt. |
 | `CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192` | Beim Start passiert viel gleichzeitig (WLAN hochfahren, Oberfläche bauen). Mit dem Standardwert reicht der Arbeitsplatz dafür nicht. |
+| `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` | Der Wachhund, der eine nicht startende Firmware von selbst zurücknimmt. Siehe [OTA und Recovery](OTA-und-Recovery#der-automatische-rückfall). Wirkt erst, wenn der Bootloader einmal per USB geschrieben wurde. |
+
+## Warum die ESP-IDF-Version festgenagelt ist
+
+In `platformio.ini` steht die Plattform-Adresse ohne Versionsangabe. Das heißt: PlatformIO holt sich beim ersten Bauen immer den **neuesten** Stand — und damit auch eine ESP-IDF-Version, die niemand ausgesucht hat.
+
+Das ist einmal teuer geworden. Ein Build, der sich dabei ESP-IDF 5.5.5 gezogen hat, brach schon beim Start ab:
+
+```text
+assert failed: sdio_mempool_create sdio_drv.c:258 (buf_mp_g)
+```
+
+Das passiert in der Startroutine des WLAN-Bausteins — **bevor** das eigentliche Programm anläuft. Also kein Bildschirm, kein WLAN, keine Update-Funktion. Rettung nur per USB-Kabel. Mit 5.5.4 startet dieselbe Firmware anstandslos.
+
+Deshalb ist die Version jetzt ausdrücklich festgelegt:
+
+```ini
+platform_packages =
+    framework-espidf @ https://github.com/pioarduino/esp-idf/releases/download/v5.5.4/esp-idf-v5.5.4.tar.xz
+```
+
+Wer sie anhebt, sollte das **bewusst** tun — und den ersten Build einer neuen ESP-IDF-Version per USB mit angehängtem Monitor flashen, nie blind über WLAN.
 
 ## Die erste Installation, Schritt für Schritt
 

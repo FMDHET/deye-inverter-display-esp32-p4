@@ -19,6 +19,7 @@ Jede Datei hat genau eine Aufgabe. Das macht es leicht, etwas zu finden, und sch
 | `ui_settings.c` | der Einstellungsbildschirm mit acht Reitern und Tastatur |
 | `modbus_tcp.c` | Geräte im Netzwerk abfragen, Energiemodell, SLS-Schutz |
 | `modbus_rtu.c` | die zwei Zweidrahtleitungen, gefälschter Zähler, Selbsttest |
+| `modbus_gw.c` | Modbus-Brücke: TCP-Server auf Port 502, reicht Anfragen an die RS485-Busse durch |
 | `deye_ctrl.c` | Akku-Betriebsarten schreiben |
 | `mqtt_fwd.c` | Werte veröffentlichen, Home Assistant einrichten |
 | `wifi_mgr.c` | WLAN-Verwaltung, mehrere Netze, Suche |

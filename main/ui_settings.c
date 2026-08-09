@@ -6,6 +6,7 @@
 #include "ui_flow.h"
 #include "modbus_tcp.h"
 #include "modbus_rtu.h"
+#include "modbus_gw.h"
 #include "mqtt_fwd.h"
 #include "ntp_client.h"
 #include "wg_client.h"
@@ -35,6 +36,8 @@ static const char *TAG = "ui_settings";
 #define BAR_H          56
 #define TAB_W          220
 #define TAB_H          52     /* 8 tabs * 52 = 416 <= rail height (424) */
+
+#define ARRAY_LEN(a)   ((int)(sizeof(a) / sizeof((a)[0])))
 
 typedef enum { TAB_WIFI = 0, TAB_DISPLAY, TAB_MBTCP, TAB_MBRTU, TAB_MQTT, TAB_ZEIT, TAB_VPN, TAB_SYSTEM, TAB_COUNT } tab_id_t;
 
@@ -95,6 +98,10 @@ static lv_obj_t       *s_rtu_role[MB_RTU_BUSES];
 static lv_obj_t       *s_rtu_id[MB_RTU_BUSES];
 static lv_obj_t       *s_rtu_baud[MB_RTU_BUSES];
 static lv_obj_t       *s_rtu_selftest_lbl;
+static lv_obj_t       *s_gw_sw;
+static lv_obj_t       *s_gw_port;
+static lv_obj_t       *s_gw_bus[MB_RTU_BUSES];
+static lv_obj_t       *s_gw_status;
 
 /* MQTT tab */
 static lv_obj_t       *s_mqtt_status, *s_mqtt_kbd;
@@ -123,6 +130,38 @@ static void wifi_refresh(void);
 static void wifi_saved_refresh(void);
 static void open_pwd_dialog(const char *ssid);
 static void close_pwd_dialog(void);
+
+/* ------------------- shared widget helpers ---------------------------- */
+
+static lv_obj_t *make_checkbox(lv_obj_t *parent, const char *txt, int x, int y, bool on)
+{
+    lv_obj_t *cb = lv_checkbox_create(parent);
+    lv_checkbox_set_text(cb, txt);
+    lv_obj_align(cb, LV_ALIGN_TOP_LEFT, x, y);
+    lv_obj_set_style_text_color(cb, COL_TEXT, 0);
+    if (on) lv_obj_add_state(cb, LV_STATE_CHECKED);
+    return cb;
+}
+
+/* Small wrapping sub-label -- status lines and hints under a tab's controls. */
+static lv_obj_t *wrap_label(lv_obj_t *parent, int32_t w, int x, int y, const char *txt)
+{
+    lv_obj_t *l = lv_label_create(parent);
+    lv_obj_set_style_text_font(l, F_SM, 0);
+    lv_obj_set_style_text_color(l, COL_SUB, 0);
+    lv_obj_set_width(l, w);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, x, y);
+    lv_label_set_text(l, txt);
+    return l;
+}
+
+/* Index of `v` in a small options table, or `dflt` if it is not listed. */
+static int opt_idx(const uint32_t *tab, int n, uint32_t v, int dflt)
+{
+    for (int i = 0; i < n; i++) if (tab[i] == v) return i;
+    return dflt;
+}
 
 /* ------------------- event handlers ---------------------------------- */
 
@@ -499,7 +538,7 @@ static void sleep_save_cb(lv_event_t *e)
 {
     (void)e;
     uint32_t sel = lv_dropdown_get_selected(s_sleep_dd);
-    if (sel >= sizeof(k_sleep_secs) / sizeof(k_sleep_secs[0])) sel = 0;
+    if (sel >= (uint32_t)ARRAY_LEN(k_sleep_secs)) sel = 0;
     uint16_t secs = k_sleep_secs[sel];
 
     nvs_store_set_sleep_secs(secs);
@@ -517,7 +556,7 @@ static void orient_change_cb(lv_event_t *e)
 {
     (void)e;
     uint32_t osel = lv_dropdown_get_selected(s_orient_dd);
-    if (osel >= sizeof(k_orient_deg) / sizeof(k_orient_deg[0])) osel = 0;
+    if (osel >= (uint32_t)ARRAY_LEN(k_orient_deg)) osel = 0;
     uint8_t deg = (uint8_t)k_orient_deg[osel];
 
     nvs_store_set_orientation(deg);
@@ -564,7 +603,7 @@ static void display_tab_build(lv_obj_t *parent)
     lv_dropdown_set_options(s_sleep_dd, SLEEP_OPTS);
     lv_obj_set_width(s_sleep_dd, 190);
     uint16_t saved = nvs_store_get_sleep_secs();
-    for (uint32_t i = 0; i < sizeof(k_sleep_secs) / sizeof(k_sleep_secs[0]); i++) {
+    for (int i = 0; i < ARRAY_LEN(k_sleep_secs); i++) {
         if (k_sleep_secs[i] == saved) {
             lv_dropdown_set_selected(s_sleep_dd, i);
             break;
@@ -591,7 +630,7 @@ static void display_tab_build(lv_obj_t *parent)
     lv_dropdown_set_options(s_orient_dd, ORIENT_OPTS);
     lv_obj_set_width(s_orient_dd, 230);
     uint8_t cur_deg = nvs_store_get_orientation();
-    for (uint32_t i = 0; i < sizeof(k_orient_deg) / sizeof(k_orient_deg[0]); i++) {
+    for (int i = 0; i < ARRAY_LEN(k_orient_deg); i++) {
         if (k_orient_deg[i] == cur_deg) {
             lv_dropdown_set_selected(s_orient_dd, i);
             break;
@@ -982,13 +1021,7 @@ static void modbus_tab_build(lv_obj_t *parent)
     lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_all(parent, 14, 0);
 
-    s_mb_status = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_mb_status, F_SM, 0);
-    lv_obj_set_style_text_color(s_mb_status, COL_SUB, 0);
-    lv_obj_set_width(s_mb_status, LV_PCT(100));
-    lv_label_set_long_mode(s_mb_status, LV_LABEL_LONG_WRAP);
-    lv_obj_align(s_mb_status, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_label_set_text(s_mb_status, "Modbus: -");
+    s_mb_status = wrap_label(parent, LV_PCT(100), 0, 0, "Modbus: -");
 
     /* The "+ Gerät" button lives in the top menu bar (see ui_settings_create);
      * it is only shown while this tab is active. */
@@ -1009,11 +1042,11 @@ static void modbus_tab_build(lv_obj_t *parent)
 static const uint32_t RTU_BAUDS[] = { 4800, 9600, 19200, 38400 };
 #define RTU_BAUD_OPTS "4800\n9600\n19200\n38400"
 
-static int rtu_baud_to_idx(uint32_t b)
-{
-    for (int i = 0; i < 4; i++) if (RTU_BAUDS[i] == b) return i;
-    return 1;   /* 9600 */
-}
+/* Listen port for the TCP<->RTU bridge. A fixed list rather than a text field:
+ * this tab has no keyboard, and 502 is the standard Modbus-TCP port -- the rest
+ * are the usual fallbacks for when something else already owns 502. */
+static const uint32_t GW_PORTS[] = { 502, 503, 1502, 5020 };
+#define GW_PORT_OPTS "502\n503\n1502\n5020"
 
 static void mb_rtu_refresh(void)
 {
@@ -1067,6 +1100,41 @@ static void mb_rtu_refresh(void)
         lv_label_set_text(s_rtu_selftest_lbl, rbuf);
         lv_obj_set_style_text_color(s_rtu_selftest_lbl, col, 0);
     }
+
+    if (s_gw_status) {
+        modbus_gw_status_t g;
+        modbus_gw_get_status(&g);
+        mb_rtu_cfg_t c; modbus_rtu_get_cfg(&c);
+
+        char gbuf[190];
+        lv_color_t gcol = COL_SUB;
+        if (!c.gw_enabled) {
+            snprintf(gbuf, sizeof(gbuf), "Bridge: aus");
+        } else if (!g.running) {
+            snprintf(gbuf, sizeof(gbuf), "Bridge: Port %u nicht belegbar", (unsigned)c.gw_port);
+            gcol = COL_WARN;
+        } else {
+            /* Which buses actually carry bridge traffic -- a bus that is off or
+             * set to Slave is silently NOT bridged, and that is exactly the
+             * case worth spelling out here. */
+            char busy[40]; int bo = 0;
+            for (int i = 0; i < MB_RTU_BUSES; i++) {
+                if (!modbus_rtu_bus_can_gateway(i)) continue;
+                bo += snprintf(busy + bo, sizeof(busy) - bo, "%s%s",
+                               bo ? "+" : "", i == 0 ? "A" : "B");
+            }
+            if (!bo) {
+                snprintf(busy, sizeof(busy), "kein Bus (Master noetig)");
+                gcol = COL_WARN;
+            }
+            snprintf(gbuf, sizeof(gbuf),
+                     "Bridge: Port %u   Bus %s   Clients %u/%u   OK %u  Fehler %u",
+                     (unsigned)c.gw_port, busy, (unsigned)g.clients,
+                     (unsigned)c.gw_max_clients, (unsigned)g.req_ok, (unsigned)g.req_err);
+        }
+        lv_label_set_text(s_gw_status, gbuf);
+        lv_obj_set_style_text_color(s_gw_status, gcol, 0);
+    }
 }
 
 static void rtu_selftest_cb(lv_event_t *e)
@@ -1079,13 +1147,27 @@ static void rtu_selftest_cb(lv_event_t *e)
 static void rtu_save_cb(lv_event_t *e)
 {
     (void)e;
+    /* Start from the STORED config, not from zero: this tab owns only the bus
+     * rows and the three bridge widgets below, so every other field (and every
+     * field appended in the future) must survive a save untouched. */
     mb_rtu_cfg_t c;
-    memset(&c, 0, sizeof(c));
+    modbus_rtu_get_cfg(&c);
     for (int i = 0; i < MB_RTU_BUSES; i++) {
         c.bus[i].enabled  = lv_obj_has_state(s_rtu_sw[i], LV_STATE_CHECKED) ? 1 : 0;
         c.bus[i].role     = (uint8_t)lv_dropdown_get_selected(s_rtu_role[i]); /* 0=Master,1=Slave */
         c.bus[i].slave_id = (uint8_t)(lv_dropdown_get_selected(s_rtu_id[i]) + 1);
         c.bus[i].baud     = RTU_BAUDS[lv_dropdown_get_selected(s_rtu_baud[i])];
+    }
+    /* TCP<->RTU bridge. Built after the bus rows, so the widgets may not exist
+     * yet while a bus dropdown fires during tab construction -- the stored
+     * values then simply stay as loaded above. */
+    if (s_gw_sw && s_gw_port) {
+        c.gw_enabled = lv_obj_has_state(s_gw_sw, LV_STATE_CHECKED) ? 1 : 0;
+        c.gw_port    = (uint16_t)GW_PORTS[lv_dropdown_get_selected(s_gw_port)];
+        c.gw_bus_mask = 0;
+        for (int i = 0; i < MB_RTU_BUSES; i++)
+            if (s_gw_bus[i] && lv_obj_has_state(s_gw_bus[i], LV_STATE_CHECKED))
+                c.gw_bus_mask |= (uint8_t)(1u << i);
     }
     modbus_rtu_set_cfg(&c);
     mb_rtu_refresh();
@@ -1135,28 +1217,81 @@ static void rtu_row(lv_obj_t *parent, int idx, int y, const char *title,
     lv_obj_align(bl, LV_ALIGN_TOP_LEFT, 392, y + 28);
     s_rtu_baud[idx] = lv_dropdown_create(parent);
     lv_dropdown_set_options(s_rtu_baud[idx], RTU_BAUD_OPTS);
-    lv_dropdown_set_selected(s_rtu_baud[idx], rtu_baud_to_idx(cfg->baud));
+    lv_dropdown_set_selected(s_rtu_baud[idx],
+                             opt_idx(RTU_BAUDS, ARRAY_LEN(RTU_BAUDS), cfg->baud, 1));
     lv_obj_set_width(s_rtu_baud[idx], 120);
     lv_obj_align(s_rtu_baud[idx], LV_ALIGN_TOP_LEFT, 392, y + 48);
     lv_obj_add_event_cb(s_rtu_baud[idx], rtu_save_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+/* TCP<->RTU bridge: on/off, listen port, and which buses are reachable.
+ * Everything else (timeout, client limit) keeps its default -- see
+ * clamp_cfg() in modbus_rtu.c. */
+static void gw_section_build(lv_obj_t *parent, const mb_rtu_cfg_t *c, int y)
+{
+    lv_obj_t *sep = lv_obj_create(parent);
+    lv_obj_set_size(sep, 700, 1);
+    lv_obj_set_style_bg_color(sep, COL_PANEL2, 0);
+    lv_obj_set_style_border_width(sep, 0, 0);
+    lv_obj_set_style_radius(sep, 0, 0);
+    lv_obj_set_style_pad_all(sep, 0, 0);
+    lv_obj_remove_flag(sep, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(sep, LV_ALIGN_TOP_LEFT, 0, y);
+
+    lv_obj_t *t = lv_label_create(parent);
+    lv_label_set_text(t, "TCP-Bridge   (Modbus-TCP \xe2\x86\x92 RTU)");
+    lv_obj_set_style_text_font(t, F_MD, 0);
+    lv_obj_align(t, LV_ALIGN_TOP_LEFT, 0, y + 14);
+
+    s_gw_sw = lv_switch_create(parent);
+    lv_obj_align(s_gw_sw, LV_ALIGN_TOP_LEFT, 0, y + 62);
+    if (c->gw_enabled) lv_obj_add_state(s_gw_sw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(s_gw_sw, rtu_save_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *pl = lv_label_create(parent);
+    lv_label_set_text(pl, "Port"); lv_obj_set_style_text_color(pl, COL_SUB, 0);
+    lv_obj_align(pl, LV_ALIGN_TOP_LEFT, 100, y + 42);
+    s_gw_port = lv_dropdown_create(parent);
+    lv_dropdown_set_options(s_gw_port, GW_PORT_OPTS);
+    lv_dropdown_set_selected(s_gw_port,
+                             opt_idx(GW_PORTS, ARRAY_LEN(GW_PORTS), c->gw_port, 0));
+    lv_obj_set_width(s_gw_port, 120);
+    lv_obj_align(s_gw_port, LV_ALIGN_TOP_LEFT, 100, y + 62);
+    lv_obj_add_event_cb(s_gw_port, rtu_save_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *bl = lv_label_create(parent);
+    lv_label_set_text(bl, "Erreichbare Busse");
+    lv_obj_set_style_text_color(bl, COL_SUB, 0);
+    lv_obj_align(bl, LV_ALIGN_TOP_LEFT, 240, y + 42);
+    for (int i = 0; i < MB_RTU_BUSES; i++) {
+        s_gw_bus[i] = make_checkbox(parent, i == 0 ? "Bus A" : "Bus B",
+                                    240 + i * 110, y + 66,
+                                    c->gw_bus_mask & (1u << i));
+        lv_obj_add_event_cb(s_gw_bus[i], rtu_save_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    }
+
+    /* Only a MASTER bus can be bridged -- on a Slave bus the Deye is the master
+     * and our request would collide with its polling. Say so up front. */
+    wrap_label(parent, 700, 0, y + 104,
+        "Nur Busse in der Rolle Master werden gebrueckt. Unit-ID = Slave-ID des "
+        "Busses; ist nur ein Bus gebrueckt, wird jede Unit-ID an ihn "
+        "durchgereicht.");
+
+    s_gw_status = wrap_label(parent, 700, 0, y + 152, "Bridge: -");
 }
 
 static void modbus_rtu_tab_build(lv_obj_t *parent)
 {
     lv_obj_set_style_bg_opa(parent, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(parent, 0, 0);
-    lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
+    /* Scrollable (unlike the other tabs): the bridge section pushes the content
+     * past the panel height. */
+    lv_obj_set_scroll_dir(parent, LV_DIR_VER);
     lv_obj_set_style_pad_all(parent, 14, 0);
 
     mb_rtu_cfg_t c; modbus_rtu_get_cfg(&c);
 
-    s_rtu_status = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_rtu_status, F_SM, 0);
-    lv_obj_set_style_text_color(s_rtu_status, COL_SUB, 0);
-    lv_obj_set_width(s_rtu_status, LV_PCT(100));
-    lv_label_set_long_mode(s_rtu_status, LV_LABEL_LONG_WRAP);
-    lv_obj_align(s_rtu_status, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_label_set_text(s_rtu_status, "RTU: -");
+    s_rtu_status = wrap_label(parent, LV_PCT(100), 0, 0, "RTU: -");
 
     rtu_row(parent, 0, 50,  "Bus A  (UART1, GPIO52/51)", &c.bus[0]);
     rtu_row(parent, 1, 152, "Bus B  (UART2, GPIO50/49)", &c.bus[1]);
@@ -1172,13 +1307,10 @@ static void modbus_rtu_tab_build(lv_obj_t *parent)
     lv_obj_set_style_text_color(stl, COL_TEXT, 0);
     lv_obj_center(stl);
 
-    s_rtu_selftest_lbl = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_rtu_selftest_lbl, F_SM, 0);
-    lv_obj_set_style_text_color(s_rtu_selftest_lbl, COL_SUB, 0);
-    lv_obj_set_width(s_rtu_selftest_lbl, 560);
-    lv_label_set_long_mode(s_rtu_selftest_lbl, LV_LABEL_LONG_WRAP);
-    lv_obj_align(s_rtu_selftest_lbl, LV_ALIGN_TOP_LEFT, 196, 272);
-    lv_label_set_text(s_rtu_selftest_lbl, "\xe2\x80\x94");  /* em-dash */
+    /* em-dash = "no self-test run yet" */
+    s_rtu_selftest_lbl = wrap_label(parent, 560, 196, 272, "\xe2\x80\x94");
+
+    gw_section_build(parent, &c, 320);
 
     /* Save button is in the top menu bar (header_save_cb). */
 
@@ -1219,16 +1351,6 @@ static lv_obj_t *mqtt_ta(lv_obj_t *parent, const char *ph, const char *val,
     lv_obj_set_user_data(ta, (void *)(intptr_t)num);
     lv_obj_add_event_cb(ta, mqtt_ta_focus_cb, LV_EVENT_CLICKED, NULL);
     return ta;
-}
-
-static lv_obj_t *mqtt_cb(lv_obj_t *parent, const char *txt, int x, int y, bool on)
-{
-    lv_obj_t *cb = lv_checkbox_create(parent);
-    lv_checkbox_set_text(cb, txt);
-    lv_obj_align(cb, LV_ALIGN_TOP_LEFT, x, y);
-    lv_obj_set_style_text_color(cb, COL_TEXT, 0);
-    if (on) lv_obj_add_state(cb, LV_STATE_CHECKED);
-    return cb;
 }
 
 static void mqtt_refresh(void)
@@ -1297,9 +1419,9 @@ static void mqtt_tab_build(lv_obj_t *parent)
     s_mqtt_base = mqtt_ta(parent, "Basis-Topic",      c.base, 0,  178, 280, false, false);
 
     /* Three checkboxes evenly spaced (40 px), aligned with the left column. */
-    s_mqtt_retain = mqtt_cb(parent, "Retain",       300, 104, c.retain);
-    s_mqtt_disc   = mqtt_cb(parent, "HA Discovery", 300, 144, c.discovery);
-    s_mqtt_lwt    = mqtt_cb(parent, "Last Will",    300, 184, c.lastwill);
+    s_mqtt_retain = make_checkbox(parent, "Retain",       300, 104, c.retain);
+    s_mqtt_disc   = make_checkbox(parent, "HA Discovery", 300, 144, c.discovery);
+    s_mqtt_lwt    = make_checkbox(parent, "Last Will",    300, 184, c.lastwill);
 
     s_mqtt_kbd = lv_keyboard_create(parent);
     lv_obj_set_size(s_mqtt_kbd, LV_PCT(100), 174);
@@ -1772,7 +1894,7 @@ static void sls_change_cb(lv_event_t *e)
 {
     (void)e;
     uint32_t sel = lv_dropdown_get_selected(s_sls_dd);
-    if (sel >= sizeof(k_sls_amps)) sel = 0;
+    if (sel >= (uint32_t)ARRAY_LEN(k_sls_amps)) sel = 0;
     uint8_t a = k_sls_amps[sel];
     nvs_store_set_sls_a(a);
     sls_update_status(a);
@@ -1809,7 +1931,7 @@ static void system_tab_build(lv_obj_t *parent)
     lv_dropdown_set_options(s_sls_dd, SLS_OPTS);
     lv_obj_set_width(s_sls_dd, 200);
     uint8_t cur_a = nvs_store_get_sls_a();
-    for (uint32_t i = 0; i < sizeof(k_sls_amps); i++) {
+    for (int i = 0; i < ARRAY_LEN(k_sls_amps); i++) {
         if (k_sls_amps[i] == cur_a) { lv_dropdown_set_selected(s_sls_dd, i); break; }
     }
     lv_obj_add_event_cb(s_sls_dd, sls_change_cb, LV_EVENT_VALUE_CHANGED, NULL);

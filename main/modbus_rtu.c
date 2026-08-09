@@ -5,6 +5,7 @@
 
 #include <string.h>
 #include <math.h>
+#include <stddef.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -15,12 +16,22 @@
 
 static const char *TAG = "mb_rtu";
 
+/* Compile-time guard for the NVS blob layout (see the note in modbus_rtu.h):
+ * bus[] stride and the offset of the appended bridge block are the whole
+ * migration contract, so pin them rather than trusting a comment. */
+_Static_assert(sizeof(mb_rtu_bus_cfg_t) == 8, "mb_rtu_bus_cfg_t stride");
+_Static_assert(offsetof(mb_rtu_cfg_t, gw_enabled) == 16, "gw block must follow bus[]");
+_Static_assert(sizeof(mb_rtu_cfg_t) == 24, "mb_rtu_cfg_t layout");
+
 #define RX_BUF          512
 #define TX_BUF          256
 
 /* Deye SG04LP3 holding registers (same map as the TCP path). */
 #define DEYE_SOC_REG    588
 #define DEYE_PWR_REG    590     /* S16, +discharge / -charge */
+
+/* Interval of the regular Deye battery poll on a MASTER bus. */
+#define DEYE_POLL_MS    2000
 
 /* Max age of the grid reading we still feed the Deye as a REAL value through the
  * Eastron emulation. Within this -> report real grid power (zero-export works,
@@ -60,6 +71,25 @@ typedef struct {
 static deye_req_t        s_deye_req;
 static SemaphoreHandle_t s_deye_req_mtx;
 
+/* Bridge slot, one per bus: modbus_gw.c parks a raw RTU frame here and the bus
+ * task runs it between its own polls (same "never touch the UART from two
+ * tasks" rule as s_deye_req, but per-bus so two masters can serve in
+ * parallel). `lock` serialises the TCP clients, `done` wakes the waiter. */
+typedef struct {
+    volatile bool     pending;
+    SemaphoreHandle_t lock;
+    SemaphoreHandle_t done;
+    uint8_t           req[MB_RTU_ADU_MAX];   /* +2 bytes room for the CRC   */
+    int               req_len;               /* without CRC                 */
+    uint8_t           resp[MB_RTU_ADU_MAX];
+    int               rc;                    /* rtu_raw(): len > 0, or < 0  */
+    uint32_t          timeout_ms;
+} rtu_txn_t;
+static rtu_txn_t s_txn[MB_RTU_BUSES];
+
+/* When the regular Deye poll is next due, per bus (0 = immediately). */
+static int64_t s_next_poll_us[MB_RTU_BUSES];
+
 /* ----------------------------- helpers ------------------------------- */
 
 static uint16_t crc16(const uint8_t *p, int n)
@@ -73,6 +103,28 @@ static uint16_t crc16(const uint8_t *p, int n)
     return c;
 }
 
+/* Fill in defaults for unset/out-of-range fields. Also the migration path: an
+ * NVS record written before the bridge existed is 16 bytes, so every gw_* field
+ * reads 0 here and lands on its default (bridge off). */
+static void clamp_cfg(mb_rtu_cfg_t *c)
+{
+    for (int i = 0; i < MB_RTU_BUSES; i++) {
+        if (c->bus[i].baud == 0)     c->bus[i].baud = 9600;
+        if (c->bus[i].slave_id == 0) c->bus[i].slave_id = 1;
+        if (c->bus[i].role > MB_RTU_SLAVE) c->bus[i].role = MB_RTU_MASTER;
+    }
+    if (c->gw_port == 0)       c->gw_port = MB_GW_DEFAULT_PORT;
+    if (c->gw_timeout_ms == 0) c->gw_timeout_ms = MB_GW_DEFAULT_TIMEOUT_MS;
+    if (c->gw_timeout_ms < 100)   c->gw_timeout_ms = 100;
+    if (c->gw_timeout_ms > 5000)  c->gw_timeout_ms = 5000;
+    if (c->gw_max_clients == 0)                    c->gw_max_clients = MB_GW_DEFAULT_CLIENTS;
+    if (c->gw_max_clients > MB_GW_MAX_CLIENTS)     c->gw_max_clients = MB_GW_MAX_CLIENTS;
+    /* No bus picked but the bridge is on -> serve every master bus, so simply
+     * switching it on does something useful instead of answering 0x0A. */
+    if (c->gw_enabled && c->gw_bus_mask == 0)
+        c->gw_bus_mask = (1u << MB_RTU_BUSES) - 1u;
+}
+
 static void load_cfg(void)
 {
     mb_rtu_cfg_t c;
@@ -82,11 +134,7 @@ static void load_cfg(void)
         c.bus[0].role = MB_RTU_SLAVE;
         c.bus[1].role = MB_RTU_MASTER;
     }
-    for (int i = 0; i < MB_RTU_BUSES; i++) {
-        if (c.bus[i].baud == 0)     c.bus[i].baud = 9600;
-        if (c.bus[i].slave_id == 0) c.bus[i].slave_id = 1;
-        if (c.bus[i].role > MB_RTU_SLAVE) c.bus[i].role = MB_RTU_MASTER;
-    }
+    clamp_cfg(&c);
     portENTER_CRITICAL(&s_mux);
     s_cfg = c;
     portEXIT_CRITICAL(&s_mux);
@@ -261,33 +309,137 @@ static void serve_deye_req(int port, uint8_t slave)
     s_deye_req.done    = true;
 }
 
+/* ------------------- TCP <-> RTU bridge back-end ---------------------- */
+
+/* Read exactly n bytes, bounded by an absolute deadline (esp_timer us). */
+static int rtu_read_exact(int port, uint8_t *dst, int n, int64_t deadline)
+{
+    int got = 0;
+    while (got < n) {
+        int64_t left = deadline - esp_timer_get_time();
+        if (left <= 0) return -1;
+        int r = uart_read_bytes(port, dst + got, n - got,
+                                pdMS_TO_TICKS((uint32_t)(left / 1000) + 1));
+        if (r <= 0) return -1;
+        got += r;
+    }
+    return got;
+}
+
+/* Run one arbitrary RTU request and return the response ADU without its CRC.
+ *
+ * RTU has no length prefix, so the response size has to be derived from the
+ * function code -- that is the whole reason this cannot just be a byte pipe:
+ *   FC 01/02/03/04/23 -> [id][fc][bytecount][data..][crc]  (length in byte 2)
+ *   FC 05/06/15/16    -> [id][fc][addr][value|qty][crc]    (always 8 bytes)
+ *   fc | 0x80         -> [id][fc][exception][crc]          (always 5 bytes)
+ * An exception response is a VALID answer and is passed back to the TCP client
+ * verbatim -- the inverter refusing a register is the client's business.
+ *
+ * `req` and `resp` must BOTH be MB_RTU_ADU_MAX bytes -- spelled as [static ...]
+ * so the compiler rejects a smaller buffer: the CRC is appended into `req` in
+ * place and the answer is received straight into `resp`. Scratch copies would
+ * cost 512 B of stack on the bus task, which also runs the Deye poll and the
+ * Eastron emulation -- not worth it for two memcpys. */
+static int rtu_raw(int port, uint8_t req[static MB_RTU_ADU_MAX], int req_len,
+                   uint8_t resp[static MB_RTU_ADU_MAX], uint32_t tmo_ms)
+{
+    if (req_len < 2 || req_len + 2 > MB_RTU_ADU_MAX) return -10;
+
+    uint16_t c = crc16(req, req_len);
+    req[req_len]     = (uint8_t)(c & 0xFF);
+    req[req_len + 1] = (uint8_t)(c >> 8);
+
+    uart_flush_input(port);
+    if (uart_write_bytes(port, req, req_len + 2) != req_len + 2) return -11;
+
+    int64_t deadline = esp_timer_get_time() + (int64_t)tmo_ms * 1000;
+    int     got;
+
+    if (rtu_read_exact(port, resp, 2, deadline) < 0) return -12;  /* timeout */
+    got = 2;
+
+    int body;                       /* bytes still outstanding after the header */
+    if (resp[1] & 0x80) {
+        body = 3;                                   /* exception code + CRC     */
+    } else switch (resp[1]) {
+    case 0x01: case 0x02: case 0x03: case 0x04: case 0x17:
+        if (rtu_read_exact(port, resp + 2, 1, deadline) < 0) return -12;
+        got  = 3;
+        body = resp[2] + 2;                         /* data + CRC               */
+        break;
+    case 0x05: case 0x06: case 0x0F: case 0x10:
+        body = 6;                                   /* addr + qty/value + CRC   */
+        break;
+    default:
+        return -13;                                 /* unframeable function     */
+    }
+    if (got + body > MB_RTU_ADU_MAX) return -14;
+    if (rtu_read_exact(port, resp + got, body, deadline) < 0) return -12;
+    got += body;
+
+    if ((resp[got - 2] | (resp[got - 1] << 8)) != crc16(resp, got - 2)) return -15;
+    if (resp[0] != req[0]) return -16;              /* answer from another id   */
+
+    return got - 2;                                 /* strip CRC                */
+}
+
+/* Serve a parked bridge request on this bus, if one is waiting. */
+static void serve_txn(int idx, int port)
+{
+    rtu_txn_t *t = &s_txn[idx];
+    t->rc = rtu_raw(port, t->req, t->req_len, t->resp, t->timeout_ms);
+    t->pending = false;
+    xSemaphoreGive(t->done);
+}
+
 static void do_master(int idx, int port, const mb_rtu_bus_cfg_t *c)
 {
     /* Serve an on-demand /deye read/write first if one is queued (skip the
      * regular battery read this cycle; it resumes next loop). */
     if (s_deye_req.pending) { serve_deye_req(port, c->slave_id); return; }
 
-    /* 586..590 covers SoC(588) + battery power(590) in one short read. */
-    uint16_t r[5];
-    int rc = rtu_read(port, c->slave_id, 586, 5, r);
-    if (rc == 0) {
-        float soc = (float)r[DEYE_SOC_REG - 586];
-        float w   = (float)(int16_t)r[DEYE_PWR_REG - 586];   /* +discharge */
-        modbus_tcp_set_rtu_deye(w, soc, true);
-        portENTER_CRITICAL(&s_mux);
-        s_st.bus[idx].online = true; s_st.bus[idx].polls++;
-        s_st.bus[idx].a = w; s_st.bus[idx].b = soc;
-        portEXIT_CRITICAL(&s_mux);
-    } else {
-        modbus_tcp_set_rtu_deye(0, 0, false);
-        portENTER_CRITICAL(&s_mux);
-        s_st.bus[idx].online = false; s_st.bus[idx].errs++;
-        portEXIT_CRITICAL(&s_mux);
-        ESP_LOGW(TAG, "bus%d Deye RTU read failed (%d)", idx, rc);
+    /* Then a parked TCP-bridge request. Both jump the poll cadence so a
+     * Modbus-TCP client sees gateway-typical latency, not multi-second waits. */
+    if (s_txn[idx].pending) { serve_txn(idx, port); return; }
+
+    /* The poll cadence is a DEADLINE, not "once per loop": serving a request
+     * returns from here, so a loop-counted poll would fire again immediately
+     * afterwards and a 5 Hz bridge client would multiply the Deye's own RS485
+     * traffic tenfold -- on the bus that carries the control path. */
+    if (esp_timer_get_time() >= s_next_poll_us[idx]) {
+        s_next_poll_us[idx] = esp_timer_get_time() + DEYE_POLL_MS * 1000;
+
+        /* 586..590 covers SoC(588) + battery power(590) in one short read. */
+        uint16_t r[5];
+        int rc = rtu_read(port, c->slave_id, 586, 5, r);
+        if (rc == 0) {
+            float soc = (float)r[DEYE_SOC_REG - 586];
+            float w   = (float)(int16_t)r[DEYE_PWR_REG - 586];   /* +discharge */
+            modbus_tcp_set_rtu_deye(w, soc, true);
+            portENTER_CRITICAL(&s_mux);
+            s_st.bus[idx].online = true; s_st.bus[idx].polls++;
+            s_st.bus[idx].a = w; s_st.bus[idx].b = soc;
+            portEXIT_CRITICAL(&s_mux);
+        } else {
+            modbus_tcp_set_rtu_deye(0, 0, false);
+            portENTER_CRITICAL(&s_mux);
+            s_st.bus[idx].online = false; s_st.bus[idx].errs++;
+            portEXIT_CRITICAL(&s_mux);
+            ESP_LOGW(TAG, "bus%d Deye RTU read failed (%d)", idx, rc);
+        }
     }
-    /* Break the 2 s poll interval early for a self-test or a queued /deye req. */
-    for (int i = 0; i < 20 && !s_selftest_req && !s_deye_req.pending; i++)
-        vTaskDelay(pdMS_TO_TICKS(100));
+
+    /* Break the poll interval early for a self-test or a queued /deye or
+     * TCP-bridge request. A bridged bus is checked every 20 ms so a Modbus-TCP
+     * client polling once a second does not spend most of its round-trip
+     * waiting for this loop to notice; without the bridge there is nothing to
+     * notice quickly, so stay at 100 ms and keep this priority-5 task (above
+     * LVGL) at 10 wakeups/s instead of 50. */
+    const int step = modbus_rtu_bus_can_gateway(idx) ? 20 : 100;
+    for (int i = 0; i < DEYE_POLL_MS / step && !s_selftest_req &&
+                    !s_deye_req.pending && !s_txn[idx].pending; i++)
+        vTaskDelay(pdMS_TO_TICKS(step));
 }
 
 /* ----------------------- Self-test ------------------------------------ */
@@ -440,10 +592,97 @@ int modbus_rtu_deye_write(uint16_t addr, uint16_t val)
     return deye_req_run(true, addr, 1, val, NULL);
 }
 
+/* ---------------- TCP <-> RTU bridge back-end -------------------------- */
+
+/* The eligibility rule, in ONE place -- it is the safety invariant that keeps
+ * injected traffic off a SLAVE bus, so it must not exist as two copies that can
+ * drift apart. Caller holds s_mux; `bus` is already range-checked. */
+static inline bool bus_can_gw_nolock(int bus)
+{
+    return s_cfg.gw_enabled && (s_cfg.gw_bus_mask & (1u << bus)) &&
+           s_cfg.bus[bus].enabled && s_cfg.bus[bus].role == MB_RTU_MASTER;
+}
+
+bool modbus_rtu_bus_can_gateway(int bus)
+{
+    if (bus < 0 || bus >= MB_RTU_BUSES) return false;
+    bool ok;
+    portENTER_CRITICAL(&s_mux);
+    ok = bus_can_gw_nolock(bus);
+    portEXIT_CRITICAL(&s_mux);
+    return ok;
+}
+
+int modbus_rtu_gw_route(uint8_t unit)
+{
+    int hit = -1, only = -1, n = 0;
+    portENTER_CRITICAL(&s_mux);
+    for (int i = 0; i < MB_RTU_BUSES; i++) {
+        if (!bus_can_gw_nolock(i)) continue;
+        n++; only = i;
+        if (s_cfg.bus[i].slave_id == unit && hit < 0) hit = i;
+    }
+    portEXIT_CRITICAL(&s_mux);
+    /* Exact slave-id match wins (lets both buses be addressed at once). With a
+     * single bridge bus, everything else falls through to it so other slaves on
+     * that RS485 segment stay reachable. */
+    if (hit >= 0) return hit;
+    return (n == 1) ? only : -1;
+}
+
+int modbus_rtu_txn(int bus, const uint8_t *req, int req_len,
+                   uint8_t *resp, int resp_max, uint32_t timeout_ms)
+{
+    if (bus < 0 || bus >= MB_RTU_BUSES)          return -100;
+    if (!req || !resp)                           return -101;
+    if (req_len < 2 || req_len + 2 > MB_RTU_ADU_MAX) return -102;
+    if (!modbus_rtu_bus_can_gateway(bus))        return -103;
+
+    rtu_txn_t *t = &s_txn[bus];
+    if (!t->lock || !t->done)                    return -104;
+
+    /* Serialise the TCP clients: one RS485 exchange at a time per bus. */
+    if (xSemaphoreTake(t->lock, pdMS_TO_TICKS(timeout_ms + 2000)) != pdTRUE)
+        return -105;
+
+    xSemaphoreTake(t->done, 0);      /* drop a stale signal from a past timeout */
+
+    memcpy(t->req, req, req_len);
+    t->req_len    = req_len;
+    t->rc         = -106;
+    t->timeout_ms = timeout_ms;
+    t->pending    = true;            /* set LAST -- the bus task picks it up    */
+
+    int rc;
+    /* Budget: up to 20 ms for the bus task to notice + the RTU exchange itself,
+     * plus slack for a poll/write it may already be in the middle of. */
+    if (xSemaphoreTake(t->done, pdMS_TO_TICKS(timeout_ms + 2000)) == pdTRUE) {
+        rc = t->rc;                  /* rtu_raw(): response length, or < 0      */
+        if (rc > 0) {
+            if (rc > resp_max) rc = -107;
+            else memcpy(resp, t->resp, rc);
+        }
+    } else {
+        /* The bus task may be mid-exchange and about to write t->resp. Give it
+         * a grace period before releasing the lock, otherwise its late result
+         * would land in the NEXT caller's buffers. */
+        if (xSemaphoreTake(t->done, pdMS_TO_TICKS(3000)) != pdTRUE)
+            t->pending = false;
+        rc = -108;                   /* bus task stalled or bus switched off    */
+    }
+    xSemaphoreGive(t->lock);
+    return rc;
+}
+
 esp_err_t modbus_rtu_start(void)
 {
     s_grid_sp = nvs_store_get_grid_sp();
     if (!s_deye_req_mtx) s_deye_req_mtx = xSemaphoreCreateMutex();
+    for (int i = 0; i < MB_RTU_BUSES; i++) {
+        if (!s_txn[i].lock) s_txn[i].lock = xSemaphoreCreateMutex();
+        if (!s_txn[i].done) s_txn[i].done = xSemaphoreCreateBinary();
+        if (!s_txn[i].lock || !s_txn[i].done) return ESP_ERR_NO_MEM;
+    }
     load_cfg();
     for (int i = 0; i < MB_RTU_BUSES; i++) {
         char name[12];
@@ -475,10 +714,12 @@ void modbus_rtu_get_cfg(mb_rtu_cfg_t *out)
 esp_err_t modbus_rtu_set_cfg(const mb_rtu_cfg_t *cfg)
 {
     if (!cfg) return ESP_ERR_INVALID_ARG;
-    esp_err_t e = nvs_store_set_mb_rtu(cfg, sizeof(*cfg));
+    mb_rtu_cfg_t c = *cfg;
+    clamp_cfg(&c);
+    esp_err_t e = nvs_store_set_mb_rtu(&c, sizeof(c));
     if (e == ESP_OK) {
         portENTER_CRITICAL(&s_mux);
-        s_cfg = *cfg;
+        s_cfg = c;
         portEXIT_CRITICAL(&s_mux);
         /* clear stale Deye value; an enabled master re-populates within 2 s */
         modbus_tcp_set_rtu_deye(0, 0, false);

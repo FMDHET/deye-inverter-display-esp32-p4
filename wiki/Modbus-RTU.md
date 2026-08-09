@@ -85,6 +85,8 @@ Wichtig ist, dass das **innerhalb** der Bus-Task passiert und nicht direkt von d
 
 Die gelesenen Werte gehen ins Energiemodell und haben dort **Vorrang** vor Werten, die über das Netzwerk gekommen sind — die Kabelverbindung ist die verlässlichere Quelle. Aber auch nur so lange, wie sie frisch sind (höchstens 20 Sekunden). Danach verfallen sie, damit der Kreis nicht ewig einen Wert anzeigt, obwohl der Bus längst abgeschaltet ist.
 
+Über denselben Weg lassen sich die Register des Deye auch **vom Netzwerk aus** abfragen: siehe [Modbus-Brücke](Modbus-Bridge).
+
 ## Der Selbsttest
 
 Wenn nichts funktioniert, ist die erste Frage immer: liegt es an mir oder am Wechselrichter? Der Selbsttest im Menü „Mod RTU" beantwortet genau das.

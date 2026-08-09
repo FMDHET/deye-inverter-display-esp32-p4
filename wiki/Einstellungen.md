@@ -48,6 +48,16 @@ Für jeden der beiden Busse (A hängt an GPIO 52/51, B an GPIO 50/49):
 
 Darunter der **Selbsttest** — der prüft die eigene Hardware, ohne dass der Wechselrichter beteiligt ist. Sehr nützlich zum Eingrenzen von Verkabelungsfehlern, siehe [Modbus-RTU](Modbus-RTU#der-selbsttest).
 
+Ganz unten der Abschnitt **TCP-Bridge**. Damit wird das Display zum Modbus-Gateway: Programme im Netzwerk erreichen über Port 502 die Register des Deye, ohne eigenen RS485-Adapter.
+
+| Feld | Werte |
+| --- | --- |
+| **Schalter** | Brücke ein oder aus. Standard: aus. |
+| **Port** | 502 / 503 / 1502 / 5020. Standard 502. |
+| **Erreichbare Busse** | Welche der beiden Leitungen über das Netz erreichbar sind — beide gleichzeitig ist erlaubt. Nur Busse in der Rolle *Master* werden gebrückt. |
+
+Alles Weitere — Unit-ID-Zuordnung, Fehlercodes, Home-Assistant-Beispiel — steht unter [Modbus-Brücke](Modbus-Bridge).
+
 ## MQTT
 
 Broker-Adresse, Port, Zugangsdaten, Basistopic und drei Schalter (Retain, HA Discovery, Last Will). Was die Schalter bedeuten, steht unter [MQTT und Home Assistant](MQTT-und-Home-Assistant#die-drei-schalter-erklärt).

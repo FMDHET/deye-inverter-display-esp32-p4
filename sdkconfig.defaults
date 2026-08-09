@@ -81,13 +81,23 @@ CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 
 # More LWIP sockets: two HTTP servers (:80 page/touch/ota, :81 MJPEG stream)
 # + DNS + Modbus-TCP need more than the default 10, or the web server starves.
+#
+# DO NOT RAISE THIS. 24 was tried for the Modbus bridge and bricked the device:
+# the extra lwIP pools eat DMA-capable internal RAM, and esp_hosted's SDIO
+# transport then failed to allocate its buffer pool at boot ->
+#   assert failed: sdio_mempool_create sdio_drv.c:258 (buf_mp_g)
+# -> reboot loop before WiFi (and therefore before OTA) ever came up, so the
+# only way out was a USB flash. The bridge lives within these 16 instead: it is
+# off by default and capped at MB_GW_MAX_CLIENTS (4) sockets when enabled.
 CONFIG_LWIP_MAX_SOCKETS=16
 
-# Short TIME_WAIT: with 16 sockets shared between the two HTTP servers, MQTT,
-# WireGuard, DNS and the PERSISTENT Modbus-TCP worker sockets, a 60 s MSL (=120 s
-# TIME_WAIT) let closed HTTP connections (web-mirror touch polling, /api churn)
-# pile up and starve the pool until httpd stopped accepting (and large OTA
-# uploads got refused). 5 s MSL (=10 s TIME_WAIT) frees sockets fast; safe on LAN.
+# Short TIME_WAIT: with the 16 sockets above shared between the two HTTP
+# servers, MQTT, WireGuard, DNS, the Modbus-TCP<->RTU bridge and the PERSISTENT
+# Modbus-TCP worker sockets, a 60 s MSL (=120 s TIME_WAIT) let closed HTTP
+# connections (web-mirror touch polling, /api churn) pile up and starve the pool
+# until httpd stopped accepting (and large OTA uploads got refused). 5 s MSL
+# (=10 s TIME_WAIT) frees sockets fast; safe on LAN. Doubly important now that
+# the pool cannot be grown -- see above.
 CONFIG_LWIP_TCP_MSL=5000
 
 # Enable bridge support purely to flip LWIP_ESP_NETIF_DATA=1, so esp_netif stores

@@ -257,7 +257,12 @@ esp_err_t nvs_store_get_mb_rtu(void *buf, size_t len)
     size_t l = len;
     e = nvs_get_blob(h, "rtu2", buf, &l);
     nvs_close(h);
-    if (e == ESP_OK && l != len) e = ESP_ERR_INVALID_SIZE;  /* layout changed */
+    /* A SHORTER record is an older layout: mb_rtu_cfg_t only ever grows at the
+     * end (the bus[] array keeps its stride), and the caller pre-zeroes, so the
+     * appended fields read 0 and clamp_cfg() gives them their defaults. Only a
+     * LONGER record -- a downgrade to firmware that predates those fields --
+     * is rejected, since we cannot know what it holds. */
+    if (e == ESP_OK && l > len) e = ESP_ERR_INVALID_SIZE;
     return e;
 }
 

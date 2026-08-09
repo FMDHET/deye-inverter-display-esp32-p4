@@ -14,6 +14,7 @@ idf_component_register(
         "ota.c"
         "modbus_tcp.c"
         "modbus_rtu.c"
+        "modbus_gw.c"
         "deye_ctrl.c"
         "deye_web.c"
         "mqtt_fwd.c"

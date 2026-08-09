@@ -56,6 +56,7 @@ Das ist der Kern: **wir verschieben nicht den Wechselrichter, wir verschieben se
 1. [Glossar](Glossar) — alle Fachbegriffe auf einer Seite
 2. [Architektur](Architektur) — wie das Programm innen aufgebaut ist
 3. [Modbus-TCP](Modbus-TCP) und [Modbus-RTU](Modbus-RTU) — wie die Geräte abgefragt werden
+4. [Modbus-Brücke](Modbus-Bridge) — wie andere Programme über das Display an den Deye kommen
 
 **Du willst es nachbauen:**
 

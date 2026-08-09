@@ -16,6 +16,7 @@ Das Gerät sammelt die Messwerte einer real gemischten PV-Anlage (Fronius-Wechse
 Firmware for a **GUITION JC4880P443C** (ESP32-P4 + ESP32-C6, 4.3″ 480×800 MIPI-DSI IPS, GT911 touch) that turns the panel into an energy dashboard and control bridge for a **Deye SG04LP3** hybrid inverter.
 
 * **Reads** up to 8 Modbus-TCP devices in parallel (Fronius/SunSpec, Deye native, Eltako DSZ15/16), plus two RS485 Modbus-RTU buses.
+* **Bridges** Modbus-TCP to RTU in the other direction: a server on port 502 forwards LAN requests onto the RS485 buses, so any Modbus master can read and write the Deye's registers without its own adapter. Multiple concurrent clients, both buses routable by unit id.
 * **Emulates** an Eastron SDM630 energy meter on the Deye's meter port and reports *(real grid power − setpoint)*, so the inverter regulates the real grid connection point to a setpoint you pick on screen. Emulation is gated on a **fresh** meter reading — a frozen value once caused a 15 kW export runaway.
 * **Controls** the Deye battery: Normal / forced charge / forced discharge, from the touch UI or from Home Assistant, with an SLS (main-fuse) export guard that throttles discharge power.
 * **Publishes** all values over MQTT with Home Assistant auto-discovery (7 sensors + a mode select + a power slider).
@@ -55,7 +56,7 @@ Documentation is in German — see the [Wiki](../../wiki) for the full reference
 | **Energiemodell bilden** | Aus PV, Netz und Akku wird der Hausverbrauch gerechnet. Jeder Wert läuft durch eine Plausibilitätsprüfung; fehlende Quellen zeigen `--` statt eines eingefrorenen Werts. |
 | **Anzeigen** | Fünf Kreis-Gauges mit animierten Flusslinien, Uhr, WLAN-Status, Build-Nummer. Antippen öffnet Detail-Popups (Einzel-Wechselrichter, Akku-Modus, Laufzeit/Neustart). |
 | **Regeln** | Eastron-SDM630-Emulation am Zähler-Port des Deye plus direkte Register-Schreibzugriffe für Zwangsladen/-entladen. |
-| **Weitergeben** | MQTT mit Home-Assistant-Auto-Discovery, inklusive steuerbarer Entities. |
+| **Weitergeben** | MQTT mit Home-Assistant-Auto-Discovery, inklusive steuerbarer Entities. Dazu die Modbus-Brücke: Port 502 reicht Anfragen aus dem LAN auf die RS485-Busse durch. |
 | **Fernwarten** | Web-Mirror (1:1-Bild plus Touch im Browser), OTA-Update über WiFi, Recovery-Seite, WireGuard-Tunnel. |
 
 Unterstützte Geräteprofile am Modbus-TCP:
@@ -317,6 +318,6 @@ Dieses README ist die Kurzfassung für Leute, die mit Mikrocontrollern und PV-An
 | | |
 | --- | --- |
 | **Nachbauen** | [Hardware](../../wiki/Hardware) · [Bauen und Flashen](../../wiki/Bauen-und-Flashen) · [WLAN und Ersteinrichtung](../../wiki/WLAN-und-Captive-Portal) · [Die Menüs](../../wiki/Einstellungen) |
-| **Verstehen** | [Modbus-TCP](../../wiki/Modbus-TCP) · [Modbus-RTU](../../wiki/Modbus-RTU) · [Architektur](../../wiki/Architektur) |
+| **Verstehen** | [Modbus-TCP](../../wiki/Modbus-TCP) · [Modbus-RTU](../../wiki/Modbus-RTU) · [Modbus-Brücke](../../wiki/Modbus-Bridge) · [Architektur](../../wiki/Architektur) |
 | **Benutzen** | [Deye-Steuerung](../../wiki/Deye-Steuerung) · [MQTT und Home Assistant](../../wiki/MQTT-und-Home-Assistant) · [Web-Mirror](../../wiki/Web-Mirror) · [Zeit und VPN](../../wiki/Zeit-und-VPN) · [Updates über WLAN](../../wiki/OTA-und-Recovery) |
 | **Wenn es klemmt** | [Fehlersuche](../../wiki/Fehlersuche) |

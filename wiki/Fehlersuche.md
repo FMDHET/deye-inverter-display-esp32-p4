@@ -84,6 +84,23 @@ Sehr wahrscheinlich meldet die Emulation gerade 0 Watt, weil **kein frischer Net
 
 Das ist **kein Fehler, sondern die eingebaute Sicherung.** Warum, steht gleich unten.
 
+## Modbus-Brücke (Port 502)
+
+**Die Verbindung kommt gar nicht zustande.**
+Zwei verschiedene Fälle, die sich ähnlich anfühlen:
+
+* **Die Brücke ist aus** (Reiter „Mod RTU", Abschnitt TCP-Bridge). Dann lauscht niemand auf dem Port, und die Verbindung wird schon beim Aufbau abgelehnt. In diesem Fall bekommst du auch **keine** Fehlercodes wie `0x0A` zu sehen — dafür müsste die Brücke ja laufen.
+* **Das Verbindungslimit ist erreicht.** Die Verbindung geht kurz auf und wird sofort wieder geschlossen. Erlaubt sind zwei gleichzeitige Verbindungen; die Statuszeile zeigt es: `Clients 2/2` heißt voll.
+
+**Antwort kommt, aber mit Fehlercode `0x0A`.**
+„Weg nicht verfügbar" — es ist kein Bus zuständig. Der Reihe nach prüfen: Bus angehakt? Bus eingeschaltet? Bus auf **Master** gestellt (ein Slave-Bus wird nie gebrückt)? Passt die Unit-ID? Die Statuszeile listet die tatsächlich gebrückten Busse — bleibt keiner übrig, schreibt sie „kein Bus (Master noetig)". Steht dort dagegen ein Bus und du bekommst trotzdem `0x0A`, dann passt die **Unit-ID** nicht: sie landet nur dann automatisch auf dem Bus, wenn genau ein Bus gebrückt ist.
+
+**Antwort kommt, aber mit Fehlercode `0x0B`.**
+„Zielgerät antwortet nicht" — der Weg stand, aber es kam keine brauchbare Antwort zurück. Neben „gar nichts gehört" steckt darunter auch eine kaputte Prüfsumme, eine Antwort von der falschen Slave-ID oder ein Funktionscode, den die Brücke nicht zerlegen kann. Meist ist es dasselbe Problem wie ein offline stehender Master-Bus: Slave-ID, Baudrate, Verkabelung. Erst den [Selbsttest](Modbus-RTU#der-selbsttest) laufen lassen.
+
+**Alles antwortet, aber sehr langsam.**
+Normal sind ein paar Dutzend Millisekunden. Einige hundert sind es, wenn die Anfrage ausgerechnet dann eintrifft, während die regelmäßige Akku-Abfrage auf ihre Antwort wartet — das ist normal und geht vorbei. Dauerhaft länger wird es, wenn mehrere Programme gleichzeitig fragen: auf RS485 wird nacheinander gearbeitet, die Anfragen stehen also an. Abhilfe: seltener abfragen oder die Werte über [MQTT](MQTT-und-Home-Assistant) beziehen statt sie einzeln zu pollen.
+
 ## Deye-Steuerung
 
 **Der Modus wird gesetzt, der Wechselrichter reagiert nicht.**

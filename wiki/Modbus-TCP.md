@@ -2,6 +2,9 @@
 
 Hier geht es um die Geräte, die über das normale Netzwerk abgefragt werden: die Fronius-Wechselrichter und der Eltako-Stromzähler. Wenn dir „Modbus" oder „Register" nichts sagen, lies zuerst das [Glossar](Glossar#wie-geräte-miteinander-reden).
 
+> [!NOTE]
+> Auf dieser Seite **fragt das Display** andere Geräte. Für die Gegenrichtung — ein Programm im Netz fragt über das Display den Deye ab — siehe [Modbus-Brücke](Modbus-Bridge).
+
 ## Die Grundidee
 
 Jedes Gerät im Netzwerk hat eine IP-Adresse. Fragt man es auf Port 502 nach einem Register, antwortet es mit einer Zahl. Genau das macht diese Firmware — für bis zu **8 Geräte gleichzeitig**.

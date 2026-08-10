@@ -6,6 +6,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
 
 #include "esp_check.h"
 #include "esp_http_server.h"
@@ -102,20 +103,15 @@ static void json_escape(char *dst, size_t dsz, const char *src)
 
 /* ------------------------------ DNS hijack ----------------------------- */
 
-/* Answer every A query with the AP IP so the OS captive-portal probe is
- * redirected to our page. */
-static void dns_task(void *arg)
+/* Bind the hijack socket. Returns false and leaves s_dns_sock at -1 on failure
+ * (the caller retries later -- a failure here is usually the shared lwIP socket
+ * pool being momentarily empty, not a permanent condition). */
+static bool dns_open(void)
 {
-    (void)arg;
-    uint8_t rx[DNS_BUF_LEN];
-    uint8_t tx[DNS_BUF_LEN + 16];
-
     s_dns_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s_dns_sock < 0) {
-        ESP_LOGE(TAG, "DNS socket failed");
-        s_dns_task = NULL;
-        vTaskDelete(NULL);
-        return;
+        ESP_LOGE(TAG, "DNS socket failed (errno %d)", errno);
+        return false;
     }
 
     struct sockaddr_in srv = {
@@ -124,20 +120,58 @@ static void dns_task(void *arg)
         .sin_addr.s_addr = htonl(INADDR_ANY),
     };
     if (bind(s_dns_sock, (struct sockaddr *)&srv, sizeof(srv)) < 0) {
-        ESP_LOGE(TAG, "DNS bind failed");
+        ESP_LOGE(TAG, "DNS bind failed (errno %d)", errno);
         close(s_dns_sock);
         s_dns_sock = -1;
-        s_dns_task = NULL;
-        vTaskDelete(NULL);
-        return;
+        return false;
     }
 
+    /* 1 s receive timeout: doubles as the polling cadence for "is the AP still
+     * up?", so the socket is released within a second of the AP going away. */
     struct timeval to = { .tv_sec = 1, .tv_usec = 0 };
     setsockopt(s_dns_sock, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof(to));
 
     ESP_LOGI(TAG, "DNS hijack listening on :%d", DNS_PORT);
+    return true;
+}
+
+static void dns_close(void)
+{
+    if (s_dns_sock < 0) return;
+    close(s_dns_sock);
+    s_dns_sock = -1;
+    ESP_LOGI(TAG, "DNS hijack stopped (no AP) -- socket released");
+}
+
+/* Answer every A query with the AP IP so the OS captive-portal probe is
+ * redirected to our page.
+ *
+ * The socket is held ONLY while the SoftAP is actually up. It used to be bound
+ * for the entire uptime, which permanently spent one of the 16 lwIP sockets
+ * shared with both HTTP servers, MQTT, WireGuard, the Modbus-TCP pollers and
+ * the Modbus bridge -- on a device that is in plain STA mode 99.9% of the time
+ * and where a dry pool makes port 502 refuse connections. In STA mode the
+ * hijack has no job anyway: nobody is connected to an AP that isn't running. */
+static void dns_task(void *arg)
+{
+    (void)arg;
+    uint8_t rx[DNS_BUF_LEN];
+    uint8_t tx[DNS_BUF_LEN + 16];
 
     while (s_dns_run) {
+        wifi_mgr_status_t ws;
+        wifi_mgr_get_status(&ws);
+
+        if (!ws.ap_active) {
+            dns_close();
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+        if (s_dns_sock < 0 && !dns_open()) {
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
+        }
+
         struct sockaddr_in src;
         socklen_t slen = sizeof(src);
         int n = recvfrom(s_dns_sock, rx, sizeof(rx), 0,
@@ -170,8 +204,7 @@ static void dns_task(void *arg)
         sendto(s_dns_sock, tx, p, 0, (struct sockaddr *)&src, slen);
     }
 
-    close(s_dns_sock);
-    s_dns_sock = -1;
+    dns_close();
     s_dns_task = NULL;
     vTaskDelete(NULL);
 }
@@ -294,7 +327,14 @@ esp_err_t captive_start(void)
     cfg.max_uri_handlers = 24;   /* mirror + ota + deye + captive routes */
     cfg.recv_wait_timeout = 12;  /* grace for a large OTA upload under load */
     cfg.send_wait_timeout = 12;
-    cfg.max_open_sockets = 7;          /* headroom for OTA + concurrent reqs */
+    /* 4, not 7. These are not free slots, they are 4 of the 16 lwIP sockets the
+     * whole device shares -- and this server plus the :81 stream server plus the
+     * DNS hijack used to reserve 14 of them, leaving the Modbus bridge and the
+     * Modbus-TCP pollers to fight over the rest. accept() then failed with
+     * ENFILE and port 502 refused LAN clients. 4 still covers the page + its
+     * /api/live poll + an OTA upload alongside; lru_purge_enable recycles the
+     * oldest connection instead of failing when a browser opens more. */
+    cfg.max_open_sockets = 4;
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
 
     ESP_RETURN_ON_ERROR(httpd_start(&s_httpd, &cfg), TAG, "httpd start");
@@ -320,17 +360,22 @@ esp_err_t captive_start(void)
         s_dns_run = false;
     }
 
-    ESP_LOGI(TAG, "captive portal up (HTTP :80 + DNS :53)");
+    /* Not "+ DNS :53" any more: the hijack task is up but binds nothing until
+     * the SoftAP actually runs, so claiming the port here would be a lie in the
+     * common (STA) case. */
+    ESP_LOGI(TAG, "captive portal up (HTTP :80; DNS :53 follows the SoftAP)");
     return ESP_OK;
 }
 
 void captive_stop(void)
 {
+    /* The DNS task now opens and closes its own socket (it only holds one while
+     * the AP is up), so closing it from here would race a reopen and could shut
+     * down a descriptor another module has since been handed. Signal instead and
+     * give it up to ~2 s to fall out of its 1 s recvfrom and clean up itself. */
     s_dns_run = false;
-    if (s_dns_sock >= 0) {
-        shutdown(s_dns_sock, SHUT_RDWR);
-        close(s_dns_sock);
-        s_dns_sock = -1;
+    for (int i = 0; i < 40 && s_dns_task; i++) {
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
     if (s_httpd) {
         httpd_stop(s_httpd);

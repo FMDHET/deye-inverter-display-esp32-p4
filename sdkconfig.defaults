@@ -122,3 +122,15 @@ CONFIG_LWIP_TCP_MSL=5000
 # raw lwIP netif (state = wireguard_device) doesn't crash esp_netif's DHCP
 # ext-callback (Load access fault in esp_netif_internal_dhcpc_cb). See wg_client.
 CONFIG_ESP_NETIF_BRIDGE_EN=y
+
+# This checkout lives under ".../Visual Studio Code/...". IDF's path-hiding adds
+# -fmacro-prefix-map=<project dir>=. which GCC parses as a plain argument, so a
+# space in the project path aborts every compile with
+#   cc1: error: invalid argument '/Users/.../Visual' to '-fmacro-prefix-map'
+# There is no quoting that survives the CMake -> ninja -> cc1 hand-off, and a
+# symlinked whitespace-free path does not help (CMake resolves the realpath).
+# Turning the remap off costs only cosmetics: __FILE__ in assert/log messages
+# becomes an absolute path instead of a relative one. PlatformIO's own guard
+# still refuses a BUILD_DIR containing spaces -- keep building with
+#   PLATFORMIO_BUILD_DIR=~/pio-build/deye-display pio run -e guition-p4 ...
+CONFIG_COMPILER_HIDE_PATHS_MACROS=n

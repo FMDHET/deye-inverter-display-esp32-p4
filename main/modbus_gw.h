@@ -34,6 +34,13 @@ typedef struct {
     uint8_t  clients;      /* currently connected                */
     uint32_t req_ok;       /* requests answered from the RTU bus */
     uint32_t req_err;      /* answered with a gateway exception  */
+    /* Connections that never became a client: accept() failed (the shared lwIP
+     * socket pool was empty) or the slot limit was hit. Counted separately from
+     * req_err because a client that cannot even connect never sends a request --
+     * without this the bridge looks perfectly healthy while the LAN sees a
+     * refused port. */
+    uint32_t conn_rej;
+    int32_t  last_errno;   /* errno of the last failed accept(); 0 = none */
 } modbus_gw_status_t;
 
 /* Starts the server task. Call AFTER modbus_rtu_start() -- it uses that

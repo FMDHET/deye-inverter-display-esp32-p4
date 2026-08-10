@@ -1128,9 +1128,16 @@ static void mb_rtu_refresh(void)
                 gcol = COL_WARN;
             }
             snprintf(gbuf, sizeof(gbuf),
-                     "Bridge: Port %u   Bus %s   Clients %u/%u   OK %u  Fehler %u",
+                     "Bridge: Port %u   Bus %s   Clients %u/%u   OK %u  Fehler %u  Abgew. %u",
                      (unsigned)c.gw_port, busy, (unsigned)g.clients,
-                     (unsigned)c.gw_max_clients, (unsigned)g.req_ok, (unsigned)g.req_err);
+                     (unsigned)c.gw_max_clients, (unsigned)g.req_ok,
+                     (unsigned)g.req_err, (unsigned)g.conn_rej);
+            /* "Abgew." counts connections that never became a client. It is the
+             * only visible symptom of a dry lwIP socket pool -- a client that
+             * cannot connect never sends a request, so OK/Fehler both stay put
+             * while the LAN sees a refused port. Non-zero here means look at
+             * the socket budget, not at RS485. */
+            if (g.conn_rej) gcol = COL_WARN;
         }
         lv_label_set_text(s_gw_status, gbuf);
         lv_obj_set_style_text_color(s_gw_status, gcol, 0);

@@ -38,9 +38,22 @@ _Static_assert(GW_RXBUF >= GW_FRAME_MAX,
                "the receive buffer must hold one maximum-size frame");
 
 /* Idle connections are reaped so a crashed client cannot hold a slot forever.
- * Generous: a Home Assistant / SCADA poller keeps its socket open between
- * scans, and dropping a healthy one just to reconnect costs a round trip. */
-#define GW_IDLE_MS   300000
+ * 60 s, not the 300 s this started at: with only gw_max_clients slots (2 by
+ * default) a client that dies without a FIN -- HA restarting, a WiFi dropout,
+ * a laptop closing its lid -- parks its slot for the whole window, and the
+ * reconnect is then refused. Five minutes of that reads as "the Deye is not
+ * reachable over Modbus". A healthy poller sends far more often than once a
+ * minute, so nothing legitimate is dropped; TCP keepalive below catches the
+ * half-open case even sooner. */
+#define GW_IDLE_MS   60000
+
+/* TCP keepalive on accepted clients: probe an idle peer after 20 s, then every
+ * 5 s, and drop it after 3 unanswered probes (~35 s). This is what actually
+ * frees a slot whose peer vanished silently -- the idle reaper above only
+ * covers a peer that is alive but quiet. */
+#define GW_KA_IDLE_S   20
+#define GW_KA_INTVL_S   5
+#define GW_KA_COUNT     3
 
 /* Below LVGL/touch (priority 4), like the Modbus-TCP poll workers -- a busy
  * bridge must never make the UI sluggish. Pinned to core 0 for the same reason
@@ -89,7 +102,13 @@ static int send_all(int fd, const uint8_t *p, int n)
 static int gw_listen(uint16_t port)
 {
     int s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (s < 0) return -1;
+    if (s < 0) {
+        /* Same shared-pool failure as in gw_accept(), just one step earlier:
+         * without a listener the bridge never comes up at all. */
+        ESP_LOGE(TAG, "socket for :%u failed (errno %d) -- bridge not listening",
+                 port, errno);
+        return -1;
+    }
     int one = 1;
     /* Without SO_REUSEADDR a re-bind after a config change fails for as long as
      * the old socket lingers in TIME_WAIT. */
@@ -202,7 +221,25 @@ static void gw_accept(int lsock, int maxcl, uint32_t now)
     struct sockaddr_in sa;
     socklen_t sl = sizeof(sa);
     int fd = accept(lsock, (struct sockaddr *)&sa, &sl);
-    if (fd < 0) return;
+    if (fd < 0) {
+        /* This used to `return` silently, and that silence was the whole
+         * problem: the 16 lwIP sockets are shared with both HTTP servers, MQTT,
+         * WireGuard and the PERSISTENT Modbus-TCP worker sockets, so accept()
+         * here fails with ENFILE (23) whenever the pool runs dry. The bridge
+         * then refuses every LAN client while its status line still reads
+         * "running" and req_err stays at 0 -- the failure was invisible both on
+         * the display and in the log. Count it and say so. */
+        int e = errno;
+        portENTER_CRITICAL(&s_mux);
+        s_st.conn_rej++; s_st.last_errno = e;
+        portEXIT_CRITICAL(&s_mux);
+        ESP_LOGW(TAG, "accept failed (errno %d%s) -- LAN client refused", e,
+                 e == ENFILE || e == EMFILE ? ": lwIP socket pool exhausted" : "");
+        /* Do not spin: with the pool empty the next accept() fails just as
+         * fast, and a client retrying every 1.5 s would flood the log. */
+        vTaskDelay(pdMS_TO_TICKS(200));
+        return;
+    }
 
     int slot = -1, used = 0;
     for (int i = 0; i < MB_GW_MAX_CLIENTS; i++) {
@@ -213,6 +250,9 @@ static void gw_accept(int lsock, int maxcl, uint32_t now)
         /* Close immediately instead of leaving it parked in the backlog: the
          * client gets a clean error and can retry, rather than hanging. */
         close(fd);
+        portENTER_CRITICAL(&s_mux);
+        s_st.conn_rej++;
+        portEXIT_CRITICAL(&s_mux);
         ESP_LOGW(TAG, "client limit %d reached -- refused %s",
                  maxcl, inet_ntoa(sa.sin_addr));
         return;
@@ -224,6 +264,14 @@ static void gw_accept(int lsock, int maxcl, uint32_t now)
     /* Bound a blocked send so one wedged client cannot stall the whole task. */
     struct timeval to = { .tv_sec = 5, .tv_usec = 0 };
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &to, sizeof(to));
+    /* Keepalive: reclaim the slot of a peer that vanished without a FIN. A
+     * client slot is a scarce resource here (2 by default), and a half-open
+     * connection is otherwise indistinguishable from an idle healthy one. */
+    int ka_idle = GW_KA_IDLE_S, ka_intvl = GW_KA_INTVL_S, ka_cnt = GW_KA_COUNT;
+    setsockopt(fd, SOL_SOCKET,  SO_KEEPALIVE,  &one,      sizeof(one));
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE,  &ka_idle,  sizeof(ka_idle));
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &ka_intvl, sizeof(ka_intvl));
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT,   &ka_cnt,   sizeof(ka_cnt));
 
     s_cl[slot].fd      = fd;
     s_cl[slot].have    = 0;

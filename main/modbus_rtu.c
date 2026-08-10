@@ -117,8 +117,14 @@ static void clamp_cfg(mb_rtu_cfg_t *c)
     if (c->gw_timeout_ms == 0) c->gw_timeout_ms = MB_GW_DEFAULT_TIMEOUT_MS;
     if (c->gw_timeout_ms < 100)   c->gw_timeout_ms = 100;
     if (c->gw_timeout_ms > 5000)  c->gw_timeout_ms = 5000;
-    if (c->gw_max_clients == 0)                    c->gw_max_clients = MB_GW_DEFAULT_CLIENTS;
-    if (c->gw_max_clients > MB_GW_MAX_CLIENTS)     c->gw_max_clients = MB_GW_MAX_CLIENTS;
+    /* gw_max_clients has NO control in the "Mod RTU" tab, and rtu_save_cb writes
+     * the whole struct back -- so the stored byte is never a user choice, only a
+     * snapshot of whatever the compiled default was when the bridge was last
+     * switched on. Clamping it would pin an old default in NVS forever (raising
+     * MB_GW_DEFAULT_CLIENTS would silently do nothing on every device that has
+     * ever saved). Derive it instead. If this ever becomes user-editable, delete
+     * this line and restore the 0 -> default / > MAX -> MAX clamp. */
+    c->gw_max_clients = MB_GW_DEFAULT_CLIENTS;
     /* No bus picked but the bridge is on -> serve every master bus, so simply
      * switching it on does something useful instead of answering 0x0A. */
     if (c->gw_enabled && c->gw_bus_mask == 0)

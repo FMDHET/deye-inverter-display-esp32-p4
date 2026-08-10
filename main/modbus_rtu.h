@@ -63,7 +63,12 @@ typedef struct {
  * because RS485 is serial and extra clients would only queue behind each other.
  * Growing the pool is possible but untested on this board (see the note in
  * sdkconfig.defaults); sizing the bridge to fit avoids the question. */
-#define MB_GW_DEFAULT_CLIENTS    2
+/* 4 since the socket budget was fixed: the :80 server gave back 3 slots and the
+ * DNS hijack no longer holds one outside AP mode, so the bridge can afford the
+ * full ceiling. NOTE this is still a shared, oversubscribed pool -- if the HTTP
+ * servers, the per-IP Modbus-TCP poll sockets and 4 bridge clients ever peak at
+ * once it is tight again. Drop this back to 2 if `Abgew.` starts counting. */
+#define MB_GW_DEFAULT_CLIENTS    4
 #define MB_GW_MAX_CLIENTS        4      /* hard ceiling for gw_max_clients   */
 
 typedef struct {

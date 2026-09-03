@@ -3,6 +3,7 @@
 #include "web_mirror.h"
 #include "ota.h"
 #include "deye_web.h"
+#include "meter_web.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -299,18 +300,63 @@ static esp_err_t h_connect(httpd_req_t *req)
     return httpd_resp_sendstr(req, page);
 }
 
-/* Catch-all: redirect any other request to the portal so the OS connectivity
- * check fails and the captive-portal sheet opens. */
+/* Catch-all for everything no route claimed.
+ *
+ * Two very different situations end up here, and sending the same 302 to both
+ * was wrong:
+ *
+ *  1. SoftAP up: a phone probing for connectivity. Redirecting it to the AP IP
+ *     is the whole captive-portal trick -- keep that.
+ *
+ *  2. Normal LAN use over STA: a mistyped or near-miss URL. `/deye/` with a
+ *     trailing slash, `/Deye`, a browser asking for `/favicon.ico` -- none of
+ *     them match exactly, and all of them used to be redirected to
+ *     192.168.4.1, which does not exist on the LAN. The browser then showed its
+ *     own error page and the device looked broken ("the pages are white").
+ *     Answer with a real 404 that names the routes instead.
+ */
 static esp_err_t h_redirect(httpd_req_t *req)
 {
-    char ip[16];
-    ap_ip_str(ip, sizeof(ip));
-    char loc[32];
-    snprintf(loc, sizeof(loc), "http://%s/", ip);
+    wifi_mgr_status_t st;
+    wifi_mgr_get_status(&st);
 
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", loc);
-    return httpd_resp_send(req, NULL, 0);
+    if (st.ap_active) {
+        char ip[16];
+        ap_ip_str(ip, sizeof(ip));
+        char loc[32];
+        snprintf(loc, sizeof(loc), "http://%s/", ip);
+        httpd_resp_set_status(req, "302 Found");
+        httpd_resp_set_hdr(req, "Location", loc);
+        return httpd_resp_send(req, NULL, 0);
+    }
+
+    /* A near-miss of a real route ("/deye/", "/deye#") is worth bouncing
+     * straight to it. Location is RELATIVE on purpose: the browser resolves it
+     * against whatever host it asked, so this works on any IP the device has. */
+    if (strncmp(req->uri, "/deye", 5) == 0 || strncmp(req->uri, "/meter", 6) == 0) {
+        httpd_resp_set_status(req, "302 Found");
+        httpd_resp_set_hdr(req, "Location", "/deye");
+        return httpd_resp_send(req, NULL, 0);
+    }
+
+    static const char notfound[] =
+        "<!DOCTYPE html><html lang=\"de\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Nicht gefunden</title><style>:root{color-scheme:dark}"
+        "body{margin:0;padding:32px;background:#0f1115;color:#e6e6e6;"
+        "font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif}"
+        "h1{font-size:18px;margin:0 0 6px}p{color:#8a8f99;margin:0 0 18px}"
+        "a{color:#9bb1d1;display:block;padding:6px 0}</style></head><body>"
+        "<h1>Diese Adresse gibt es nicht</h1>"
+        "<p>Das Ger&auml;t kennt diese drei Seiten:</p>"
+        "<a href=\"/deye\">/deye &ndash; Z&auml;hler, Modbus-Register, Update</a>"
+        "<a href=\"/\">/ &ndash; Display-Spiegel</a>"
+        "<a href=\"/recovery\">/recovery &ndash; Notfall-Oberfl&auml;che</a>"
+        "</body></html>";
+
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_type(req, "text/html");
+    return httpd_resp_sendstr(req, notfound);
 }
 
 /* ------------------------------ public API ----------------------------- */
@@ -324,7 +370,7 @@ esp_err_t captive_start(void)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size       = 6144;
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 24;   /* mirror + ota + deye + captive routes */
+    cfg.max_uri_handlers = 28;   /* mirror + ota + deye + meter + captive routes */
     cfg.recv_wait_timeout = 12;  /* grace for a large OTA upload under load */
     cfg.send_wait_timeout = 12;
     /* 4, not 7. These are not free slots, they are 4 of the 16 lwIP sockets the
@@ -345,6 +391,7 @@ esp_err_t captive_start(void)
     web_mirror_register(s_httpd);
     ota_register_routes(s_httpd);
     deye_web_register(s_httpd);
+    meter_web_register(s_httpd);
 
     const httpd_uri_t scan = { .uri = "/scan",    .method = HTTP_GET,  .handler = h_scan };
     const httpd_uri_t conn = { .uri = "/connect", .method = HTTP_POST, .handler = h_connect };

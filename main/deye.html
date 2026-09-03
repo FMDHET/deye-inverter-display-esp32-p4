@@ -1,9 +1,49 @@
 <!DOCTYPE html><html lang="de"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deye Modbus Register</title>
+<title>Deye Display &ndash; Werkbank</title>
+<script>
+/* Farbschema VOR dem ersten Rendern setzen, sonst blitzt die Seite kurz in der
+ * anderen Farbe auf. Nutzerwahl liegt in localStorage ("light"/"dark", nichts =
+ * Systemeinstellung); ?theme=light|dark in der URL ueberstimmt einmalig. */
+(function () {
+  try {
+    var q = new URLSearchParams(location.search).get("theme");
+    var t = q || localStorage.getItem("theme");
+    if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+})();
+</script>
 <style>
-  :root { --bg:#0f1115; --fg:#e6e6e6; --mut:#8a8f99; --acc:#3aa675; --warn:#d4823b;
-          --err:#d44b3b; --tbg:#171a21; --bd:#2a2f3a; }
+  /* ---- Farbschema ----
+   * Helle Palette als Basis; die dunkle ueberschreibt nur die Tokens -- einmal
+   * ueber die Systemeinstellung (prefers-color-scheme), einmal ueber die
+   * Nutzerwahl (data-theme, vom Skript im <head> aus localStorage gesetzt).
+   * Die beiden dunklen Bloecke muessen identisch bleiben.
+   * color-scheme laesst den Browser seine EIGENEN Widgets passend malen:
+   * Select-Liste, Zahlenfeld-Pfeile, Datei-Button, Scrollbalken, confirm().
+   * Jede Farbe hier ist gegen ihre Flaeche auf WCAG AA gemessen (Text >=4.5:1,
+   * Bedienrahmen >=3:1); --bd ist die bewusst leise Tabellenlinie, --bdi der
+   * sichtbare Rand fuer alles Bedienbare. */
+  :root { color-scheme: light;
+          --bg:#f2f4f7; --tbg:#ffffff; --fg:#1b1f27; --mut:#5a6270;
+          --acc:#1e7b4e; --accfg:#ffffff; --acc-soft:rgba(30,123,78,.12);
+          --warn:#a9560f; --err:#b42318; --man:#7b3fa0; --link:#245fb0;
+          --bd:#dde1e7; --bdi:#7f889a; --inp:#ffffff; --btn:#e8ebf0; --dis:#eef0f3;
+          --warnbg:#fff4e0; --warnfg:#6b3d05; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { color-scheme: dark;
+          --bg:#0f1115; --tbg:#171a21; --fg:#e6e6e6; --mut:#8a8f99;
+          --acc:#3aa675; --accfg:#002211; --acc-soft:rgba(58,166,117,.18);
+          --warn:#d4823b; --err:#f2705f; --man:#c78bd9; --link:#9bb1d1;
+          --bd:#2a2f3a; --bdi:#6a7589; --inp:#222632; --btn:#2a2f3a; --dis:#1b1e27;
+          --warnbg:#221a10; --warnfg:#e8cba6; }
+  }
+  :root[data-theme="dark"] { color-scheme: dark;
+          --bg:#0f1115; --tbg:#171a21; --fg:#e6e6e6; --mut:#8a8f99;
+          --acc:#3aa675; --accfg:#002211; --acc-soft:rgba(58,166,117,.18);
+          --warn:#d4823b; --err:#f2705f; --man:#c78bd9; --link:#9bb1d1;
+          --bd:#2a2f3a; --bdi:#6a7589; --inp:#222632; --btn:#2a2f3a; --dis:#1b1e27;
+          --warnbg:#221a10; --warnfg:#e8cba6; }
   * { box-sizing:border-box; }
   body { margin:0; font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;
          color:var(--fg); background:var(--bg); padding:16px; }
@@ -15,7 +55,7 @@
   .card > summary { cursor:pointer; }
   .card > .body { padding-top:8px; }
   .hint { color:var(--mut); font-size:12px; }
-  code { color:#9bb1d1; }
+  code { color:var(--link); }
   table { width:100%; border-collapse:collapse; }
   th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--bd); font-variant-numeric:tabular-nums; }
   th { color:var(--mut); font-weight:500; font-size:12px; position:sticky; top:0; background:var(--tbg); z-index:2; box-shadow:inset 0 -1px 0 var(--bd); }
@@ -26,17 +66,194 @@
   #probeResult th .grip { position:absolute; top:0; right:0; width:8px; height:100%;
                           cursor:col-resize; }
   #probeResult th .grip:hover { background:var(--acc); opacity:.6; }
-  button { background:#2a2f3a; color:var(--fg); border:1px solid var(--bd); border-radius:5px;
+  button { background:var(--btn); color:var(--fg); border:1px solid var(--bdi); border-radius:5px;
            padding:5px 12px; cursor:pointer; font-size:12px; }
-  button.primary { background:var(--acc); color:#021; border-color:var(--acc); font-weight:600; }
-  input { background:#222632; color:var(--fg); border:1px solid var(--bd); border-radius:5px;
+  button:hover { border-color:var(--fg); }
+  button:focus-visible, input:focus-visible, select:focus-visible,
+  nav.tabs button:focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+  button.primary { background:var(--acc); color:var(--accfg); border-color:var(--acc); font-weight:600; }
+  input { background:var(--inp); color:var(--fg); border:1px solid var(--bdi); border-radius:5px;
           padding:4px 8px; font-size:13px; font-variant-numeric:tabular-nums; }
+  /* Der Wert-Eingang wird im Modus "aus" deaktiviert. Die Browser-Vorgabe fuer
+   * :disabled ist ausgegraut auf hell gedacht und verschwindet hier fast -- also
+   * selbst abtoenen, aber lesbar lassen. */
+  input:disabled, select:disabled { background:var(--dis); color:var(--mut);
+                                    border-color:var(--bd); cursor:not-allowed; }
   .formrow { display:flex; gap:12px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
   .formrow label { color:var(--mut); font-size:12px; }
+/* ---- Zaehler-Tab ----
+ * Tabellenregeln sind bewusst auf #tab-meter beschraenkt: das Register-Tab
+ * darueber will linksbuendige Zellen und seinen eigenen sticky-Header. */
+  #tab-meter th, #tab-meter td { text-align:right; padding:6px 8px; }
+  #tab-meter th:first-child, #tab-meter td:first-child { text-align:left; }
+  #tab-meter thead tr.grp th { text-align:center; color:var(--fg); font-size:11px;
+                               text-transform:uppercase; letter-spacing:.04em; }
+  #tab-meter tbody tr.sum td { font-weight:600; border-top:1px solid var(--bd); }
+  #tab-meter td.big { font-size:15px; }
+  #tab-meter input[type=number] { width:110px; text-align:right; }
+  .pos { color:var(--warn); }   /* Bezug        */
+  .neg { color:var(--acc); }    /* Einspeisung  */
+  .man { color:var(--man); }    /* manipuliert  */
+  .pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px;
+          border:1px solid var(--bd); color:var(--mut); margin-right:6px; }
+  .pill.ok  { color:var(--acc);  border-color:var(--acc); }
+  .pill.bad { color:var(--err);  border-color:var(--err); }
+  .pill.hot { color:var(--warn); border-color:var(--warn); }
+  button.danger { background:transparent; color:var(--err); border-color:var(--err); }
+  select { background:var(--inp); color:var(--fg); border:1px solid var(--bdi); border-radius:5px;
+           padding:4px 8px; font-size:13px; }
+  .warn { border-left:3px solid var(--warn); background:var(--warnbg); color:var(--warnfg);
+          padding:10px 12px; border-radius:0 6px 6px 0; font-size:12px; margin:0 0 14px; }
+  .warn b { color:var(--warn); }
+  .sw { display:flex; align-items:center; gap:8px; }
+
+/* ---- hub chrome: header + tab bar ---- */
+  header.hub { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin:0 0 12px; }
+  header.hub h1 { margin:0; }
+  header.hub .spacer { flex:1; }
+  header.hub a.ext { color:var(--link); text-decoration:none; font-size:12px; }
+  header.hub a.ext:hover { text-decoration:underline; }
+  .theme { display:inline-flex; border:1px solid var(--bdi); border-radius:6px; overflow:hidden; }
+  .theme button { border:none; border-radius:0; padding:4px 10px; font-size:12px; background:transparent; color:var(--mut); }
+  .theme button + button { border-left:1px solid var(--bdi); }
+  .theme button.on { background:var(--btn); color:var(--fg); font-weight:600; }
+  nav.tabs { display:flex; gap:6px; border-bottom:1px solid var(--bd); margin:0 0 16px; flex-wrap:wrap; }
+  nav.tabs button { background:transparent; border:1px solid transparent; border-bottom:none;
+                    border-radius:6px 6px 0 0; padding:8px 16px; color:var(--mut); font-size:13px;
+                    margin-bottom:-1px; }
+  nav.tabs button:hover { color:var(--fg); }
+  /* Der aktive Tab hebt sich sonst nur durch #171a21 gegen #0f1115 ab -- das
+   * sind 1.2:1 und damit praktisch nichts. Sichtbarer Rand + Akzentkante oben. */
+  nav.tabs button.on { color:var(--fg); background:var(--tbg); border-color:var(--bdi);
+                       border-top:2px solid var(--acc);
+                       border-bottom:1px solid var(--tbg); font-weight:600; }
+  section.tab[hidden] { display:none; }
+  section.tab > .lead { color:var(--mut); margin:0 0 14px; font-size:12px; }
+
+/* ---- system / update tab ---- */
+  .kv { display:flex; justify-content:space-between; font-size:13px; padding:3px 0;
+        border-bottom:1px solid var(--bd); }
+  .kv:last-child { border-bottom:none; }
+  .kv span { color:var(--mut); }
+  .kv b { font-variant-numeric:tabular-nums; }
+  .bar { height:8px; background:var(--btn); border-radius:5px; overflow:hidden; margin:8px 0; display:none; }
+  .bar > div { height:100%; width:0; background:var(--acc); transition:width .15s; }
+  input[type=file] { width:100%; font-size:13px; margin:6px 0; color:var(--fg);
+                     background:var(--inp); border:1px solid var(--bdi);
+                     border-radius:5px; padding:6px 8px; }
+  #sysStatus { font-size:12px; color:var(--mut); min-height:1.2em; white-space:pre-wrap; }
 </style></head>
 <body>
-<h1>Deye Modbus Register</h1>
-<p class="sub">Holding-Register (FC03) des Wechselrichters lesen/schreiben — über den RTU-Master-Bus.</p>
+
+<header class="hub">
+  <h1>Deye Display</h1>
+  <span class="sub" style="margin:0;" id="hubVer">&hellip;</span>
+  <span class="spacer"></span>
+  <a class="ext" href="/" target="_blank">Display-Spiegel &#8599;</a>
+  <a class="ext" href="/recovery" target="_blank">Recovery-Seite &#8599;</a>
+  <span class="theme" role="group" aria-label="Farbschema">
+    <button type="button" data-theme-set="auto" title="Systemeinstellung folgen">Auto</button>
+    <button type="button" data-theme-set="light">Hell</button>
+    <button type="button" data-theme-set="dark">Dunkel</button>
+  </span>
+</header>
+
+<nav class="tabs">
+  <button data-tab="meter" class="on">Z&auml;hler &amp; Deye</button>
+  <button data-tab="regs">Modbus-Register</button>
+  <button data-tab="sys">System &amp; Update</button>
+</nav>
+
+<section class="tab" id="tab-meter">
+  <p class="lead">Was der Eltako-Z&auml;hler misst &mdash; und was die SDM630-Emulation dem Deye davon erz&auml;hlt.</p>
+<div class="card">
+  <div class="formrow" style="margin:0;">
+    <span id="pStale" class="pill">Zählerwert …</span>
+    <span id="pSlave" class="pill">Emulation …</span>
+    <span id="pSplit" class="pill">Phasenaufteilung …</span>
+    <span id="pManip" class="pill">Manipulation …</span>
+    <span class="hint" id="pInfo" style="margin-left:auto;"></span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Phasenübersicht</h2>
+  <table>
+    <thead>
+      <tr class="grp">
+        <th style="width:64px;"></th>
+        <th colspan="3">Zähler (gemessen)</th>
+        <th colspan="2">Korrektur</th>
+        <th colspan="2">an Deye gesendet</th>
+      </tr>
+      <tr>
+        <th></th>
+        <th>U [V]</th><th>I [A]</th><th>P [W]</th>
+        <th>Sollwert [W]</th><th>Manipulation</th>
+        <th>P [W]</th><th>I [A]</th>
+      </tr>
+    </thead>
+    <tbody id="phaseBody"></tbody>
+  </table>
+  <p class="hint" style="margin:10px 0 0;">
+    Vorzeichen wie beim Zähler: <span class="pos">+ = Netzbezug</span>,
+    <span class="neg">&minus; = Einspeisung</span>. Spannung und Strom in der
+    rechten Hälfte werden von der Emulation aus der Leistung erzeugt
+    (230&nbsp;V nominal) — der Deye regelt ohnehin nur auf die Wirkleistung.
+  </p>
+</div>
+
+<div class="card">
+  <h2>Phasen gezielt manipulieren</h2>
+  <p class="warn">
+    <b>&#9888; Achtung:</b> Diese Werte gehen direkt in den Regelkreis des
+    Wechselrichters. Der Deye <i>glaubt</i> was hier steht und regelt darauf —
+    ein falscher Wert kann echte Einspeisung oder echten Bezug in beliebiger Höhe
+    erzeugen. Die Einstellung bleibt über einen Neustart hinweg aktiv.
+    Nur mit Blick auf den echten Zähler benutzen.
+  </p>
+  <div class="formrow">
+    <span class="sw"><input type="checkbox" id="mEn"> <label for="mEn" style="font-size:13px;color:var(--fg);">Manipulation aktiv</label></span>
+    <span style="flex:1;"></span>
+    <label for="sp">Netz-Sollwert [W]</label>
+    <input type="number" id="sp" step="10" min="-30000" max="30000">
+  </div>
+  <table>
+    <thead><tr>
+      <th style="width:64px;">Phase</th><th style="width:200px;text-align:left;">Modus</th>
+      <th style="width:150px;">Wert</th><th style="text-align:left;">Wirkung</th>
+    </tr></thead>
+    <tbody id="manipBody"></tbody>
+  </table>
+  <div class="formrow" style="margin:14px 0 0;">
+    <button class="primary" id="btnSave">Übernehmen</button>
+    <button class="danger" id="btnOff">Sofort abschalten</button>
+    <button id="btnReset">Alle Phasen auf „aus“</button>
+    <span class="hint" id="saveMsg"></span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Modbus-TCP Zähler / Geräte</h2>
+  <table>
+    <thead><tr>
+      <th style="text-align:left;">Name</th><th style="text-align:left;">IP</th>
+      <th style="text-align:left;">Typ</th><th style="text-align:left;">Rolle</th>
+      <th>Status</th><th>L1 [W]</th><th>L2 [W]</th><th>L3 [W]</th><th style="text-align:left;padding-left:18px;">Leistung</th><th>Phasen-Alter</th>
+    </tr></thead>
+    <tbody id="devBody"></tbody>
+  </table>
+  <p class="hint" style="margin:10px 0 0;">
+    Nur Eltako-Zähler liefern Werte je Phase (Eingangsregister 0…17); bei allen
+    anderen bleibt L1…L3 leer, und die Emulation teilt die Summe zu gleichen
+    Teilen auf. „Leistung" ist rollenabhängig: Netz-/Erzeugungsleistung beim
+    Zähler, PV-Produktion beim Wechselrichter (Hybrid zusätzlich Akku und SoC).
+  </p>
+</div>
+</section>
+
+<section class="tab" id="tab-regs" hidden>
+  <p class="lead">Holding-Register (FC03) des Wechselrichters lesen/schreiben &mdash; &uuml;ber den RTU-Master-Bus.</p>
     <p class="hint" style="margin:0 0 10px 0;">
       Liest beliebige Holding-Register (FC03) vom Deye. Hilft beim Verifizieren ob
       TOU-Writes "gestickt" sind und welche Adressen welchen Wert haben.
@@ -93,7 +310,344 @@
     <div class="formrow" style="margin-top:6px;">
       <span id="ioStatus" style="color:var(--mut);font-size:12px;"></span>
     </div>
+</section>
+
+<section class="tab" id="tab-sys" hidden>
+  <p class="lead">Ger&auml;te-Info, Firmware- und Dateisystem-Update. Dieselben Endpunkte wie die
+     eigenst&auml;ndige <a href="/recovery" style="color:var(--link);">Recovery-Seite</a>, die bewusst
+     unver&auml;ndert bleibt: sie ist die Notfall-Oberfl&auml;che und darf nichts von dieser Seite brauchen.</p>
+
+  <div class="card">
+    <h2>Ger&auml;t</h2>
+    <div class="kv"><span>Version</span><b id="sVer">&hellip;</b></div>
+    <div class="kv"><span>Dateisystem-Build</span><b id="sFs">&hellip;</b></div>
+    <div class="kv"><span>Laufender Slot</span><b id="sRun">&hellip;</b></div>
+    <div class="kv"><span>Ziel-Slot (OTA)</span><b id="sTgt">&hellip;</b></div>
+    <div class="kv"><span>Laufzeit</span><b id="sUpt">&hellip;</b></div>
+    <div class="kv"><span>MAC</span><b id="sMac">&hellip;</b></div>
+    <div class="kv"><span>ESP-IDF</span><b id="sIdf">&hellip;</b></div>
+  </div>
+
+  <div class="card">
+    <h2>Firmware (firmware.bin)</h2>
+    <input type="file" id="fwFile" accept=".bin">
+    <div class="bar" id="fwBar"><div></div></div>
+    <button class="primary" id="btnFw">Firmware flashen</button>
+  </div>
+
+  <div class="card">
+    <h2>Dateisystem (storage.bin)</h2>
+    <input type="file" id="fsFile" accept=".bin">
+    <div class="bar" id="fsBar"><div></div></div>
+    <button class="primary" id="btnFs">Dateisystem flashen</button>
+  </div>
+
+  <div class="card">
+    <h2>Aktionen</h2>
+    <div class="formrow" style="margin:0;">
+      <button id="btnRollback">&#8634; Auf vorigen Slot wechseln (Rollback)</button>
+      <button id="btnReboot">Neustart</button>
+    </div>
+  </div>
+
+  <div class="card"><div id="sysStatus"></div></div>
+</section>
+
 <script>
+/* ---------------- System & Update ---------------- */
+(function () {
+  var S = document.getElementById("sysStatus");
+  function set(t) { S.textContent = t; }
+
+  function fmtUptime(s) {
+    s = s | 0;
+    var d = (s / 86400) | 0; s -= d * 86400;
+    var h = (s / 3600)  | 0; s -= h * 3600;
+    var m = (s / 60)    | 0; var sec = s - m * 60;
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d + " T  " + p(h) + ":" + p(m) + ":" + p(sec);
+  }
+
+  window.sysLoadInfo = function () {
+    fetch("/ota", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
+      var v = j.version + " (#" + j.build + ")";
+      document.getElementById("sVer").textContent = v;
+      document.getElementById("hubVer").textContent = v;
+      document.getElementById("sFs").textContent  = "#" + j.fs_build;
+      document.getElementById("sRun").textContent = j.running;
+      document.getElementById("sTgt").textContent = j.target_slot;
+      document.getElementById("sUpt").textContent = (j.uptime != null) ? fmtUptime(j.uptime) : "-";
+      document.getElementById("sMac").textContent = j.mac;
+      document.getElementById("sIdf").textContent = j.idf;
+    }).catch(function () { set("Geraet nicht erreichbar."); });
+  };
+
+  function flash(inputId, url, barId) {
+    var f = document.getElementById(inputId).files[0];
+    if (!f) { set("Bitte zuerst eine Datei waehlen."); return; }
+    var bar = document.getElementById(barId), fill = bar.firstElementChild;
+    bar.style.display = "block"; fill.style.width = "0";
+    set("Lade " + f.name + " (" + Math.round(f.size / 1024) + " KB) hoch \u2026");
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", url, true);
+    xhr.upload.onprogress = function (e) {
+      if (e.lengthComputable) fill.style.width = (e.loaded / e.total * 100) + "%";
+    };
+    xhr.onload  = function () { set(xhr.responseText || ("Fertig (HTTP " + xhr.status + ")")); setTimeout(window.sysLoadInfo, 4000); };
+    xhr.onerror = function () { set("Verbindung getrennt \u2013 das Geraet startet vermutlich neu. Seite gleich neu laden."); };
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.send(f);
+  }
+
+  function act(url, msg) {
+    if (!confirm(msg)) return;
+    set("\u2026");
+    fetch(url, { method: "POST" }).then(function (r) { return r.text(); })
+      .then(set).catch(function () { set("Befehl gesendet, Geraet startet neu \u2026"); });
+  }
+
+  document.getElementById("btnFw").addEventListener("click", function () { flash("fwFile", "/ota", "fwBar"); });
+  document.getElementById("btnFs").addEventListener("click", function () { flash("fsFile", "/ota/fs", "fsBar"); });
+  document.getElementById("btnRollback").addEventListener("click", function () { act("/ota/rollback", "Auf vorigen Slot wechseln und neu starten?"); });
+  document.getElementById("btnReboot").addEventListener("click", function () { act("/ota/reboot", "Neu starten?"); });
+
+  window.sysLoadInfo();
+})();
+</script>
+
+<script>
+/* ---------------- Zaehler & Deye (Tab 1) ----------------
+ * Gekapselt, damit sich nichts mit dem Register-Werkzeug darunter beisst --
+ * das arbeitet bewusst mit globalen Funktionen fuer seine inline-onclicks. */
+(function () {
+"use strict";
+
+const MODES = [
+  { v: 0, label: "aus (Messwert durchreichen)",   unit: "",  hint: "Phase wird unverändert weitergegeben." },
+  { v: 1, label: "Offset  (+/- Watt addieren)",   unit: "W", hint: "gesendet = gemessen &minus; Sollwertanteil + Offset" },
+  { v: 2, label: "Absolut (festen Wert senden)",  unit: "W", hint: "gesendet = fester Wert, Messwert wird ignoriert" },
+  { v: 3, label: "Skalieren (Prozent)",           unit: "%", hint: "gesendet = (gemessen &minus; Sollwertanteil) × Prozent/100" }
+];
+const PH = ["L1", "L2", "L3"];
+
+const $ = (id) => document.getElementById(id);
+let dirty = false;          /* solange der Nutzer tippt, Felder nicht überschreiben */
+let last = null;
+
+function fmt(x, dec) {
+  if (x === undefined || x === null || !isFinite(x)) return "–";
+  return x.toFixed(dec === undefined ? 0 : dec);
+}
+function cls(w) { return w > 0.5 ? "pos" : (w < -0.5 ? "neg" : ""); }
+function td(txt, klass) {
+  return '<td' + (klass ? ' class="' + klass + '"' : '') + '>' + txt + '</td>';
+}
+
+/* ---------- Manipulations-Formular (einmal aufbauen) ---------- */
+function buildManipRows() {
+  let h = "";
+  for (let k = 0; k < 3; k++) {
+    let opts = MODES.map(m => '<option value="' + m.v + '">' + m.label + '</option>').join("");
+    h += '<tr>' +
+         '<td><b>' + PH[k] + '</b></td>' +
+         '<td style="text-align:left;"><select id="m' + k + '" style="width:100%;">' + opts + '</select></td>' +
+         '<td><input type="number" id="v' + k + '" step="10" value="0"> <span class="hint" id="u' + k + '"></span></td>' +
+         '<td style="text-align:left;" class="hint" id="h' + k + '"></td>' +
+         '</tr>';
+  }
+  $("manipBody").innerHTML = h;
+  for (let k = 0; k < 3; k++) {
+    $("m" + k).addEventListener("change", () => { dirty = true; syncHints(); });
+    $("v" + k).addEventListener("input",  () => { dirty = true; });
+  }
+  $("mEn").addEventListener("change", () => { dirty = true; });
+  $("sp").addEventListener("input",   () => { dirty = true; });
+  syncHints();
+}
+
+function syncHints() {
+  for (let k = 0; k < 3; k++) {
+    const m = MODES[+$("m" + k).value] || MODES[0];
+    $("u" + k).textContent = m.unit;
+    $("h" + k).innerHTML   = m.hint;
+    $("v" + k).disabled    = (m.v === 0);
+  }
+}
+
+function manipText(mode, val) {
+  if (mode === 1) return (val >= 0 ? "+" : "") + fmt(val) + " W";
+  if (mode === 2) return "= " + fmt(val) + " W";
+  if (mode === 3) return "× " + fmt(val, 1) + " %";
+  return "–";
+}
+
+/* ---------- Anzeige ---------- */
+function render(d) {
+  last = d;
+  const s = d.served, m = d.manip;
+
+  /* Status-Pills */
+  const stale = $("pStale");
+  stale.textContent = s.fresh ? "Zählerwert frisch" : "Zählerwert VERALTET → 0 W gesendet";
+  stale.className   = "pill " + (s.fresh ? "ok" : "bad");
+
+  const sl = $("pSlave");
+  sl.textContent = s.slave ? "Emulation aktiv" : "kein Bus im Slave-Modus";
+  sl.className   = "pill " + (s.slave ? "ok" : "bad");
+
+  const sp = $("pSplit");
+  sp.textContent = s.per_phase ? "echte Phasenwerte" : "Summe ÷ 3 (keine Phasendaten)";
+  sp.className   = "pill " + (s.per_phase ? "ok" : "");
+
+  const mp = $("pManip");
+  mp.textContent = m.en ? "Manipulation AKTIV" : "Manipulation aus";
+  mp.className   = "pill " + (m.en ? "hot" : "");
+
+  $("pInfo").textContent =
+    s.req + " Anfragen vom Deye" +
+    (s.req ? " · letzte vor " + (s.age / 1000).toFixed(1) + " s" : "");
+
+  /* Phasentabelle */
+  const spPhase = s.sp / 3;
+  let h = "";
+  for (let k = 0; k < 3; k++) {
+    const meas = s.real[k], out = s.p[k];
+    const mm = m.en ? m.ph[k] : { mode: 0, val: 0 };
+    h += "<tr>" +
+      "<td><b>" + PH[k] + "</b></td>" +
+      td(fmt(s.per_phase && d.gridPh ? d.gridPh.v[k] : NaN, 1)) +
+      td(fmt(s.per_phase && d.gridPh ? d.gridPh.i[k] : NaN, 2)) +
+      td('<span class="' + cls(meas) + '">' + fmt(meas) + "</span>", "big") +
+      td(fmt(-spPhase)) +
+      td('<span class="' + (mm.mode ? "man" : "") + '">' + manipText(mm.mode, mm.val) + "</span>") +
+      td('<span class="' + cls(out) + '">' + fmt(out) + "</span>", "big") +
+      td(fmt(s.i[k], 2)) +
+      "</tr>";
+  }
+  h += '<tr class="sum">' +
+    "<td>Summe</td><td>–</td><td>–</td>" +
+    td('<span class="' + cls(s.real_total) + '">' + fmt(s.real_total) + "</span>", "big") +
+    td(fmt(-s.sp)) + td("") +
+    td('<span class="' + cls(s.total) + '">' + fmt(s.total) + "</span>", "big") +
+    td("") + "</tr>";
+  $("phaseBody").innerHTML = h;
+
+  /* Formular nur befüllen, solange der Nutzer nichts angefasst hat */
+  if (!dirty) {
+    $("mEn").checked = !!m.en;
+    $("sp").value    = s.sp;
+    for (let k = 0; k < 3; k++) {
+      $("m" + k).value = m.ph[k].mode;
+      $("v" + k).value = m.ph[k].val;
+    }
+    syncHints();
+  }
+
+  /* Gerätetabelle. Was "Leistung" heißt, hängt von der Rolle ab (rc =
+   * mb_role_t): Zähler liefern eine Netz-/Erzeugungsleistung, ein Wechsel-
+   * richter seine PV-Produktion (bei Fronius steht die in pv, nicht in w --
+   * w ist dort die Batterieleistung des Hybrid), eine Batterie Leistung + SoC. */
+  function power(g) {
+    const W = (x) => fmt(x) + " W";
+    if (g.rc === 2) {                                  /* Wechselrichter */
+      let t = '<span class="neg">PV ' + W(g.pv) + "</span>";
+      if (g.w || g.soc) t += ' · Akku <span class="' + cls(g.w) + '">' + W(g.w) + "</span> · " + fmt(g.soc) + " %";
+      return t;
+    }
+    if (g.rc === 3)                                    /* Batterie */
+      return 'Akku <span class="' + cls(g.w) + '">' + W(g.w) + "</span> · " + fmt(g.soc) + " %";
+    return '<span class="' + cls(g.ptot) + '">' + W(g.ptot) + "</span>";   /* Zähler */
+  }
+  /* Bei Verbindungsabbruch behält die Firmware den letzten gelesenen Wert --
+   * den zeigen wir gedämpft, statt einen Strich: „weg" plus letzter Stand sagt
+   * mehr als „weg" allein. Direkt nach einem Neustart gibt es noch keinen. */
+  function powerCell(g) {
+    if (g.conn) return power(g);
+    if (!g.pv && !g.w && !g.soc && !g.ptot) return "–";
+    return '<span class="hint">zuletzt: ' + power(g) + "</span>";
+  }
+  let dh = "";
+  for (const g of d.meters) {
+    const p = g.phases ? g.p : null;
+    dh += "<tr>" +
+      "<td>" + (g.name || g.mfr) + "</td>" +
+      "<td>" + g.ip + ":" + g.slave + "</td>" +
+      "<td>" + g.mfr + "</td>" +
+      "<td>" + g.role + "</td>" +
+      td(g.conn ? '<span class="pill ok">ok</span>' : '<span class="pill bad">weg</span>') +
+      td(p ? '<span class="' + cls(p[0]) + '">' + fmt(p[0]) + "</span>" : "–") +
+      td(p ? '<span class="' + cls(p[1]) + '">' + fmt(p[1]) + "</span>" : "–") +
+      td(p ? '<span class="' + cls(p[2]) + '">' + fmt(p[2]) + "</span>" : "–") +
+      '<td style="text-align:left;padding-left:18px;">' + powerCell(g) + "</td>" +
+      td(g.phases ? (g.age / 1000).toFixed(1) + " s" : "–") +
+      "</tr>";
+  }
+  $("devBody").innerHTML = dh || '<tr><td colspan="10" class="hint">Kein Modbus-TCP-Gerät konfiguriert.</td></tr>';
+}
+
+/* ---------- Polling ---------- */
+async function poll() {
+  try {
+    const r = await fetch("/api/meter", { cache: "no-store" });
+    const d = await r.json();
+    /* U/I der Phasentabelle kommen vom Netz-Zähler selbst (Rolle "Netz"). */
+    d.gridPh = d.meters.find(g => g.phases && g.grid) || null;
+    render(d);
+  } catch (e) {
+    $("pInfo").textContent = "keine Verbindung zum Gerät";
+  }
+}
+
+/* ---------- Senden ---------- */
+async function send(params, msg) {
+  $("saveMsg").textContent = "…";
+  try {
+    const r = await fetch("/api/meter/manip?" + params, { cache: "no-store" });
+    const d = await r.json();
+    $("saveMsg").textContent = d.ok ? (msg || "gespeichert") : ("Fehler: " + (d.err || "?"));
+  } catch (e) {
+    $("saveMsg").textContent = "Fehler: keine Verbindung";
+  }
+  dirty = false;
+  poll();
+  setTimeout(() => { $("saveMsg").textContent = ""; }, 4000);
+}
+
+function formParams() {
+  const q = ["en=" + ($("mEn").checked ? 1 : 0), "sp=" + (parseInt($("sp").value, 10) || 0)];
+  for (let k = 0; k < 3; k++) {
+    q.push("m" + (k + 1) + "=" + $("m" + k).value);
+    q.push("v" + (k + 1) + "=" + (parseFloat($("v" + k).value) || 0));
+  }
+  return q.join("&");
+}
+
+buildManipRows();
+$("btnSave").addEventListener("click", () => send(formParams()));
+$("btnOff").addEventListener("click", () => {
+  $("mEn").checked = false;
+  send("en=0", "Manipulation abgeschaltet");
+});
+$("btnReset").addEventListener("click", () => {
+  for (let k = 0; k < 3; k++) { $("m" + k).value = 0; $("v" + k).value = 0; }
+  $("mEn").checked = false;
+  syncHints();
+  send("en=0&m1=0&v1=0&m2=0&v2=0&m3=0&v3=0", "zurückgesetzt");
+});
+
+/* Nur im sichtbaren Tab pollen: der :80-Server hat vier Sockets, und ein
+ * Sekundentakt im Hintergrund wuerde beim Register-Export oder einem OTA-Upload
+ * genau den Slot wegnehmen, den die gerade brauchen. */
+let timer = null;
+window.meterTabVisible = function (visible) {
+  if (visible && !timer) { poll(); timer = setInterval(poll, 1000); }
+  if (!visible && timer) { clearInterval(timer); timer = null; }
+};
+})();
+</script>
+
+<script>
+/* ---------------- Modbus-Register (Tab 2) ---------------- */
 const REG_INFO = (() => {
   const i = {};
   const opt    = (addr, name, options) => { i[addr] = {name, options}; };
@@ -561,10 +1115,10 @@ function renderInterp(info, v) {
       rows += '<tr style="' + bg + '"><td style="padding:1px 6px;">' + k + '</td>'
             + '<td style="padding:1px 6px;">' + info.options[k] + '</td></tr>';
     }
-    return '<details style="display:inline-block;"><summary style="cursor:pointer;color:#3aa675;">'
+    return '<details style="display:inline-block;"><summary style="cursor:pointer;color:var(--acc);">'
          + summary + '</summary>'
          + '<table style="margin-top:4px;font-size:11px;border-collapse:collapse;">'
-         + '<thead><tr style="color:#6a7a90;"><th style="text-align:left;padding:1px 6px;">Wert</th>'
+         + '<thead><tr style="color:var(--mut);"><th style="text-align:left;padding:1px 6px;">Wert</th>'
          + '<th style="text-align:left;padding:1px 6px;">Bedeutung</th></tr></thead>'
          + '<tbody>' + rows + '</tbody></table></details>';
   }
@@ -613,14 +1167,14 @@ async function probeRead(){
       const info = REG_INFO[a];
       const name = info ? info.name : '';
       const interp = info ? renderInterp(info, v) : '';
-      const rowStyle = info ? ' style="background:#11332244;"' : '';
+      const rowStyle = info ? ' style="background:var(--acc-soft);"' : '';
       html += '<tr' + rowStyle + '>'
             + '<td>' + a + '</td>'
             + '<td><code>0x' + v.toString(16).padStart(4,'0').toUpperCase() + '</code></td>'
             + '<td>' + v + '</td>'
             + '<td>' + s + '</td>'
-            + '<td style="color:#9bb1d1;font-size:12px;">' + name + '</td>'
-            + '<td style="color:#3aa675;font-size:12px;">' + interp + '</td>'
+            + '<td style="color:var(--link);font-size:12px;">' + name + '</td>'
+            + '<td style="color:var(--acc);font-size:12px;">' + interp + '</td>'
             + '</tr>';
     }
     tbody.innerHTML = html;
@@ -834,6 +1388,55 @@ async function importRegs(input){
       grip.addEventListener('pointerup', up);
       e.preventDefault(); e.stopPropagation();
     });
+  });
+})();
+</script>
+
+<script>
+/* ---------------- Farbschema-Umschalter ---------------- */
+(function () {
+  var btns = document.querySelectorAll(".theme button");
+  function mark() {
+    var cur = "auto";
+    try { cur = localStorage.getItem("theme") || "auto"; } catch (e) {}
+    btns.forEach(function (b) { b.classList.toggle("on", b.dataset.themeSet === cur); });
+  }
+  btns.forEach(function (b) {
+    b.addEventListener("click", function () {
+      var v = b.dataset.themeSet;
+      try { v === "auto" ? localStorage.removeItem("theme") : localStorage.setItem("theme", v); } catch (e) {}
+      if (v === "auto") document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", v);
+      mark();
+    });
+  });
+  mark();
+})();
+
+/* ---------------- Tabs ----------------
+ * Die Zaehlerseite pollt im Sekundentakt; der :80-Server hat nur vier Sockets.
+ * Deshalb meldet der Tabwechsel dem Zaehler-Modul, ob es sichtbar ist, und das
+ * Polling laeuft nur im aktiven Tab (siehe meterTabVisible). */
+(function () {
+  var buttons = document.querySelectorAll("nav.tabs button");
+  function show(name, push) {
+    buttons.forEach(function (b) { b.classList.toggle("on", b.dataset.tab === name); });
+    ["meter", "regs", "sys"].forEach(function (t) {
+      document.getElementById("tab-" + t).hidden = (t !== name);
+    });
+    if (window.meterTabVisible) window.meterTabVisible(name === "meter");
+    if (name === "sys" && window.sysLoadInfo) window.sysLoadInfo();
+    if (push && location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+  }
+  buttons.forEach(function (b) {
+    b.addEventListener("click", function () { show(b.dataset.tab, true); });
+  });
+  var initial = (location.hash || "#meter").slice(1);
+  if (!document.getElementById("tab-" + initial)) initial = "meter";
+  show(initial, false);
+  window.addEventListener("hashchange", function () {
+    var n = location.hash.slice(1);
+    if (document.getElementById("tab-" + n)) show(n, false);
   });
 })();
 </script>

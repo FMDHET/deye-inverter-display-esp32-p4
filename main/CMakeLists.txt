@@ -17,6 +17,7 @@ idf_component_register(
         "modbus_gw.c"
         "deye_ctrl.c"
         "deye_web.c"
+        "meter_web.c"
         "mqtt_fwd.c"
         "ntp_client.c"
         "wg_client.c"

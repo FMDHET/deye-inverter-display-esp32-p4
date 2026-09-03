@@ -88,6 +88,30 @@ bool      modbus_tcp_grid_w_fresh(float *out_w, uint32_t max_age_ms);
  * feed the Deye node + house balance; SoC also comes from here. */
 void      modbus_tcp_set_rtu_deye(float w, float soc, bool valid);
 
+/* ---------------- per-phase meter snapshot (Eltako only) ----------------
+ * Eltako DSZ15/DSZ16 expose L1..L3 voltage/current/power in the SDM630-style
+ * input-register block at address 0..17 (FC04). Reading it alongside the total
+ * gives the /meter page real per-phase values and lets the SDM630 emulation
+ * forward the REAL phase split to the Deye instead of total/3. Other
+ * manufacturers leave `valid` false. */
+typedef struct {
+    bool     valid;        /* per-phase block read OK at least once        */
+    uint32_t age_ms;       /* ms since that read (0 when !valid)           */
+    float    v[3];         /* L1..L3 voltage           (V)                 */
+    float    i[3];         /* L1..L3 current           (A)                 */
+    float    p[3];         /* L1..L3 active power      (W, + = import)     */
+    float    p_total;      /* total active power, reg 52 (W)               */
+} mb_phases_t;
+
+/* Per-device phase snapshot by device slot (same index as the device list).
+ * Returns false for an unknown slot or a meter that carries no phase data. */
+bool      modbus_tcp_get_phases(int idx, mb_phases_t *out);
+
+/* Fresh per-phase GRID power for the control path (the SDM630 emulation).
+ * Same freshness contract as modbus_tcp_grid_w_fresh(): false means the caller
+ * MUST NOT use the values -- fall back to splitting the total evenly. */
+bool      modbus_tcp_grid_phases_fresh(float p[3], uint32_t max_age_ms);
+
 /* Per-device live values (for drill-down popups, e.g. individual inverters). */
 typedef struct {
     char    ip[32];

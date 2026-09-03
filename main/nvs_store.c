@@ -277,6 +277,32 @@ esp_err_t nvs_store_set_mb_rtu(const void *buf, size_t len)
     return e;
 }
 
+/* Per-phase manipulation of the values served to the Deye (mb_manip_cfg_t).
+ * Its own key so it can be wiped without touching the bus config, and so an
+ * older firmware simply ignores it (= manipulation off). */
+esp_err_t nvs_store_get_mb_manip(void *buf, size_t len)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS_MB, NVS_READONLY, &h);
+    if (e != ESP_OK) return e;
+    size_t l = len;
+    e = nvs_get_blob(h, "manip1", buf, &l);
+    nvs_close(h);
+    if (e == ESP_OK && l > len) e = ESP_ERR_INVALID_SIZE;
+    return e;
+}
+
+esp_err_t nvs_store_set_mb_manip(const void *buf, size_t len)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS_MB, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_blob(h, "manip1", buf, len);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+
 #define NS_MQTT "mqtt"
 
 esp_err_t nvs_store_get_mqtt(void *buf, size_t len)

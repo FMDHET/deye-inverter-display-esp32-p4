@@ -37,6 +37,11 @@ static const char *TAG = "modbus";
  * Register 52 (0x0034); same address SDM630 uses for float32, but Eltako meters
  * encode it as an integer -- decode with words_to_i32, not words_to_f32. */
 #define SDM630_PTOT_ADDR 0x0034
+/* Per-phase block, SDM630 layout, all int32 on Eltako:
+ *   0/2/4  = U L1..L3 (scale 100)   6/8/10 = I L1..L3 (scale 100)
+ *   12/14/16 = P L1..L3 (scale 1, watts, + = import) */
+#define ELTAKO_PH_ADDR   0x0000
+#define ELTAKO_PH_COUNT  18
 
 static modbus_tcp_status_t s_st;
 static portMUX_TYPE        s_mux    = portMUX_INITIALIZER_UNLOCKED;
@@ -72,6 +77,14 @@ typedef struct {
     uint16_t meter_off;   /* meter model 201-204 data offset (0 = none)   */
 } ss_cache_t;
 static ss_cache_t s_ss[MB_MAX_DEVICES];
+
+/* Per-device phase snapshot, filled by the Eltako branch of poll_device().
+ * s_ph_ms is the ms timestamp of the last successful per-phase read; the GRID
+ * device's index is cached separately so the control path (SDM630 emulation)
+ * can fetch it without walking the list under the lock. */
+static mb_phases_t s_ph[MB_MAX_DEVICES];
+static uint32_t    s_ph_ms[MB_MAX_DEVICES];
+static int         s_ph_grid_idx = -1;   /* slot of the GRID meter, -1 = none */
 
 /* Deye supplied by the RTU master (modbus_rtu.c), if present. Carries a
  * timestamp so a value stops "ghosting" once the master stops refreshing it
@@ -446,6 +459,33 @@ static int poll_device(int s, const mb_dev_cfg_t *d, int idx, agg_t *a,
             ESP_LOGW(TAG, "dev%d: implausible Eltako %.0f W -- discarded", idx, w);
             return -1;
         }
+
+        /* Per-phase block (U/I/P L1..L3) for the /meter page and for forwarding
+         * the REAL phase split to the Deye. A second read on the control-
+         * critical grid path, so it must never be able to fail the poll: the
+         * total above is what steers the inverter and is already in hand. On a
+         * read error or an implausible phase we simply leave the snapshot
+         * untouched -- it ages out on its own. */
+        uint16_t ph[ELTAKO_PH_COUNT];
+        if (mb_read(s, d->slave, MB_FC04, ELTAKO_PH_ADDR, ELTAKO_PH_COUNT, ph) == 0) {
+            mb_phases_t sn = { .valid = true, .p_total = w };
+            bool ok = true;
+            for (int k = 0; k < 3; k++) {
+                sn.v[k] = (float)words_to_i32(ph[k * 2],     ph[k * 2 + 1])     / 100.0f;
+                sn.i[k] = (float)words_to_i32(ph[6 + k * 2], ph[6 + k * 2 + 1]) / 100.0f;
+                sn.p[k] = (float)words_to_i32(ph[12 + k * 2], ph[12 + k * 2 + 1]);
+                if (!plausible_w(sn.p[k]) || !isfinite(sn.v[k]) || !isfinite(sn.i[k]))
+                    ok = false;
+            }
+            if (ok) {
+                portENTER_CRITICAL(&s_mux);
+                s_ph[idx]    = sn;
+                s_ph_ms[idx] = (uint32_t)(esp_timer_get_time() / 1000);
+                portEXIT_CRITICAL(&s_mux);
+            } else {
+                ESP_LOGW(TAG, "dev%d: implausible Eltako phase block -- discarded", idx);
+            }
+        }
         if (d->role == MB_ROLE_GRID) {
             a->netz = w; a->netz_v = true; *o_w = w;
         } else if (d->role == MB_ROLE_DEYE_METER) {
@@ -511,8 +551,12 @@ static void reconfigure_apply(void)
     int cnt = load_cfg_into(tmp);                  /* NVS I/O -- no lock held */
 
     bool has_grid = false;
+    int  grid_idx = -1;
     for (int i = 0; i < cnt; i++)
-        if (tmp[i].enabled && tmp[i].role == MB_ROLE_GRID) has_grid = true;
+        if (tmp[i].enabled && tmp[i].role == MB_ROLE_GRID) {
+            has_grid = true;
+            if (grid_idx < 0) grid_idx = i;      /* first grid meter wins */
+        }
 
     portENTER_CRITICAL(&s_mux);
     memcpy(s_devs, tmp, sizeof(s_devs));
@@ -521,6 +565,9 @@ static void reconfigure_apply(void)
     memset(s_valid,   0, sizeof(s_valid));
     memset(s_last_ms, 0, sizeof(s_last_ms));
     memset(s_ss,      0, sizeof(s_ss));            /* re-discover SunSpec layout */
+    memset(s_ph,      0, sizeof(s_ph));            /* phase snapshots are stale  */
+    memset(s_ph_ms,   0, sizeof(s_ph_ms));
+    s_ph_grid_idx    = grid_idx;
     s_have_grid_role = has_grid;
     for (int i = 0; i < cnt; i++) {
         memset(&s_live[i], 0, sizeof(s_live[i]));
@@ -843,6 +890,31 @@ void modbus_tcp_get_status(modbus_tcp_status_t *out)
     portENTER_CRITICAL(&s_mux);
     *out = s_st;
     portEXIT_CRITICAL(&s_mux);
+}
+
+bool modbus_tcp_get_phases(int idx, mb_phases_t *out)
+{
+    if (!out || idx < 0 || idx >= MB_MAX_DEVICES) return false;
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    portENTER_CRITICAL(&s_mux);
+    *out = s_ph[idx];
+    if (out->valid) out->age_ms = (uint32_t)(now - s_ph_ms[idx]);
+    portEXIT_CRITICAL(&s_mux);
+    return out->valid;
+}
+
+bool modbus_tcp_grid_phases_fresh(float p[3], uint32_t max_age_ms)
+{
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    bool ok = false;
+    portENTER_CRITICAL(&s_mux);
+    int g = s_ph_grid_idx;
+    if (g >= 0 && s_ph[g].valid && (uint32_t)(now - s_ph_ms[g]) <= max_age_ms) {
+        if (p) { p[0] = s_ph[g].p[0]; p[1] = s_ph[g].p[1]; p[2] = s_ph[g].p[2]; }
+        ok = true;
+    }
+    portEXIT_CRITICAL(&s_mux);
+    return ok;
 }
 
 bool modbus_tcp_grid_w_fresh(float *out_w, uint32_t max_age_ms)

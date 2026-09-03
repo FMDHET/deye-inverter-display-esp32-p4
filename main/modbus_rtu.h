@@ -93,6 +93,53 @@ void        modbus_rtu_get_status(mb_rtu_status_t *out);
 int         modbus_rtu_get_grid_setpoint(void);
 void        modbus_rtu_set_grid_setpoint(int w);
 
+/* ---------------- per-phase manipulation of the served meter ------------
+ * The SDM630 emulation normally forwards the real grid power (minus the
+ * setpoint). For commissioning and for tricking a Deye that balances per phase,
+ * each phase can be overridden independently. The result is what the inverter
+ * sees as "the grid" -- it WILL regulate against it, so this is deliberately a
+ * separate NVS blob with its own master switch that defaults to OFF. */
+typedef enum {
+    MB_PH_OFF = 0,    /* pass the real phase through            */
+    MB_PH_OFFSET,     /* served = real + value        (W)       */
+    MB_PH_ABS,        /* served = value               (W)       */
+    MB_PH_SCALE,      /* served = real * value / 100  (%)       */
+    MB_PH_MODE_COUNT
+} mb_phase_mode_t;
+
+typedef struct {
+    uint8_t mode;     /* mb_phase_mode_t */
+    uint8_t _rsv[3];
+    float   value;    /* W for OFFSET/ABS, percent for SCALE */
+} mb_phase_cfg_t;     /* 8 B */
+
+typedef struct {
+    uint8_t        enabled;   /* master switch; 0 -> ph[] is ignored entirely */
+    uint8_t        _rsv[3];
+    mb_phase_cfg_t ph[3];     /* L1..L3 */
+} mb_manip_cfg_t;
+
+/* Every value the emulation currently answers with, for the /meter page. */
+typedef struct {
+    bool     fresh;           /* grid reading fresh -> real values forwarded  */
+    bool     per_phase;       /* real per-phase data (Eltako) vs. total/3     */
+    float    real_p[3];       /* meter side, before setpoint + manipulation   */
+    float    real_total;
+    int      setpoint;        /* W, split evenly over the three phases        */
+    float    served_p[3];     /* active power the Deye is told, per phase     */
+    float    served_total;
+    float    served_v[3];     /* voltage / current the emulation synthesises  */
+    float    served_i[3];
+    uint32_t requests;        /* SDM630 requests answered since boot          */
+    uint32_t age_ms;          /* since the last answered request (0 = never)  */
+    bool     slave_running;   /* a bus is actually in SDM630-slave mode       */
+} mb_served_t;
+
+void        modbus_rtu_get_served(mb_served_t *out);
+void        modbus_rtu_get_manip(mb_manip_cfg_t *out);
+esp_err_t   modbus_rtu_set_manip(const mb_manip_cfg_t *cfg);
+const char *modbus_rtu_phase_mode_name(uint8_t mode);
+
 /* On-demand Deye holding-register access for the /deye web page, served by the
  * Deye-master bus task between polls (no UART contention). Read up to 64 regs
  * (FC03) or write one (FC06). Return 0 on success, negative on error/timeout. */

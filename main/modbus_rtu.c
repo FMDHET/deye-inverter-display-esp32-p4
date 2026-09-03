@@ -40,6 +40,14 @@ _Static_assert(sizeof(mb_rtu_cfg_t) == 24, "mb_rtu_cfg_t layout");
  * alive for the Deye while giving it no frozen value to chase. */
 #define MB_GRID_MAX_AGE_MS  12000
 
+/* Nominal values the emulation synthesises around: the Deye only uses P, but a
+ * plausible U/I keeps meter-detection happy. */
+#define SDM_NOMINAL_V   230.0f
+/* Hard clamp on anything we hand the inverter. A manipulated phase is allowed to
+ * be extreme (that is the point), but never inf/NaN or a value that would make
+ * the Deye's own limit logic wrap. */
+#define MB_SERVED_CLAMP_W  100000.0f
+
 /* Fixed per-bus UART + pins (bus 0 = A, bus 1 = B). */
 static const struct { int uart, tx, rx; } BUS_HW[MB_RTU_BUSES] = {
     { BOARD_RS485_A_UART, BOARD_RS485_A_TX, BOARD_RS485_A_RX },
@@ -50,6 +58,12 @@ static mb_rtu_cfg_t          s_cfg;
 static mb_rtu_status_t       s_st;
 static portMUX_TYPE          s_mux = portMUX_INITIALIZER_UNLOCKED;
 static volatile int          s_grid_sp;      /* grid setpoint (W) for zero-export trick */
+
+/* Per-phase manipulation of the values served to the Deye (under s_mux), plus
+ * how often the Deye has actually asked -- the /meter page shows both. */
+static mb_manip_cfg_t        s_manip;         /* master switch defaults to OFF */
+static uint32_t              s_requests;      /* SDM630 requests answered       */
+static uint32_t              s_request_ms;    /* ms of the last answered request */
 static volatile bool         s_selftest_req  = false;
 static mb_rtu_selftest_result_t s_selftest_result = { .state = MB_RTU_SELFTEST_IDLE, .latency_ms = -1 };
 
@@ -146,6 +160,36 @@ static void load_cfg(void)
     portEXIT_CRITICAL(&s_mux);
 }
 
+/* Reject anything that could turn into inf/NaN inside compute_served(). An
+ * unknown mode degrades to pass-through rather than to undefined behaviour. */
+static void clamp_manip(mb_manip_cfg_t *m)
+{
+    m->enabled = m->enabled ? 1 : 0;
+    for (int k = 0; k < 3; k++) {
+        if (m->ph[k].mode >= MB_PH_MODE_COUNT) m->ph[k].mode = MB_PH_OFF;
+        if (!isfinite(m->ph[k].value))         m->ph[k].value = 0.0f;
+        if (m->ph[k].value >  MB_SERVED_CLAMP_W) m->ph[k].value =  MB_SERVED_CLAMP_W;
+        if (m->ph[k].value < -MB_SERVED_CLAMP_W) m->ph[k].value = -MB_SERVED_CLAMP_W;
+    }
+}
+
+static void load_manip(void)
+{
+    mb_manip_cfg_t m;
+    memset(&m, 0, sizeof(m));
+    /* Absent blob -> all zeroes = master switch off, every phase pass-through. */
+    nvs_store_get_mb_manip(&m, sizeof(m));
+    clamp_manip(&m);
+    portENTER_CRITICAL(&s_mux);
+    s_manip = m;
+    portEXIT_CRITICAL(&s_mux);
+    if (m.enabled)
+        ESP_LOGW(TAG, "phase manipulation ACTIVE after boot: L1=%s/%.0f L2=%s/%.0f L3=%s/%.0f",
+                 modbus_rtu_phase_mode_name(m.ph[0].mode), m.ph[0].value,
+                 modbus_rtu_phase_mode_name(m.ph[1].mode), m.ph[1].value,
+                 modbus_rtu_phase_mode_name(m.ph[2].mode), m.ph[2].value);
+}
+
 static void uart_setup(int port, int tx, int rx, uint32_t baud)
 {
     uart_config_t cfg = {
@@ -166,22 +210,26 @@ static void uart_setup(int port, int tx, int rx, uint32_t baud)
 
 /* IEEE-754 value for an SDM630 input-register pair starting at `base` (even
  * address). SDM630 sign: + = import (from grid), - = export -- same as
- * modbus_tcp grid_w. */
-static float sdm630_value(uint16_t base, float grid_w)
+ * modbus_tcp grid_w. `p` carries the three phase powers already served (real,
+ * setpoint-shifted and manipulated); `total` is their sum. */
+static float sdm630_value(uint16_t base, const float p[3], float total)
 {
-    float p_phase = grid_w / 3.0f;
     switch (base) {
-    case 0x0000: case 0x0002: case 0x0004: return 230.0f;                 /* V L1..L3 */
-    case 0x0006: case 0x0008: case 0x000A: return fabsf(p_phase) / 230.0f;/* I L1..L3 */
-    case 0x000C: case 0x000E: case 0x0010: return p_phase;                /* P L1..L3 */
-    case 0x0034: return grid_w;                                           /* total P  */
-    case 0x0046: return 50.0f;                                            /* frequency*/
+    case 0x0000: case 0x0002: case 0x0004: return SDM_NOMINAL_V;      /* V L1..L3 */
+    case 0x0006: return fabsf(p[0]) / SDM_NOMINAL_V;                  /* I L1     */
+    case 0x0008: return fabsf(p[1]) / SDM_NOMINAL_V;                  /* I L2     */
+    case 0x000A: return fabsf(p[2]) / SDM_NOMINAL_V;                  /* I L3     */
+    case 0x000C: return p[0];                                         /* P L1     */
+    case 0x000E: return p[1];                                         /* P L2     */
+    case 0x0010: return p[2];                                         /* P L3     */
+    case 0x0034: return total;                                        /* total P  */
+    case 0x0046: return 50.0f;                                        /* frequency*/
     default:     return 0.0f;
     }
 }
 
 /* Build an FC03/FC04 read response into `out`, return its length (0 = drop). */
-static int sdm630_response(const uint8_t *req, uint8_t *out, float grid_w)
+static int sdm630_response(const uint8_t *req, uint8_t *out, const float p[3], float total)
 {
     uint8_t  slave = req[0], fc = req[1];
     uint16_t addr  = (uint16_t)((req[2] << 8) | req[3]);
@@ -192,7 +240,7 @@ static int sdm630_response(const uint8_t *req, uint8_t *out, float grid_w)
     for (uint16_t i = 0; i < cnt; i++) {
         uint16_t reg  = addr + i;
         uint16_t base = reg & ~1u;
-        float    f    = sdm630_value(base, grid_w);
+        float    f    = sdm630_value(base, p, total);
         uint32_t u;   memcpy(&u, &f, sizeof(u));
         uint16_t word = (reg & 1u) ? (uint16_t)(u & 0xFFFF) : (uint16_t)(u >> 16);
         out[3 + i * 2]     = (uint8_t)(word >> 8);
@@ -203,6 +251,56 @@ static int sdm630_response(const uint8_t *req, uint8_t *out, float grid_w)
     out[n]     = (uint8_t)(c & 0xFF);
     out[n + 1] = (uint8_t)(c >> 8);
     return n + 2;
+}
+
+/* Turn the (fresh) real grid reading into the three phase values the Deye is
+ * told about.
+ *
+ * real phase  ->  minus setpoint/3  ->  per-phase manipulation  ->  served
+ *
+ * When the meter delivers no per-phase data (or is not an Eltako) the total is
+ * split evenly, which is exactly what this emulation did before -- so an
+ * unmanipulated three-phase-blind setup behaves bit-for-bit as it used to.
+ * When the reading is STALE every phase is served as 0 (see do_slave): the
+ * meter stays alive for the Deye but gives it nothing to chase.
+ *
+ * Deliberately SIDE-EFFECT FREE, so the /meter page can call it to show the
+ * chain even while no Deye is polling us -- otherwise the page would read all
+ * zeroes on a setup that has no RTU slave bus running. Optional outputs may be
+ * NULL. */
+static void compute_served(bool fresh, float grid_w, bool *per_phase_out,
+                           float real_out[3], float p_out[3], float *total_out)
+{
+    float real[3];
+    bool per_phase = fresh && modbus_tcp_grid_phases_fresh(real, MB_GRID_MAX_AGE_MS);
+    if (!per_phase) real[0] = real[1] = real[2] = grid_w / 3.0f;
+
+    mb_manip_cfg_t m;
+    portENTER_CRITICAL(&s_mux);
+    m = s_manip;
+    portEXIT_CRITICAL(&s_mux);
+
+    float sp_phase = (float)s_grid_sp / 3.0f;
+    float total = 0.0f;
+    for (int k = 0; k < 3; k++) {
+        float v = fresh ? (real[k] - sp_phase) : 0.0f;
+        if (fresh && m.enabled) {
+            switch (m.ph[k].mode) {
+            case MB_PH_OFFSET: v += m.ph[k].value;            break;
+            case MB_PH_ABS:    v  = m.ph[k].value;            break;
+            case MB_PH_SCALE:  v *= m.ph[k].value / 100.0f;   break;
+            default:                                          break;
+            }
+        }
+        if (!isfinite(v)) v = 0.0f;
+        if (v >  MB_SERVED_CLAMP_W) v =  MB_SERVED_CLAMP_W;
+        if (v < -MB_SERVED_CLAMP_W) v = -MB_SERVED_CLAMP_W;
+        if (p_out)    p_out[k]    = v;
+        if (real_out) real_out[k] = fresh ? real[k] : 0.0f;
+        total += v;
+    }
+    if (per_phase_out) *per_phase_out = per_phase;
+    if (total_out)     *total_out     = total;
 }
 
 static void do_slave(int idx, int port, const mb_rtu_bus_cfg_t *c)
@@ -239,13 +337,17 @@ static void do_slave(int idx, int port, const mb_rtu_bus_cfg_t *c)
         s_grid_was_fresh = fresh;
     }
 
-    float served = fresh ? (grid_w - (float)s_grid_sp) : 0.0f;
+    float served_p[3], served_total;
+    compute_served(fresh, grid_w, NULL, NULL, served_p, &served_total);
+
     uint8_t resp[260];
-    int rn = sdm630_response(req, resp, served);
+    int rn = sdm630_response(req, resp, served_p, served_total);
     if (rn > 0) {
         uart_write_bytes(port, resp, rn);
         portENTER_CRITICAL(&s_mux);
-        s_st.bus[idx].polls++; s_st.bus[idx].a = served;
+        s_st.bus[idx].polls++; s_st.bus[idx].a = served_total;
+        s_requests++;
+        s_request_ms = (uint32_t)(esp_timer_get_time() / 1000);
         portEXIT_CRITICAL(&s_mux);
     }
 }
@@ -555,6 +657,77 @@ void modbus_rtu_set_grid_setpoint(int w)
     nvs_store_set_grid_sp(w);
 }
 
+const char *modbus_rtu_phase_mode_name(uint8_t mode)
+{
+    switch (mode) {
+    case MB_PH_OFFSET: return "offset";
+    case MB_PH_ABS:    return "absolut";
+    case MB_PH_SCALE:  return "skalieren";
+    default:           return "aus";
+    }
+}
+
+void modbus_rtu_get_manip(mb_manip_cfg_t *out)
+{
+    if (!out) return;
+    portENTER_CRITICAL(&s_mux);
+    *out = s_manip;
+    portEXIT_CRITICAL(&s_mux);
+}
+
+esp_err_t modbus_rtu_set_manip(const mb_manip_cfg_t *cfg)
+{
+    if (!cfg) return ESP_ERR_INVALID_ARG;
+    mb_manip_cfg_t m = *cfg;
+    clamp_manip(&m);
+    esp_err_t e = nvs_store_set_mb_manip(&m, sizeof(m));
+    portENTER_CRITICAL(&s_mux);
+    s_manip = m;                 /* apply immediately, even if NVS refused */
+    portEXIT_CRITICAL(&s_mux);
+    ESP_LOGW(TAG, "phase manipulation %s: L1=%s/%.0f L2=%s/%.0f L3=%s/%.0f",
+             m.enabled ? "ON" : "off",
+             modbus_rtu_phase_mode_name(m.ph[0].mode), m.ph[0].value,
+             modbus_rtu_phase_mode_name(m.ph[1].mode), m.ph[1].value,
+             modbus_rtu_phase_mode_name(m.ph[2].mode), m.ph[2].value);
+    return e;
+}
+
+void modbus_rtu_get_served(mb_served_t *out)
+{
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+
+    /* Recompute rather than report the last answered request: the page must show
+     * the chain even on a setup where no bus is in slave mode at all. */
+    float grid_w = 0.0f;
+    bool  fresh  = modbus_tcp_grid_w_fresh(&grid_w, MB_GRID_MAX_AGE_MS);
+    bool  per_phase = false;
+    float real[3], p[3], total = 0.0f;
+    compute_served(fresh, grid_w, &per_phase, real, p, &total);
+
+    out->fresh        = fresh;
+    out->per_phase    = per_phase;
+    out->setpoint     = s_grid_sp;
+    out->real_total   = fresh ? (per_phase ? real[0] + real[1] + real[2] : grid_w) : 0.0f;
+    out->served_total = total;
+    for (int k = 0; k < 3; k++) {
+        out->real_p[k]   = real[k];
+        out->served_p[k] = p[k];
+        out->served_v[k] = SDM_NOMINAL_V;
+        out->served_i[k] = fabsf(p[k]) / SDM_NOMINAL_V;
+    }
+
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    portENTER_CRITICAL(&s_mux);
+    out->requests = s_requests;
+    out->age_ms   = s_request_ms ? (uint32_t)(now - s_request_ms) : 0;
+    bool slave = false;
+    for (int i = 0; i < MB_RTU_BUSES; i++)
+        if (s_cfg.bus[i].enabled && s_cfg.bus[i].role == MB_RTU_SLAVE) slave = true;
+    out->slave_running = slave;
+    portEXIT_CRITICAL(&s_mux);
+}
+
 /* On-demand Deye access for the /deye web page. Queues a request that the
  * Deye-master bus task serves, then waits for the result. Returns 0 on success,
  * a negative Modbus/transport error, or a negative timeout/availability code. */
@@ -683,6 +856,7 @@ int modbus_rtu_txn(int bus, const uint8_t *req, int req_len,
 esp_err_t modbus_rtu_start(void)
 {
     s_grid_sp = nvs_store_get_grid_sp();
+    load_manip();
     if (!s_deye_req_mtx) s_deye_req_mtx = xSemaphoreCreateMutex();
     for (int i = 0; i < MB_RTU_BUSES; i++) {
         if (!s_txn[i].lock) s_txn[i].lock = xSemaphoreCreateMutex();

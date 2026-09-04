@@ -62,6 +62,9 @@ Unter `http://<ip-des-geräts>/deye` liegt ein Werkzeug, mit dem man direkt in d
 
 **Ein Register schreiben** — für Versuche mit einzelnen Adressen.
 
+> [!TIP]
+> Die laufend interessanten Messwerte muss man nicht von Hand suchen: der Tab „Zähler & Deye" zeigt sie unter „Was der Deye daraus macht" fertig aufbereitet — PV, AC-Ausgang, Last, Netz und Batterie, je Phase. Siehe [Deye-Steuerung](Deye-Steuerung#was-der-wechselrichter-selbst-misst).
+
 **Sichern und Zurückschreiben** — ein Adressbereich wird komplett ausgelesen und als CSV-Datei gespeichert, die man in Excel öffnen kann (Spalten `addr;value;hex;signed;name;interp`). Dieselbe Datei lässt sich wieder einspielen; geschrieben wird dabei immer die Spalte `signed`, negative Werte werden korrekt umgerechnet.
 
 > [!CAUTION]
@@ -69,7 +72,7 @@ Unter `http://<ip-des-geräts>/deye` liegt ein Werkzeug, mit dem man direkt in d
 
 ## Werte als JSON abfragen
 
-Für eigene Dashboards oder Skripte gibt es drei Adressen, die einfach nur Daten liefern.
+Für eigene Dashboards oder Skripte gibt es mehrere Adressen, die einfach nur Daten liefern.
 
 `GET /api/live` — alles, was der Hauptbildschirm zeigt:
 
@@ -85,9 +88,24 @@ Zu lesen als: 4 Geräte eingerichtet, 4 verbunden, 3,4 Millionen Abfragen seit d
 
 `GET /api/devices` — die Werte jedes einzelnen Geräts, siehe [Modbus-TCP](Modbus-TCP#werte-von-außen-abfragen).
 
-`GET /ota` — Version, Build-Nummer, Speicherabschnitt, Laufzeit, siehe [OTA und Recovery](OTA-und-Recovery).
+`GET /api/meter` — die ganze Zählerkette in einem Poll: was der Eltako je Phase misst, der Sollwertanteil, die Manipulation, was der Deye zu hören bekommt, dazu alle Modbus-TCP-Geräte. `GET /api/meter/manip?en=&m1=&v1=&…[&sp=]` setzt Manipulation und Netz-Sollwert; jeder Parameter ist einzeln setzbar und behält sonst seinen Wert.
 
-Alle drei setzen den Header `Access-Control-Allow-Origin: *`. Das heißt: man kann sie auch aus einer Webseite heraus abfragen, die auf einem anderen Rechner liegt — der Browser blockiert es nicht.
+`GET /api/deye/live` — was der Wechselrichter über sich selbst meldet, fertig skaliert:
+
+```json
+{"valid":1,"online":1,"blocks":15,"age":1507,
+ "bat":{"soc":76,"p":1276,"v":53.05,"i":24.48,"t":25.9},
+ "pv":{"total":0,"p":[0,0,0,0],"v":[0,0,0,0],"i":[0,0,0,0]},
+ "inv":{"total":-1139,"freq":49.95,"p":[-98,-149,-892], …},
+ "load":{"total":1144,"ups_total":81, …},
+ "grid":{"ct_total":5,"ct":[2,1,2],"inner_total":-1058, …}}
+```
+
+`blocks` ist die Bitmaske der Registerblöcke, die in der letzten Runde geantwortet haben (1 = Batterie, 2 = Netz, 4 = Ausgang/Last, 8 = PV). Fällt einer aus, bleiben seine Werte als letzter Stand stehen — die Seite dimmt sie dann. Bedient wird die Anfrage aus dem Poll-Cache, es entsteht also **kein** RS485-Verkehr pro Abfrage: beliebig viele offene Browser kosten den Bus nichts.
+
+`GET /ota` — Version, Build-Nummer, Speicherabschnitt, Laufzeit, Grund des letzten Neustarts, freier Speicher, siehe [OTA und Recovery](OTA-und-Recovery).
+
+Alle setzen den Header `Access-Control-Allow-Origin: *`. Das heißt: man kann sie auch aus einer Webseite heraus abfragen, die auf einem anderen Rechner liegt — der Browser blockiert es nicht.
 
 ## Alle Adressen auf einen Blick
 
@@ -98,7 +116,9 @@ Alle drei setzen den Header `Access-Control-Allow-Origin: *`. Das heißt: man ka
 | `GET` | `/touch`, `/key`, `/copy` | 80 |
 | `POST` | `/paste` | 80 |
 | `GET` | `/api/live`, `/api/devices` | 80 |
-| `GET` | `/deye`, `/deye/read`, `/deye/write` | 80 |
+| `GET` | `/deye`, `/deye/read`, `/deye/write`, `/api/deye/live` | 80 |
+| `GET` | `/meter` — Umleitung auf `/deye#meter` | 80 |
+| `GET` | `/api/meter`, `/api/meter/manip` | 80 |
 | `GET` | `/ota`, `/recovery` | 80 |
 | `POST` | `/ota`, `/ota/fs`, `/ota/reboot`, `/ota/rollback` | 80 |
 | `GET` | `/scan`, `POST /connect` — WLAN-Einrichtung | 80 |

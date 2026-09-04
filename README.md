@@ -211,10 +211,14 @@ Zwei HTTP-Server: `:80` für Seiten und Steuerung, `:81` nur für den MJPEG-Stro
 | Endpunkt | Was es tut |
 | --- | --- |
 | `GET /` | **Web-Mirror**: das echte Panelbild als MJPEG (~8 fps, Hardware-JPEG-Encoder, Qualität 80) plus Maus- und Tastatureingabe zurück in LVGL. Inklusive Copy/Paste in Textfelder. |
-| `GET /deye` | **Register-Werkzeug**: beliebige Holding-Register lesen (FC03), einzeln schreiben (FC16), Adressbereich als CSV exportieren und wieder importieren — praktisch, um Register zu finden oder eine Konfiguration zu sichern. |
+| `GET /deye` | **Werkbank** mit drei Tabs: „Zähler & Deye" (Phasenkette vom Eltako bis zum Wechselrichter, Phasenmanipulation, Gerätetabelle, Deye-Messwerte), „Modbus-Register" (beliebige Holding-Register lesen (FC03), einzeln schreiben (FC16), Adressbereich als CSV exportieren und importieren) und „System & Update". |
+| `GET /meter` | Umleitung auf `/deye#meter` |
 | `GET /api/live` | Energiewerte, MQTT-/NTP-Status, Zeit als JSON |
 | `GET /api/devices` | Pro-Gerät-Livewerte als JSON |
-| `GET /ota` | laufende Version, Build, Slot, IDF-Version, MAC, Laufzeit |
+| `GET /api/meter` | Zählerkette in einem Poll: gemessene und gesendete Phasenwerte, Sollwert, Manipulation, alle Modbus-TCP-Geräte |
+| `GET /api/meter/manip` | Phasenmanipulation und Netz-Sollwert setzen |
+| `GET /api/deye/live` | Was der Wechselrichter selbst misst: PV, AC-Ausgang, Last, Netz und Batterie — fertig skaliert aus dem Poll-Cache, ohne RS485-Verkehr pro Anfrage |
+| `GET /ota` | laufende Version, Build, Slot, IDF-Version, MAC, Laufzeit, Grund des letzten Neustarts, freier Speicher |
 | `POST /ota` · `POST /ota/fs` | Firmware- bzw. Dateisystem-Image schreiben |
 | `POST /ota/reboot` · `POST /ota/rollback` | Neustart bzw. Slot-Rückrollung |
 | `GET /recovery` | Notfallseite mit Upload-Feldern und Rollback |

@@ -2,17 +2,25 @@
 
 ## Wo man zuerst hinschaut
 
-Bevor man rät, holt man sich Informationen. Es gibt fünf Quellen:
+Bevor man rät, holt man sich Informationen. Es gibt sechs Quellen:
 
 | Quelle | Was man sieht |
 | --- | --- |
 | **Serieller Monitor** | `pio device monitor -e guition-p4` — alle Meldungen der Firmware mit Zeitstempel. Bei Abstürzen wird sogar die Fehlerstelle im Code aufgelöst. |
-| **`GET /ota`** | Version, Build-Nummer, welcher Speicherabschnitt läuft, Laufzeit |
+| **`GET /ota`** | Version, Build-Nummer, welcher Speicherabschnitt läuft, Laufzeit, **Grund des letzten Neustarts**, freier Speicher |
 | **`GET /api/live`** | alle Messwerte, MQTT- und Uhr-Zustand |
 | **`GET /api/devices`** | pro Gerät: antwortet es, und mit welchen Werten |
+| **`GET /api/deye/live`** | was der Wechselrichter über sich selbst meldet, und welche Registerblöcke gerade antworten (`blocks`) |
 | **Kopfzeilen der Menüs** | jeder Reiter zeigt oben laufende Zähler — oft steht die Antwort schon dort |
 
-Ein Tipp zur Laufzeit: tippe auf die Uhr. Steht dort nur eine kurze Zeit, hat das Gerät sich neu gestartet — dann lohnt der Blick in den seriellen Monitor mehr als jede weitere Vermutung.
+Ein Tipp zur Laufzeit: tippe auf die Uhr. Steht dort nur eine kurze Zeit, hat das Gerät sich neu gestartet. Dann sagt das Feld `reset` in `GET /ota`, **warum** — an einem Gerät an der Wand gibt es keine serielle Konsole, und ohne diese Auskunft bleibt nur Raten:
+
+```bash
+curl -s http://<ip>/ota
+# ... "reset":"PANIC","heap":29542723,"heap_min":29538820
+```
+
+`SW` ist unser eigener Neustart nach einem Update und harmlos, ebenso `POWERON`, `EXT` und `USB`. `PANIC`, `TASK_WDT`, `INT_WDT` und `BROWNOUT` sind Befunde — die Bedeutung steht unter [OTA und Recovery](OTA-und-Recovery#was-schiefgehen-kann). Wer den Grund kennt, weiß auch, wo sich der Blick in den seriellen Monitor lohnt.
 
 ## Bildschirm
 

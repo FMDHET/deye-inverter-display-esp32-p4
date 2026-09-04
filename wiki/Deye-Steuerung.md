@@ -126,6 +126,40 @@ I modbus_tcp: SLS guard: export 19100 W OK -- restore → 20000 W
 > [!WARNING]
 > Das ist **Software**. Sie greift nur, wenn ein Messwert vorliegt, und sie hat womöglich Fehler. Sie ist eine Bequemlichkeit und ausdrücklich **kein Ersatz** für die Schutzeinrichtungen der Anlage. Die richtige Absicherung deines Hausanschlusses ist Sache der Elektroinstallation.
 
+## Was der Wechselrichter selbst misst
+
+Der RTU-Master liest neben Ladezustand und Akkuleistung, die das Energiemodell braucht, im selben 2-Sekunden-Takt vier weitere Registerblöcke und legt sie fertig skaliert ab. Der Tab „Zähler & Deye" auf `http://<ip-des-geräts>/deye` zeigt sie unter **„Was der Deye daraus macht"**, `GET /api/deye/live` liefert dasselbe als JSON.
+
+| Block | Register | Inhalt |
+| --- | --- | --- |
+| Batterie | 586…592 | Temperatur, Spannung, Ladezustand, Leistung, Strom |
+| Netz | 598…625 | Spannung je Phase, interne Messung, **externer Wandlereingang (CT)**, Bilanz, Frequenz |
+| Ausgang | 627…655 | Wechselrichterausgang und Last je Phase, Backup-/UPS-Ausgang |
+| PV | 672…683 | Leistung, Spannung und Strom der vier MPPT-Eingänge |
+
+Zusammen rund 76 Register, etwa 230 ms des 2-Sekunden-Takts. Zwischen den Blöcken prüft der Bustask, ob eine Register-Probe, die [Modbus-Bridge](Modbus-Bridge) oder der Selbsttest wartet, und bricht dann ab — deren Antwortzeit bleibt unverändert. Antwortet ein Block fünfmal hintereinander nicht, wird er nur noch alle 30 Sekunden gefragt: an einem Modell mit anderer Registerkarte würde er sonst dauerhaft drei Lesezeitüberschreitungen pro Runde auf dem Bus verbrennen, der den Regelpfad trägt.
+
+**Der interessante Wert ist der CT-Eingang.** Das ist derjenige, den die [Eastron-Emulation](Modbus-RTU) füttert und auf den der Wechselrichter regelt. Die Seite stellt ihn direkt neben den gesendeten Wert:
+
+```text
+An den Deye gesendet: 17 W  →  vom Deye am CT gemessen: 3 W   (Differenz -14 W)
+```
+
+Damit lässt sich in einem Blick prüfen, ob eine Phasenmanipulation überhaupt ankommt. Weicht dauerhaft etwas anderes an als gesendet, stimmen Vorzeichen oder Phasenzuordnung nicht.
+
+### Vorzeichen
+
+Überall gilt: **positiv heißt, die Leistung fließt in den Wechselrichter hinein.**
+
+| | positiv | negativ |
+| --- | --- | --- |
+| Batterie | entlädt (aus dem Akku in den Wechselrichter) | lädt |
+| AC-Ausgang | zieht AC-seitig (lädt den Akku) | speist ein (Haus/Netz) |
+| Netz (CT, intern, gesamt) | Netzbezug | Einspeisung |
+
+> [!NOTE]
+> Der Wechselrichter meldet seine Ausgangsleistung (Register 633…636) **entgegengesetzt** zu seinem eigenen Akkuregister: beim Laden stehen dort −2803 W, obwohl er AC-seitig zieht. Die Firmware dreht das Vorzeichen einmal beim Auslesen, damit für alle Werte dieselbe Regel gilt. Die Last- und UPS-Register (640…655) bleiben roh — hängt nichts am Backup-Port, spiegeln sie den AC-Fluss und liegen dadurch gegenläufig zum Ausgang.
+
 ## Register selbst untersuchen
 
 Wenn du eigene Register finden oder eine Vermutung prüfen willst, ist das Werkzeug unter `http://<ip-des-geräts>/deye` genau dafür da.

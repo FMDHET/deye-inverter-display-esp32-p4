@@ -43,7 +43,7 @@ Entscheidend ist, **woran** „gesund" festgemacht wird. Hier gilt sie als gesun
 
 | Methode | Adresse | Wirkung |
 | --- | --- | --- |
-| `GET` | `/ota` | Auskunft: Version, Build-Nummer, welcher Abschnitt läuft, Laufzeit |
+| `GET` | `/ota` | Auskunft: Version, Build-Nummer, welcher Abschnitt läuft, Laufzeit, Grund des letzten Neustarts, freier Speicher |
 | `POST` | `/ota` | Firmware schreiben, danach automatisch Neustart |
 | `POST` | `/ota/fs` | Dateisystem schreiben, **kein** automatischer Neustart |
 | `POST` | `/ota/reboot` | Neustart |
@@ -57,8 +57,9 @@ IP=192.168.1.42
 
 # 1. Was läuft gerade?
 curl -s http://$IP/ota
-# {"version":"v1.0.57","build":146,"fs_build":146,"running":"ota_1",
-#  "target_slot":"ota_0","idf":"5.5.4","mac":"...","uptime":2844443}
+# {"version":"v1.0.103","build":192,"fs_build":192,"running":"ota_0",
+#  "target_slot":"ota_1","idf":"5.5.5","mac":"...","uptime":2844443,
+#  "reset":"SW","heap":29542723,"heap_min":29538820}
 
 # 2. Bauen. Zählt die Build-Nummer einmal hoch und erzeugt beide Dateien.
 pio run -e guition-p4
@@ -67,7 +68,7 @@ pio run -e guition-p4
 curl --data-binary @.pio/build/guition-p4/firmware.bin http://$IP/ota
 
 # 4. Dateisystem schreiben und neu starten.
-curl --data-binary @.pio/build/guition-p4/storage.bin http://$IP/ota/fs
+curl --data-binary @.pio/build/guition-p4/spiffs.bin http://$IP/ota/fs
 curl -X POST http://$IP/ota/reboot
 
 # 5. Kontrolle: build und fs_build müssen gleich sein.
@@ -111,7 +112,22 @@ Nützlich, wenn gerade kein `curl` zur Hand ist — oder wenn jemand ohne Entwic
 
 **Abbruch ohne Meldung** — das gab es früher, wenn dem Gerät die Netzwerkkanäle ausgegangen waren. Dagegen steht `CONFIG_LWIP_TCP_MSL=5000` in den Einstellungen, siehe [Bauen und Flashen](Bauen-und-Flashen#ein-paar-einstellungen-die-erklärung-brauchen).
 
-**Dateisystem-Update mitten drin abgebrochen** — dann ist das Dateisystem unbrauchbar. Halb so wild: die Firmware läuft weiter und meldet beim Start `Filesystem build unavailable`. Einfach nochmal schreiben.
+**Dateisystem-Update mitten drin abgebrochen** — dann ist das Dateisystem unbrauchbar. Halb so wild: die Firmware läuft weiter und meldet beim Start `Filesystem build unavailable` und `fs_build: -1`. Einfach nochmal schreiben. Klappt auch das nicht, hilft der Weg über USB — der stellt das Dateisystem sicher wieder her.
+
+**Neustart mitten im Upload** — `GET /ota` sagt hinterher, warum:
+
+| `reset` | Bedeutung |
+| --- | --- |
+| `SW` | unser eigener Neustart nach einem erfolgreichen Update — alles in Ordnung |
+| `POWERON`, `EXT`, `USB` | Stromzufuhr, Reset-Taste, USB-Anschluss |
+| `PANIC` | echter Absturz |
+| `TASK_WDT`, `INT_WDT` | eine Aufgabe kam zu lange nicht dran oder blockierte |
+| `BROWNOUT` | die Spannungsversorgung ist eingebrochen — Netzteil oder Kabel prüfen |
+
+`heap_min` daneben ist der niedrigste freie Speicherstand seit dem Start. Ein Upload, der an Speichermangel stirbt, ist daran auch später noch zu erkennen, obwohl der aktuelle Wert längst wieder normal ist. Der Tab „System & Update" zeigt beides, Absturzursachen in Rot.
+
+> [!TIP]
+> **Langsamer Upload ist ein Warnzeichen.** Der Chip nimmt normalerweise über 100 kB/s an; ein Update ist also nach wenigen Sekunden durch. Kriecht es stattdessen bei 10 bis 20 kB/s, liegt das erfahrungsgemäß nicht am Gerät, sondern am sendenden Rechner. Ein Fall aus der Praxis: ein Mac, der gleichzeitig über WLAN **und** über eine Dock-Ethernetbuchse im selben Subnetz hing. Die Systemroute nahm das Ethernet, und darüber kamen nur 21 kB/s an, über WLAN dagegen 148 kB/s — Faktor sieben. Prüfen mit `ifconfig | grep "inet 192"`; sind es zwei Adressen im gleichen Netz, hilft `curl --interface <ip>`, um den schnellen Weg zu erzwingen.
 
 ## Und die Sicherheit?
 

@@ -49,6 +49,27 @@ Bei Fronius-Geräten ist es viel einfacher, weil SunSpec ein selbstbeschreibende
 
 Die Firmware läuft diese Liste **einmal** ab und merkt sich, wo was steht. Vorher wurde die Liste für jeden einzelnen Wert bei jeder Abfrage neu durchsucht — das waren 50 bis 100 Modbus-Zugriffe pro Runde, und alles war entsprechend langsam.
 
+### Leistung je Phase — und warum sie berechnet wird
+
+Für die Frage, ob sich im Haus eine Phasenschieflast aufbaut, braucht man die Einspeisung je Phase. SunSpec hat dafür im Wechselrichter-Modell aber **keine Wirkleistung je Phase** — nur die Summe. Was es je Phase gibt, ist Strom und Spannung:
+
+| | Ganzzahl-Modelle 101–103 | Float-Modelle 111–113 |
+| --- | --- | --- |
+| Strom L1…L3 | Offset 1…3, Skalierung bei 4 | Offset 2, 4, 6 |
+| Spannung L1…L3 (gegen N) | Offset 8…10, Skalierung bei 11 | Offset 14, 16, 18 |
+| Leistung (Summe) | Offset 12, Skalierung bei 13 | Offset 20 |
+
+Die Spalten L1…L3 in der Gerätetabelle sind daher **U × I**, also Scheinleistung. Ein PV-Wechselrichter arbeitet nahe cos φ = 1, der Unterschied ist entsprechend klein. An diesem Gerät gemessen, gegen die Wirkleistung, die der Wechselrichter selbst meldet:
+
+```text
+          L1       L2       L3 |  Summe    gemeldet   Abweichung
+Ost      997      991      996 |   2984      2989       -0,17 %
+West      61       61       61 |    183       184       -0,54 %
+Süd       80       80       80 |    240       241       -0,41 %
+```
+
+Das kostet einen zusätzlichen Lesezugriff pro Abfrage. Er ist nach demselben Muster gebaut wie der Eltako-Phasenblock: schlägt er fehl, bleibt der letzte Schnappschuss stehen und altert von selbst aus — die Summenleistung, die ins Energiemodell geht, ist längst gelesen und der Poll scheitert nicht.
+
 ## Rollen: wofür ist der Wert gut?
 
 | Rolle (so heißt sie im Gerät) | Füttert | Erklärung |

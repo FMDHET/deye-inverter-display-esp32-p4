@@ -11,9 +11,11 @@
 
 #include "esp_app_desc.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -21,6 +23,15 @@
 static const char *TAG = "ota";
 
 #define OTA_RECV_CHUNK   4096
+
+/* The receive buffer is the SOURCE of a flash write, and a flash write runs
+ * with the cache disabled -- so the buffer MUST NOT live in PSRAM, whose access
+ * path goes through that very cache. With CONFIG_SPIRAM_USE_MALLOC a plain
+ * malloc() only PREFERS internal RAM (ALWAYSINTERNAL=16384) and silently falls
+ * back to PSRAM when internal RAM is tight, which made this fail at random:
+ * the same 1 MB filesystem upload succeeded once and panicked twice.
+ * heap_caps_malloc with MALLOC_CAP_INTERNAL takes the guesswork out. */
+#define OTA_BUF_CAPS     (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
 
 /* Recovery page embedded from recovery.html (EMBED_TXTFILES). */
 extern const char recovery_html_start[] asm("_binary_recovery_html_start");
@@ -53,6 +64,30 @@ static void ota_thaw_ui(void)
 }
 
 /* GET /ota -> what is currently running (handy to confirm an OTA took). */
+/* Why the chip last came up. A failed OTA that reboots the device leaves no
+ * trace anywhere reachable over the network -- there is no serial console on a
+ * wall-mounted unit -- so /ota reports it and the next incident is diagnosable
+ * instead of guesswork: TASK_WDT and INT_WDT point at a starved or blocking
+ * task, PANIC at a crash, BROWNOUT at the power supply, SW at our own reboot. */
+static const char *reset_reason_name(void)
+{
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "POWERON";
+    case ESP_RST_EXT:      return "EXT";
+    case ESP_RST_SW:       return "SW";
+    case ESP_RST_PANIC:    return "PANIC";
+    case ESP_RST_INT_WDT:  return "INT_WDT";
+    case ESP_RST_TASK_WDT: return "TASK_WDT";
+    case ESP_RST_WDT:      return "WDT";
+    case ESP_RST_DEEPSLEEP:return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_SDIO:     return "SDIO";
+    case ESP_RST_USB:      return "USB";
+    case ESP_RST_JTAG:     return "JTAG";
+    default:               return "UNKNOWN";
+    }
+}
+
 static esp_err_t ota_info_handler(httpd_req_t *req)
 {
     const esp_partition_t *run = esp_ota_get_running_partition();
@@ -61,15 +96,22 @@ static esp_err_t ota_info_handler(httpd_req_t *req)
     wifi_mgr_status_t st;
     wifi_mgr_get_status(&st);
 
-    char json[360];
+    /* heap_min is the low-water mark since boot: an upload that dies from
+     * memory pressure in the network stack shows up here even though the value
+     * has long recovered by the time anyone asks. */
+    char json[480];
     snprintf(json, sizeof(json),
              "{\"version\":\"%s\",\"build\":%d,\"fs_build\":%d,\"running\":\"%s\","
-             "\"target_slot\":\"%s\",\"idf\":\"%s\",\"mac\":\"%s\",\"uptime\":%lld}",
+             "\"target_slot\":\"%s\",\"idf\":\"%s\",\"mac\":\"%s\",\"uptime\":%lld,"
+             "\"reset\":\"%s\",\"heap\":%u,\"heap_min\":%u}",
              DEYE_BUILD_VERSION_FULL, DEYE_BUILD_NUMBER, assets_fs_build_number(),
              run ? run->label : "?",
              next ? next->label : "?",
              app ? app->idf_ver : "?", st.mac,
-             (long long)(esp_timer_get_time() / 1000000));
+             (long long)(esp_timer_get_time() / 1000000),
+             reset_reason_name(),
+             (unsigned)esp_get_free_heap_size(),
+             (unsigned)esp_get_minimum_free_heap_size());
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -104,7 +146,7 @@ static esp_err_t ota_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    char *buf = malloc(OTA_RECV_CHUNK);
+    char *buf = heap_caps_malloc(OTA_RECV_CHUNK, OTA_BUF_CAPS);
     if (!buf) {
         esp_ota_abort(handle);
         ota_thaw_ui();
@@ -198,7 +240,7 @@ static esp_err_t ota_fs_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    uint8_t *buf = malloc(OTA_RECV_CHUNK);
+    uint8_t *buf = heap_caps_malloc(OTA_RECV_CHUNK, OTA_BUF_CAPS);
     if (!buf) {
         ota_thaw_ui();
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");

@@ -67,6 +67,12 @@ static uint32_t              s_request_ms;    /* ms of the last answered request
 static volatile bool         s_selftest_req  = false;
 static mb_rtu_selftest_result_t s_selftest_result = { .state = MB_RTU_SELFTEST_IDLE, .latency_ms = -1 };
 
+/* The inverter's own live measurements (see mb_deye_live_t). Written only by
+ * the master bus task, read by the web handler -- copied under s_mux so the
+ * page never sees half of one round next to half of the previous one. */
+static mb_deye_live_t        s_live;
+static uint32_t              s_live_ms;      /* ms of the last successful round */
+
 /* On-demand Deye register access for the /deye web page. The HTTP handler fills
  * a request and the Deye-master bus task serves it between its regular polls
  * (so the single RS485 UART is never touched by two tasks at once). A mutex
@@ -417,6 +423,174 @@ static void serve_deye_req(int port, uint8_t slave)
     s_deye_req.done    = true;
 }
 
+/* Somebody outside this task is waiting for the bus (a browser on /deye, a
+ * Modbus-TCP client, the self-test). Checked between the live blocks so their
+ * round-trip never queues behind the rest of our own poll round. */
+static inline bool bus_has_waiter(int idx)
+{
+    return s_deye_req.pending || s_txn[idx].pending || s_selftest_req;
+}
+
+/* Backoff for the three optional live blocks (grid / output / PV). They exist on
+ * an SG04LP3, but a model with a different register map would answer nothing and
+ * each miss costs a full 400 ms read timeout -- three of those per 2 s round is
+ * dead air on a bus that also carries the /deye probe and the TCP bridge. After
+ * five misses in a row, ask that block only every 30 s.
+ * One set of counters for all buses, like s_live itself: the design assumes one
+ * Deye. */
+#define LIVE_BLK_FAILS    5
+#define LIVE_BLK_RETRY_MS 30000
+static uint8_t s_blk_fail[3];
+static int64_t s_blk_retry_us[3];
+
+static bool live_blk_due(int b)
+{
+    return s_blk_fail[b] < LIVE_BLK_FAILS || esp_timer_get_time() >= s_blk_retry_us[b];
+}
+
+static void live_blk_done(int b, bool ok)
+{
+    if (ok) { s_blk_fail[b] = 0; return; }
+    if (s_blk_fail[b] < 255) s_blk_fail[b]++;
+    s_blk_retry_us[b] = esp_timer_get_time() + (int64_t)LIVE_BLK_RETRY_MS * 1000;
+}
+
+/* Read one optional live block into `r`, honouring the backoff and yielding to
+ * anyone waiting for the bus. True when `r` holds fresh data. Skipping for a
+ * waiter does NOT count as a miss -- nothing was asked. */
+static bool live_read(int b, int idx, int port, uint8_t slave,
+                      uint16_t addr, uint16_t cnt, uint16_t *r)
+{
+    if (bus_has_waiter(idx) || !live_blk_due(b)) return false;
+    bool ok = (rtu_read(port, slave, addr, cnt, r) == 0);
+    live_blk_done(b, ok);
+    return ok;
+}
+
+/* Register scaling. Powers and currents can legitimately be negative, so they
+ * are S16; voltages, frequency, SoC and the temperature never are -- reading
+ * those as signed would only turn a garbled value into a plausible one. */
+static inline float rs16(uint16_t v, float scale) { return (float)(int16_t)v * scale; }
+static inline float ru16(uint16_t v, float scale) { return (float)v * scale; }
+
+/* One poll round on a MASTER bus: the battery read that feeds the energy-flow
+ * model, followed by the inverter's own live measurements for /api/deye/live.
+ *
+ * ~76 registers at 9600 baud are roughly 230 ms of the 2 s cadence. A block
+ * that fails keeps its previous values (`blocks` says which ones are current),
+ * and a failed battery read skips the rest of the round: three more 400 ms
+ * timeouts would stall this task for over a second for nothing. */
+static void poll_deye(int idx, int port, uint8_t slave)
+{
+    mb_deye_live_t l;
+    portENTER_CRITICAL(&s_mux);
+    l = s_live;                    /* carry over the blocks that fail below */
+    portEXIT_CRITICAL(&s_mux);
+    l.blocks = 0;
+
+    uint16_t r[32];
+
+    /* ---- battery, 586..592 (the model's input; also shown on the page) ---- */
+    int rc = rtu_read(port, slave, 586, 7, r);
+    l.online = (rc == 0);
+    if (rc == 0) {
+#define RG(a) r[(a) - 586]
+        float soc = (float)RG(DEYE_SOC_REG);
+        float w   = (float)(int16_t)RG(DEYE_PWR_REG);         /* +discharge */
+        modbus_tcp_set_rtu_deye(w, soc, true);
+        portENTER_CRITICAL(&s_mux);
+        s_st.bus[idx].online = true; s_st.bus[idx].polls++;
+        s_st.bus[idx].a = w; s_st.bus[idx].b = soc;
+        portEXIT_CRITICAL(&s_mux);
+
+        l.bat_temp = ru16(RG(586), 0.1f) - 100.0f;     /* raw*0.1-100 */
+        l.bat_v    = ru16(RG(587), 0.01f);
+        l.bat_soc  = soc;
+        l.bat_p    = w;
+        l.bat_i    = rs16(RG(591), 0.02f);
+        l.blocks  |= MB_DEYE_BLK_BAT;
+#undef RG
+    } else {
+        modbus_tcp_set_rtu_deye(0, 0, false);
+        portENTER_CRITICAL(&s_mux);
+        s_st.bus[idx].online = false; s_st.bus[idx].errs++;
+        s_live.online = false; s_live.blocks = 0;
+        portEXIT_CRITICAL(&s_mux);
+        ESP_LOGW(TAG, "bus%d Deye RTU read failed (%d)", idx, rc);
+        return;
+    }
+
+    /* ---- grid side, 598..625 ---- */
+    if (live_read(0, idx, port, slave, 598, 28, r)) {
+#define RG(a) r[(a) - 598]
+        for (int k = 0; k < 3; k++) {
+            l.grid_v[k]       = ru16(RG(598 + k), 0.1f);
+            l.grid_inner_p[k] = rs16(RG(604 + k), 1.0f);
+            l.grid_ct_p[k]    = rs16(RG(616 + k), 1.0f);
+            l.grid_p[k]       = rs16(RG(622 + k), 1.0f);
+        }
+        l.grid_inner_total = rs16(RG(607), 1.0f);
+        l.grid_ct_total    = rs16(RG(619), 1.0f);
+        l.grid_total       = rs16(RG(625), 1.0f);
+        l.grid_freq        = ru16(RG(609), 0.01f);
+        l.blocks |= MB_DEYE_BLK_GRID;
+#undef RG
+    }
+
+    /* ---- inverter output + load, 627..655 ---- */
+    if (live_read(1, idx, port, slave, 627, 29, r)) {
+#define RG(a) r[(a) - 627]
+        /* NOTE the negation on the AC output. The Deye reports its inverter
+         * power the other way round from its own battery register: while the
+         * battery charges it delivers -2803 W on the AC side (i.e. it DRAWS
+         * 2803 W) and -2220 W at the battery. One rule has to win, and the
+         * useful one is "+ = power flowing INTO the inverter at this port",
+         * which the battery register already follows (+ = discharge = out of
+         * the battery, into the inverter). So flip the AC side once, here, and
+         * every consumer sees the same convention:
+         *     +  the inverter DRAWS on the AC side  (charging the battery)
+         *     -  the inverter DELIVERS on the AC side (feeding house/grid)
+         * The load and UPS registers are left as the Deye reports them -- see
+         * the note in modbus_rtu.h. */
+        for (int k = 0; k < 3; k++) {
+            l.inv_v[k]  = ru16(RG(627 + k), 0.1f);
+            l.inv_i[k]  = rs16(RG(630 + k), 0.01f);
+            l.inv_p[k]  = -rs16(RG(633 + k), 1.0f);
+            l.ups_p[k]  = rs16(RG(640 + k), 1.0f);
+            l.load_v[k] = ru16(RG(644 + k), 0.1f);
+            l.load_i[k] = rs16(RG(647 + k), 0.01f);
+            l.load_p[k] = rs16(RG(650 + k), 1.0f);
+        }
+        l.inv_total  = -rs16(RG(636), 1.0f);
+        l.inv_freq   = ru16(RG(638), 0.01f);
+        l.ups_total  = rs16(RG(643), 1.0f);
+        l.load_total = rs16(RG(653), 1.0f);
+        l.load_freq  = ru16(RG(655), 0.01f);
+        l.blocks |= MB_DEYE_BLK_OUT;
+#undef RG
+    }
+
+    /* ---- PV strings, 672..683 ---- */
+    if (live_read(2, idx, port, slave, 672, 12, r)) {
+#define RG(a) r[(a) - 672]
+        l.pv_total = 0.0f;
+        for (int k = 0; k < 4; k++) {
+            l.pv_p[k]   = ru16(RG(672 + k),     1.0f);
+            l.pv_v[k]   = ru16(RG(676 + 2 * k), 0.1f);
+            l.pv_i[k]   = ru16(RG(677 + 2 * k), 0.1f);
+            l.pv_total += l.pv_p[k];
+        }
+        l.blocks |= MB_DEYE_BLK_PV;
+#undef RG
+    }
+
+    l.valid = true;
+    portENTER_CRITICAL(&s_mux);
+    s_live    = l;
+    s_live_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    portEXIT_CRITICAL(&s_mux);
+}
+
 /* ------------------- TCP <-> RTU bridge back-end ---------------------- */
 
 /* Read exactly n bytes, bounded by an absolute deadline (esp_timer us). */
@@ -517,25 +691,7 @@ static void do_master(int idx, int port, const mb_rtu_bus_cfg_t *c)
      * traffic tenfold -- on the bus that carries the control path. */
     if (esp_timer_get_time() >= s_next_poll_us[idx]) {
         s_next_poll_us[idx] = esp_timer_get_time() + DEYE_POLL_MS * 1000;
-
-        /* 586..590 covers SoC(588) + battery power(590) in one short read. */
-        uint16_t r[5];
-        int rc = rtu_read(port, c->slave_id, 586, 5, r);
-        if (rc == 0) {
-            float soc = (float)r[DEYE_SOC_REG - 586];
-            float w   = (float)(int16_t)r[DEYE_PWR_REG - 586];   /* +discharge */
-            modbus_tcp_set_rtu_deye(w, soc, true);
-            portENTER_CRITICAL(&s_mux);
-            s_st.bus[idx].online = true; s_st.bus[idx].polls++;
-            s_st.bus[idx].a = w; s_st.bus[idx].b = soc;
-            portEXIT_CRITICAL(&s_mux);
-        } else {
-            modbus_tcp_set_rtu_deye(0, 0, false);
-            portENTER_CRITICAL(&s_mux);
-            s_st.bus[idx].online = false; s_st.bus[idx].errs++;
-            portEXIT_CRITICAL(&s_mux);
-            ESP_LOGW(TAG, "bus%d Deye RTU read failed (%d)", idx, rc);
-        }
+        poll_deye(idx, port, c->slave_id);
     }
 
     /* Break the poll interval early for a self-test or a queued /deye or
@@ -690,6 +846,19 @@ esp_err_t modbus_rtu_set_manip(const mb_manip_cfg_t *cfg)
              modbus_rtu_phase_mode_name(m.ph[1].mode), m.ph[1].value,
              modbus_rtu_phase_mode_name(m.ph[2].mode), m.ph[2].value);
     return e;
+}
+
+/* Snapshot of the inverter's own live measurements. `age_ms` counts from the
+ * last successful poll round, so the page can grey the values out when the
+ * master bus goes quiet. */
+void modbus_rtu_get_deye_live(mb_deye_live_t *out)
+{
+    if (!out) return;
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    portENTER_CRITICAL(&s_mux);
+    *out = s_live;
+    out->age_ms = s_live_ms ? (uint32_t)(now - s_live_ms) : 0;
+    portEXIT_CRITICAL(&s_mux);
 }
 
 void modbus_rtu_get_served(mb_served_t *out)
@@ -900,6 +1069,7 @@ esp_err_t modbus_rtu_set_cfg(const mb_rtu_cfg_t *cfg)
     if (e == ESP_OK) {
         portENTER_CRITICAL(&s_mux);
         s_cfg = c;
+        s_live.online = false; s_live.blocks = 0;
         portEXIT_CRITICAL(&s_mux);
         /* clear stale Deye value; an enabled master re-populates within 2 s */
         modbus_tcp_set_rtu_deye(0, 0, false);

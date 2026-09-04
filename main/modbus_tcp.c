@@ -314,6 +314,49 @@ static void sunspec_discover(int s, uint8_t u, ss_cache_t *c)
     c->done = true;
 }
 
+/* Per-phase snapshot for a SunSpec inverter.
+ *
+ * The inverter models carry NO per-phase active power -- only the total (W)
+ * plus per-phase current (AphA..AphC) and voltage (PhVphA..C). So the phase
+ * split here is U x I, i.e. APPARENT power. A PV inverter runs near unity power
+ * factor, so that is within a couple of percent of the active power, which is
+ * all the phase-imbalance view on the /deye page needs. The page says so.
+ *
+ * Layout is fixed by the SunSpec spec, relative to the model's data offset:
+ *   int   101/102/103: AphA..C @1..3, A_SF @4, PhVphA..C @8..10, V_SF @11
+ *   float 111/112/113: AphA..C @2,4,6 and PhVphA..C @14,16,18 (2 regs each)
+ * One read covers each span, so this costs one extra request per poll. */
+static int ss_ac_phases(int s, uint8_t u, const ss_cache_t *c, mb_phases_t *sn)
+{
+    if (!c->inv_off) return -2;
+    float i[3], v[3];
+
+    if (!c->inv_float) {
+        uint16_t r[11];                       /* offsets 1..11 -> r[0..10] */
+        if (mb_read(s, u, MB_FC03, c->inv_off + 1, 11, r)) return -1;
+        for (int k = 0; k < 3; k++) {
+            i[k] = apply_sf((float)r[k],     (int16_t)r[3]);
+            v[k] = apply_sf((float)r[7 + k], (int16_t)r[10]);
+        }
+    } else {
+        uint16_t r[18];                       /* offsets 2..19 -> r[0..17] */
+        if (mb_read(s, u, MB_FC03, c->inv_off + 2, 18, r)) return -1;
+        for (int k = 0; k < 3; k++) {
+            i[k] = words_to_f32(r[k * 2],      r[k * 2 + 1]);
+            v[k] = words_to_f32(r[12 + k * 2], r[12 + k * 2 + 1]);
+        }
+    }
+
+    for (int k = 0; k < 3; k++) {
+        if (!isfinite(i[k]) || !isfinite(v[k])) return -3;
+        sn->v[k] = v[k];
+        sn->i[k] = i[k];
+        sn->p[k] = v[k] * i[k];
+        if (!plausible_w(sn->p[k])) return -3;
+    }
+    return 0;
+}
+
 /* Inverter AC power (W) from the cached model offset. */
 static int ss_ac_w(int s, uint8_t u, const ss_cache_t *c, float *out)
 {
@@ -435,6 +478,20 @@ static int poll_device(int s, const mb_dev_cfg_t *d, int idx, agg_t *a,
              * swapped/rebooted): drop it so the next poll re-discovers, and
              * report failure so the device shows as disconnected, not @0. */
             if (!hybrid && !have_ac && !have_dc) { c->done = false; return -1; }
+
+            /* Per-phase split for the device table (phase-imbalance view). A
+             * second read, and like the Eltako one it must never be able to
+             * fail the poll: the total above is what feeds the energy model
+             * and is already in hand. On error the snapshot simply ages out. */
+            if (have_ac) {
+                mb_phases_t sn = { .valid = true, .p_total = ac };
+                if (ss_ac_phases(s, d->slave, c, &sn) == 0) {
+                    portENTER_CRITICAL(&s_mux);
+                    s_ph[idx]    = sn;
+                    s_ph_ms[idx] = (uint32_t)(esp_timer_get_time() / 1000);
+                    portEXIT_CRITICAL(&s_mux);
+                }
+            }
             return 0;
         }
         /* meter roles */

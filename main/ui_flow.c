@@ -77,7 +77,8 @@ static lv_obj_t *s_date_lbl;      /* top-center weekday, date */
 static lv_obj_t *s_wifi_lbl;
 static lv_obj_t *s_wifi_popup;
 static lv_obj_t *s_gen_popup;
-static lv_obj_t *s_sp_lbl;        /* grid-setpoint value label */
+static lv_obj_t *s_sp_lbl;        /* grid-setpoint value label  */
+static lv_obj_t *s_sp_slider;     /* grid-setpoint slider       */
 
 /* Uptime / restart popup (tap the clock/date). */
 static lv_obj_t  *s_sys_popup;
@@ -246,9 +247,42 @@ static float smoothstep01(float x)
  * direction of power flow. Each dot eases in (small + faint) as it leaves the
  * source, runs full near the middle, and dissolves as it reaches the sink --
  * a soft continuous stream instead of hard popping dots. */
+/* Follow a setpoint changed elsewhere (the /deye page, MQTT) so the slider is
+ * never a stale second opinion on a value that steers the inverter.
+ *
+ * Only while the user is not touching it -- otherwise the drag would fight the
+ * poll -- and only for values the slider can actually represent: its range is
+ * -1000..+1000 W while the web form accepts +-30000, and snapping a 5000 W
+ * setpoint to the end stop would MISREPRESENT it. Out of range the knob stays
+ * put and the label still shows the truth, which reads as "off the scale"
+ * rather than as a wrong number. */
+static void sp_follow(void)
+{
+    if (!s_sp_slider) return;
+    if (lv_obj_has_state(s_sp_slider, LV_STATE_PRESSED)) return;
+
+    int want = modbus_rtu_get_grid_setpoint();
+    static int s_shown = INT32_MIN;              /* last value we rendered */
+    if (want == s_shown) return;                 /* nothing changed        */
+    s_shown = want;
+
+    int lo = (int)lv_slider_get_min_value(s_sp_slider);
+    int hi = (int)lv_slider_get_max_value(s_sp_slider);
+    if (want >= lo && want <= hi &&
+        (int)lv_slider_get_value(s_sp_slider) != want)
+        lv_slider_set_value(s_sp_slider, want, LV_ANIM_OFF);
+
+    if (s_sp_lbl) {
+        char b[24];
+        snprintf(b, sizeof(b), "%+d W", want);
+        lv_label_set_text(s_sp_lbl, b);
+    }
+}
+
 static void flow_timer_cb(lv_timer_t *t)
 {
     (void)t;
+    sp_follow();
     s_flow_phase += FLOW_SPEED;
     if (s_flow_phase >= 1.0f) s_flow_phase -= 1.0f;
 
@@ -1170,6 +1204,7 @@ void ui_flow_create(void)
         lv_obj_set_style_border_color(sp, COL_BTN, LV_PART_KNOB);
         lv_obj_add_event_cb(sp, grid_sp_cb, LV_EVENT_VALUE_CHANGED, NULL);
         lv_obj_add_event_cb(sp, grid_sp_cb, LV_EVENT_RELEASED, NULL);
+        s_sp_slider = sp;                /* so sp_follow() can track /deye */
 
         /* Caption + value, stacked at the bottom-left:  "Netz-Soll" / "+500 W". */
         lv_obj_t *cap = lv_label_create(scr);

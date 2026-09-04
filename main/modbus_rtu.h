@@ -7,7 +7,9 @@
  *              answers with the real grid power obtained over Modbus-TCP from
  *              the Fronius smart meter (modbus_tcp_get_status().grid_w).
  *   - MASTER -> read the Deye inverter (battery power + SoC) and feed it into
- *              the energy-flow model via modbus_tcp_set_rtu_deye().
+ *              the energy-flow model via modbus_tcp_set_rtu_deye(); the same
+ *              poll also caches the inverter's own live measurements (PV,
+ *              output, load, grid) -- see mb_deye_live_t.
  *
  * Bus 0 = UART1 (board pins A), bus 1 = UART2 (board pins B). Config is stored
  * in NVS and edited in the "Mod RTU" settings tab. Pins are fixed in the board
@@ -139,6 +141,59 @@ void        modbus_rtu_get_served(mb_served_t *out);
 void        modbus_rtu_get_manip(mb_manip_cfg_t *out);
 esp_err_t   modbus_rtu_set_manip(const mb_manip_cfg_t *cfg);
 const char *modbus_rtu_phase_mode_name(uint8_t mode);
+
+/* ---------------- live values the Deye reports about itself ------------
+ * The MASTER bus polls the inverter's own measurements alongside the battery
+ * read that feeds the energy-flow model, and caches them here for /api/deye/live
+ * (the "Was der Deye daraus macht" cards on the /deye page). Everything is
+ * already scaled to its physical unit, so consumers never touch raw registers.
+ *
+ * Read in four FC03 blocks; `blocks` says which of them answered in the last
+ * round, so one failing range (a model without a generator port, say) leaves
+ * the other values usable instead of blanking the whole struct. */
+#define MB_DEYE_BLK_BAT   0x01   /* 586..592  battery                       */
+#define MB_DEYE_BLK_GRID  0x02   /* 598..625  grid side, incl. external CT  */
+#define MB_DEYE_BLK_OUT   0x04   /* 627..655  inverter output + load        */
+#define MB_DEYE_BLK_PV    0x08   /* 672..683  PV strings                    */
+#define MB_DEYE_BLK_ALL   0x0F
+
+typedef struct {
+    bool     valid;        /* at least one block has ever been read        */
+    bool     online;       /* the last poll round answered                 */
+    uint8_t  blocks;       /* MB_DEYE_BLK_* that answered last round       */
+    uint32_t age_ms;       /* since the last successful round (0 = never)  */
+
+    /* Battery (586..592). p is + discharge / - charge, like the RTU status. */
+    float bat_temp, bat_v, bat_soc, bat_p, bat_i;
+
+    /* Grid side (598..625). Sign follows the meter convention: + = import.
+     * `inner` is the inverter's internal transformer measurement, `ct` the
+     * external CT/meter input -- that is the one our SDM630 emulation feeds,
+     * so it is what the manipulation shows up in. */
+    float grid_v[3], grid_freq;
+    float grid_inner_p[3], grid_inner_total;
+    float grid_ct_p[3], grid_ct_total;
+    float grid_p[3], grid_total;
+
+    /* Inverter output + load (627..655).
+     *
+     * inv_p/inv_total are NEGATED against the raw register (see poll_deye) so
+     * they follow the same rule as bat_p: + = power flows INTO the inverter at
+     * this port. Concretely:
+     *     +  draws on the AC side   (charging the battery)
+     *     -  delivers on the AC side (feeding house/grid)
+     * load_p and ups_p are raw. On an installation with nothing on the backup
+     * port they mirror the AC flow (they track inv_p to within a few watts),
+     * so they carry the Deye's own sign, not this one. */
+    float inv_v[3], inv_i[3], inv_p[3], inv_total, inv_freq;
+    float ups_p[3], ups_total;                    /* backup (UPS) output   */
+    float load_v[3], load_i[3], load_p[3], load_total, load_freq;
+
+    /* PV strings (672..683). pv_total is the sum of the four string powers. */
+    float pv_p[4], pv_v[4], pv_i[4], pv_total;
+} mb_deye_live_t;
+
+void        modbus_rtu_get_deye_live(mb_deye_live_t *out);
 
 /* On-demand Deye holding-register access for the /deye web page, served by the
  * Deye-master bus task between polls (no UART contention). Read up to 64 regs

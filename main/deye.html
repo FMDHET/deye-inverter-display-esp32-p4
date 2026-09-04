@@ -107,6 +107,22 @@
   .warn b { color:var(--warn); }
   .sw { display:flex; align-items:center; gap:8px; }
 
+/* ---- Deye-Live: Kacheln fuer die Werte, die der Wechselrichter selbst misst.
+ * auto-fit statt fester Spaltenzahl, damit die Reihe auf dem Handy umbricht
+ * statt zu schrumpfen. .stale dimmt eine Gruppe, deren Registerblock in der
+ * letzten Runde nicht geantwortet hat -- die Zahlen stehen dann noch da, sind
+ * aber sichtbar von gestern. */
+  .tiles { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  .tile { border:1px solid var(--bd); border-radius:6px; padding:8px 10px; background:var(--bg); }
+  .tile .lbl  { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  .tile .val  { font-size:20px; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .tile .foot { color:var(--mut); font-size:11px; margin-top:2px; min-height:1.25em; }
+  .stale { opacity:.45; }
+  /* Neun Spalten passen auf kein Handy. Statt zu quetschen scrollt die Tabelle
+   * in sich -- die Seite selbst bleibt an der Bildschirmbreite. */
+  .xscroll { overflow-x:auto; }
+  .xscroll > table { min-width:640px; }
+
 /* ---- hub chrome: header + tab bar ---- */
   header.hub { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin:0 0 12px; }
   header.hub h1 { margin:0; }
@@ -244,12 +260,64 @@
     <tbody id="devBody"></tbody>
   </table>
   <p class="hint" style="margin:10px 0 0;">
-    Nur Eltako-Zähler liefern Werte je Phase (Eingangsregister 0…17); bei allen
-    anderen bleibt L1…L3 leer, und die Emulation teilt die Summe zu gleichen
-    Teilen auf. „Leistung" ist rollenabhängig: Netz-/Erzeugungsleistung beim
-    Zähler, PV-Produktion beim Wechselrichter (Hybrid zusätzlich Akku und SoC).
+    Eltako-Zähler liefern L1…L3 direkt (Eingangsregister 0…17). Beim Fronius
+    kennt SunSpec <b>keine</b> Wirkleistung je Phase &ndash; nur Strom und
+    Spannung (AphA…C, PhVphA…C); die Spalten sind daher U&nbsp;×&nbsp;I, also
+    Scheinleistung. Bei cos&nbsp;φ&nbsp;≈&nbsp;1 liegt das ein bis zwei Prozent
+    neben der Wirkleistung und reicht, um Phasenschieflast zu sehen. Die
+    Deye-Zeile kommt vom RTU-Bus, nicht über Modbus-TCP. Nur die Emulation
+    braucht echte Phasenwerte &ndash; fehlen sie, teilt sie die Summe zu
+    gleichen Teilen auf.
   </p>
 </div>
+
+<div class="card">
+  <h2>Was der Deye daraus macht &mdash; seine eigenen Messwerte</h2>
+  <div class="formrow" style="margin:0 0 12px;">
+    <span id="lvState" class="pill">Wechselrichter &hellip;</span>
+    <span class="hint" id="lvInfo" style="margin-left:auto;"></span>
+  </div>
+  <div class="tiles" id="lvTiles">
+    <div class="tile" id="tInv">  <div class="lbl">WR-Ausgang</div>    <div class="val">–</div><div class="foot"></div></div>
+    <div class="tile" id="tLoad"> <div class="lbl">Last</div>          <div class="val">–</div><div class="foot"></div></div>
+    <div class="tile" id="tGrid"> <div class="lbl">Netz (Deye-CT)</div><div class="val">–</div><div class="foot"></div></div>
+    <div class="tile" id="tBat">  <div class="lbl">Batterie</div>      <div class="val">–</div><div class="foot"></div></div>
+  </div>
+  <p class="hint" style="margin:12px 0 0;" id="lvDelta"></p>
+</div>
+
+<div class="card" id="cardLvPhase">
+  <h2>Deye-Leistungen je Phase</h2>
+  <div class="xscroll">
+  <table>
+    <thead>
+      <tr class="grp">
+        <th style="width:64px;"></th>
+        <th colspan="3">Netz (Deye misst)</th>
+        <th colspan="3">Wechselrichter-Ausgang</th>
+        <th colspan="2">Last</th>
+      </tr>
+      <tr>
+        <th></th>
+        <th>CT [W]</th><th>intern [W]</th><th>gesamt [W]</th>
+        <th>U [V]</th><th>I [A]</th><th>P [W]</th>
+        <th>P [W]</th><th>Backup [W]</th>
+      </tr>
+    </thead>
+    <tbody id="lvPhaseBody"></tbody>
+  </table>
+  </div>
+  <p class="hint" style="margin:10px 0 0;">
+    „CT" ist der externe Wandler-/Zählereingang (Register&nbsp;616&hellip;619)
+    &ndash; das ist der Wert, den unsere SDM630-Emulation füttert und auf den
+    der Deye regelt. „intern" ist seine eigene Messung am Netzanschluss
+    (604&hellip;607), „gesamt" seine Bilanz daraus (622&hellip;625).
+    Vorzeichen überall gleich: <span class="pos">+ = Bezug</span>,
+    <span class="neg">&minus; = Einspeisung</span>. Beim WR-Ausgang ist ein
+    positiver Wert also Bezug aus der Batterie.
+  </p>
+</div>
+
 </section>
 
 <section class="tab" id="tab-regs" hidden>
@@ -324,6 +392,8 @@
     <div class="kv"><span>Laufender Slot</span><b id="sRun">&hellip;</b></div>
     <div class="kv"><span>Ziel-Slot (OTA)</span><b id="sTgt">&hellip;</b></div>
     <div class="kv"><span>Laufzeit</span><b id="sUpt">&hellip;</b></div>
+    <div class="kv"><span>Letzter Neustart</span><b id="sRst">&hellip;</b></div>
+    <div class="kv"><span>Freier Speicher</span><b id="sHeap">&hellip;</b></div>
     <div class="kv"><span>MAC</span><b id="sMac">&hellip;</b></div>
     <div class="kv"><span>ESP-IDF</span><b id="sIdf">&hellip;</b></div>
   </div>
@@ -377,6 +447,17 @@
       document.getElementById("sRun").textContent = j.running;
       document.getElementById("sTgt").textContent = j.target_slot;
       document.getElementById("sUpt").textContent = (j.uptime != null) ? fmtUptime(j.uptime) : "-";
+      /* Absturzursachen hervorheben: SW ist unser eigener Neustart nach einem
+       * Update, POWERON/EXT sind harmlos -- alles andere ist ein Befund. */
+      var rst = j.reset || "-";
+      var bad = ["PANIC", "INT_WDT", "TASK_WDT", "WDT", "BROWNOUT"].indexOf(rst) >= 0;
+      var er  = document.getElementById("sRst");
+      er.textContent = rst;
+      er.style.color = bad ? "var(--err)" : "";
+      document.getElementById("sHeap").textContent = (j.heap != null)
+        ? (Math.round(j.heap / 1024) + " kB (Minimum seit Start: "
+           + Math.round(j.heap_min / 1024) + " kB)")
+        : "-";
       document.getElementById("sMac").textContent = j.mac;
       document.getElementById("sIdf").textContent = j.idf;
     }).catch(function () { set("Geraet nicht erreichbar."); });
@@ -482,7 +563,7 @@ function manipText(mode, val) {
 }
 
 /* ---------- Anzeige ---------- */
-function render(d) {
+function render(d, live) {
   last = d;
   const s = d.served, m = d.manip;
 
@@ -582,20 +663,149 @@ function render(d) {
       td(g.phases ? (g.age / 1000).toFixed(1) + " s" : "–") +
       "</tr>";
   }
+  /* Der Deye haengt nicht am Modbus-TCP, sondern am RTU-Master-Bus -- er
+   * gehoert hier trotzdem hin: erst mit seinem AC-Ausgang je Phase ergibt die
+   * Tabelle das vollstaendige Bild der Phasenverteilung im Haus. */
+  if (live && live.valid) {
+    const iv = live.inv, on = live.online && (live.blocks & BLK.out);
+    dh += '<tr' + (on ? "" : ' class="stale"') + ">" +
+      "<td>Deye (AC-Ausgang)</td>" +
+      '<td class="hint">RS485 / RTU</td>' +
+      "<td>Deye</td>" +
+      "<td>Wechselrichter</td>" +
+      td(live.online ? '<span class="pill ok">ok</span>' : '<span class="pill bad">weg</span>') +
+      td(span(cls(iv.p[0]), fmt(iv.p[0]))) +
+      td(span(cls(iv.p[1]), fmt(iv.p[1]))) +
+      td(span(cls(iv.p[2]), fmt(iv.p[2]))) +
+      '<td style="text-align:left;padding-left:18px;">' +
+        span(cls(iv.total), fmt(iv.total) + " W") + "</td>" +
+      td((live.age / 1000).toFixed(1) + " s") +
+      "</tr>";
+  }
   $("devBody").innerHTML = dh || '<tr><td colspan="10" class="hint">Kein Modbus-TCP-Gerät konfiguriert.</td></tr>';
 }
 
+/* ---------- Was der Deye selbst misst (/api/deye/live) ---------- */
+
+/* Registerbloecke, die die Firmware getrennt liest: faellt einer aus, bleiben
+ * seine Zahlen als letzter Stand stehen und werden hier gedimmt. */
+const BLK = { bat: 1, grid: 2, out: 4, pv: 8 };
+
+function fmtW(x)     { return fmt(x) + " W"; }
+function span(k, t) { return k ? '<span class="' + k + '">' + t + "</span>" : t; }
+
+function tile(id, fresh, val, klass, foot) {
+  const e = $(id);
+  e.classList.toggle("stale", !fresh);
+  e.querySelector(".val").innerHTML  = span(klass, val);
+  e.querySelector(".foot").innerHTML = foot || "";
+}
+
+function renderLive(l, served) {
+  const st = $("lvState");
+  if (!l) {
+    st.textContent = "Live-Werte nicht verfügbar";
+    st.className   = "pill bad";
+    $("lvInfo").textContent = "Firmware ohne /api/deye/live?";
+    return;
+  }
+  const ok = !!(l.valid && l.online);
+  st.textContent = ok ? "Wechselrichter antwortet"
+                      : (l.valid ? "Wechselrichter antwortet NICHT" : "noch keine Antwort");
+  st.className   = "pill " + (ok ? "ok" : "bad");
+  $("lvInfo").textContent = l.valid
+    ? "zuletzt gelesen vor " + (l.age / 1000).toFixed(1) + " s · RTU-Master pollt alle 2 s"
+    : "Noch nichts gelesen — ist ein Bus im Master-Modus und der Deye angeschlossen?";
+
+  const has = (bit) => ok && (l.blocks & bit);
+  const inv = l.inv, ld = l.load, gr = l.grid, ba = l.bat;
+
+  /* ---- Kacheln ---- */
+  tile("tInv", has(BLK.out), fmtW(inv.total), cls(inv.total),
+       fmt(inv.freq, 2) + " Hz am Ausgang");
+
+  tile("tLoad", has(BLK.out), fmtW(ld.total), "",
+       "davon Backup/UPS " + fmt(ld.ups_total) + " W");
+
+  tile("tGrid", has(BLK.grid), fmtW(gr.ct_total), cls(gr.ct_total),
+       "intern " + fmt(gr.inner_total) + " W · gesamt " + fmt(gr.total) + " W · "
+       + fmt(gr.freq, 2) + " Hz");
+
+  tile("tBat", has(BLK.bat), fmtW(ba.p), cls(ba.p),
+       fmt(ba.soc) + " % · " + fmt(ba.v, 2) + " V · " + fmt(ba.i, 1) + " A · "
+       + fmt(ba.t, 1) + " °C · " + (ba.p > 0.5 ? "entlädt" : (ba.p < -0.5 ? "lädt" : "Ruhe")));
+
+  /* ---- Gegenprobe: was wir senden vs. was er am CT sieht ----
+   * Genau hier wird die Manipulation sichtbar (oder eben nicht). Der Deye
+   * mittelt und rundet, also erst ab einer deutlichen Abweichung meckern. */
+  const dl = $("lvDelta");
+  if (has(BLK.grid) && served !== undefined && served !== null) {
+    const diff = gr.ct_total - served;
+    dl.innerHTML =
+      "An den Deye gesendet: " + span(cls(served), fmtW(served)) +
+      " &nbsp;→&nbsp; vom Deye am CT gemessen: " + span(cls(gr.ct_total), fmtW(gr.ct_total)) +
+      " &nbsp;(Differenz " + fmt(diff) + " W)" +
+      (Math.abs(diff) > 100
+        ? " — kommt dauerhaft etwas anderes an als gesendet, stimmen Vorzeichen oder Phasenzuordnung nicht."
+        : "");
+  } else {
+    dl.textContent = "";
+  }
+
+  /* ---- Phasentabelle. Die Netzspalten kommen aus einem anderen Register-
+   * block als der Rest, also koennen sie einzeln veralten. ---- */
+  const gs = has(BLK.grid) ? "" : " stale";
+  const os = has(BLK.out)  ? "" : " stale";
+  let h = "";
+  for (let k = 0; k < 3; k++) {
+    h += "<tr><td><b>" + PH[k] + "</b></td>" +
+      td(span(cls(gr.ct[k]), fmt(gr.ct[k])), "big" + gs) +
+      td(span(cls(gr.inner[k]), fmt(gr.inner[k])), gs.trim()) +
+      td(span(cls(gr.p[k]),     fmt(gr.p[k])),     gs.trim()) +
+      td(fmt(inv.v[k], 1), os.trim()) +
+      td(fmt(inv.i[k], 2), os.trim()) +
+      td(span(cls(inv.p[k]), fmt(inv.p[k])), "big" + os) +
+      td(fmt(ld.p[k]),   os.trim()) +
+      td(fmt(ld.ups[k]), os.trim()) +
+      "</tr>";
+  }
+  h += '<tr class="sum"><td>Summe</td>' +
+    td(span(cls(gr.ct_total), fmt(gr.ct_total)), "big" + gs) +
+    td(span(cls(gr.inner_total), fmt(gr.inner_total)), gs.trim()) +
+    td(span(cls(gr.total),       fmt(gr.total)),       gs.trim()) +
+    td("–") + td("–") +
+    td(span(cls(inv.total), fmt(inv.total)), "big" + os) +
+    td(fmt(ld.total),     os.trim()) +
+    td(fmt(ld.ups_total), os.trim()) +
+    "</tr>";
+  $("lvPhaseBody").innerHTML = h;
+
+}
+
 /* ---------- Polling ---------- */
+/* Nacheinander, nicht parallel: der :80-Server hat vier Sockets, und zwei
+ * gleichzeitige Anfragen pro Sekunde wuerden dem Browser eine zweite
+ * Verbindung aufmachen, die neben OTA-Upload und Register-Export fehlt. */
 async function poll() {
+  /* Live-Werte zuerst: die Geraetetabelle in render() zeigt den Deye mit an. */
+  let live = null;
+  try {
+    const rl = await fetch("/api/deye/live", { cache: "no-store" });
+    if (rl.ok) live = await rl.json();
+  } catch (e) { /* renderLive() meldet das gleich selbst */ }
+
+  let served = null;
   try {
     const r = await fetch("/api/meter", { cache: "no-store" });
     const d = await r.json();
     /* U/I der Phasentabelle kommen vom Netz-Zähler selbst (Rolle "Netz"). */
     d.gridPh = d.meters.find(g => g.phases && g.grid) || null;
-    render(d);
+    render(d, live);
+    served = d.served.total;
   } catch (e) {
     $("pInfo").textContent = "keine Verbindung zum Gerät";
   }
+  renderLive(live, served);
 }
 
 /* ---------- Senden ---------- */

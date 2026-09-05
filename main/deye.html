@@ -1,5 +1,5 @@
 <!DOCTYPE html><html lang="de"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Deye Display &ndash; Werkbank</title>
 <script>
 /* Farbschema VOR dem ersten Rendern setzen, sonst blitzt die Seite kurz in der
@@ -46,7 +46,8 @@
           --warnbg:#221a10; --warnfg:#e8cba6; }
   * { box-sizing:border-box; }
   body { margin:0; font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;
-         color:var(--fg); background:var(--bg); padding:16px; }
+         color:var(--fg); background:var(--bg); -webkit-text-size-adjust:100%;
+         padding:16px calc(16px + env(safe-area-inset-right)) 16px calc(16px + env(safe-area-inset-left)); }
   h1 { margin:0 0 4px; font-size:18px; }
   h2 { margin:0 0 8px; font-size:14px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; }
   h3 { margin:0 0 6px; font-size:13px; color:var(--mut); }
@@ -59,10 +60,14 @@
   table { width:100%; border-collapse:collapse; }
   th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--bd); font-variant-numeric:tabular-nums; }
   th { color:var(--mut); font-weight:500; font-size:12px; position:sticky; top:0; background:var(--tbg); z-index:2; box-shadow:inset 0 -1px 0 var(--bd); }
-  .tscroll { max-height:60vh; overflow:auto; }
+  /* dvh nach vh als Ueberschreibung: Safaris ein-/ausfahrende Toolbar aendert
+     vh mitten im Scrollen, die Tabelle sprang dabei in der Hoehe. */
+  .tscroll { max-height:60vh; max-height:60dvh; overflow:auto; }
   #probeResult { table-layout:fixed; width:max-content; min-width:100%; }
   #probeResult td { white-space:normal; overflow-wrap:anywhere; vertical-align:top; }
   #probeResult th { user-select:none; }
+  #probeResult td.c-name   { color:var(--link); font-size:12px; }
+  #probeResult td.c-interp { color:var(--acc);  font-size:12px; }
   #probeResult th .grip { position:absolute; top:0; right:0; width:8px; height:100%;
                           cursor:col-resize; }
   #probeResult th .grip:hover { background:var(--acc); opacity:.6; }
@@ -81,6 +86,7 @@
                                     border-color:var(--bd); cursor:not-allowed; }
   .formrow { display:flex; gap:12px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
   .formrow label { color:var(--mut); font-size:12px; }
+  .num-s { width:80px; } .num-m { width:90px; } .num-l { width:100px; }
 /* ---- Zaehler-Tab ----
  * Tabellenregeln sind bewusst auf #tab-meter beschraenkt: das Register-Tab
  * darueber will linksbuendige Zellen und seinen eigenen sticky-Header. */
@@ -158,6 +164,58 @@
                      background:var(--inp); border:1px solid var(--bdi);
                      border-radius:5px; padding:6px 8px; }
   #sysStatus { font-size:12px; color:var(--mut); min-height:1.2em; white-space:pre-wrap; }
+
+/* ---- iPhone / schmale Schirme ---------------------------------------
+ * Ein Breakpoint. Der Zaehler-Tab bleibt bewusst unangetastet: seine
+ * neunspaltige Tabelle scrollt per .xscroll in sich, das ist oben schon
+ * so entschieden worden. Hier geht es um alles andere. */
+  @media (max-width:640px) {
+    body { padding-left:calc(12px + env(safe-area-inset-left));
+           padding-right:calc(12px + env(safe-area-inset-right)); }
+
+    /* iOS Safari zoomt beim Fokus ungefragt in die Seite, sobald ein
+       Bedienfeld kleiner als 16px rendert. Deshalb hier exakt 16px. */
+    input, select, button { font-size:16px; }
+    button { min-height:44px; padding:8px 14px; }
+    input, select { min-height:40px; }
+
+    header.hub { gap:8px 12px; }
+    .theme button { min-height:36px; padding:6px 12px; font-size:13px; }
+
+    /* Drei Tabs nebeneinander statt umgebrochen, dabei fingergerecht hoch. */
+    nav.tabs { gap:4px; }
+    nav.tabs button { flex:1 1 auto; padding:10px 8px; font-size:13px; min-height:44px; }
+
+    .card { padding:10px; }
+    .formrow { gap:8px; }
+    .formrow label, .formrow .hint { flex:0 0 100%; }
+    .num { flex:1 1 6.5em; width:auto; min-width:0; }
+
+    /* Kein Scroll-Container im Scroll-Container: verschachteltes Wischen ist
+       unter iOS kaum treffsicher. Die Seite scrollt selbst. */
+    .tscroll { max-height:none; overflow:visible; }
+
+    #probeResult { width:100%; table-layout:auto; }
+    #probeResult thead { display:none; }
+    #probeResult th .grip { display:none; }   /* 8px sind per Finger nicht greifbar */
+
+    /* Registerzeilen werden Karten. Strikt Direktkind-Selektoren: die Spalte
+       "Interpretation" enthaelt bei bekannten Registern eine eigene <table>
+       in einem <details>, die hier nicht mit aufgebrochen werden darf. */
+    #probeResult > tbody,
+    #probeResult > tbody > tr,
+    #probeResult > tbody > tr > td { display:block; }
+    #probeResult > tbody > tr { border:1px solid var(--bd); border-radius:8px;
+                                padding:8px 10px; margin-bottom:8px; }
+    #probeResult > tbody > tr > td { border-bottom:0; padding:0; }
+    #probeResult > tbody > tr > td:nth-child(-n+4) { display:inline-block; margin-right:10px; }
+    #probeResult > tbody > tr > td:nth-child(4)::before { content:'/ '; color:var(--mut); }
+    #probeResult > tbody > tr > td:nth-child(n+5) { margin-top:4px; }
+    #probeResult > tbody > tr > td:empty { display:none; }  /* unbekannte Register: keine Leerzeilen */
+
+    /* Bedeutung/Interpretation sind am Handy der Fliesstext der Karte. */
+    #probeResult td.c-name, #probeResult td.c-interp { font-size:13px; }
+  }
 </style></head>
 <body>
 
@@ -330,9 +388,9 @@
     </p>
     <div class="formrow">
       <label for="probeAddr">Adresse</label>
-      <input type="number" id="probeAddr" min="0" max="65535" step="1" value="142" style="width:100px;">
+      <input type="number" id="probeAddr" class="num num-l" min="0" max="65535" step="1" value="142">
       <label style="min-width:0;">Anzahl</label>
-      <input type="number" id="probeCount" min="1" max="2000" step="1" value="12" style="width:80px;">
+      <input type="number" id="probeCount" class="num num-s" min="1" max="2000" step="1" value="12">
       <button class="primary" onclick="probeRead()">Lesen</button>
       <span id="probeStatus" style="color:var(--mut);font-size:12px;"></span>
     </div>
@@ -348,8 +406,8 @@
     </div>
     <div class="formrow" style="margin-top:14px;">
       <label for="wrAddr">Schreiben (Adr/Wert)</label>
-      <input type="number" id="wrAddr" min="0" max="65535" step="1" style="width:100px;">
-      <input type="number" id="wrVal" min="0" max="65535" step="1" style="width:100px;">
+      <input type="number" id="wrAddr" class="num num-l" min="0" max="65535" step="1">
+      <input type="number" id="wrVal" class="num num-l" min="0" max="65535" step="1">
       <button onclick="probeWrite()">Schreiben (FC16)</button>
       <span class="hint">&#9888; vorher genau wissen was die Adresse tut!</span>
     </div>
@@ -368,9 +426,9 @@
     </p>
     <div class="formrow">
       <label for="expFrom">Bereich (von / bis)</label>
-      <input type="number" id="expFrom" min="0" max="65535" step="1" value="0" style="width:90px;">
+      <input type="number" id="expFrom" class="num num-m" min="0" max="65535" step="1" value="0">
       <span style="color:var(--mut);">bis</span>
-      <input type="number" id="expTo" min="0" max="65535" step="1" value="749" style="width:90px;">
+      <input type="number" id="expTo" class="num num-m" min="0" max="65535" step="1" value="749">
       <button class="primary" onclick="exportRegs()">&#11015; Export (CSV)</button>
       <button onclick="document.getElementById('impFile').click()">&#11014; Import &hellip;</button>
       <input type="file" id="impFile" accept=".csv,.txt" style="display:none;" onchange="importRegs(this)">
@@ -1383,8 +1441,8 @@ async function probeRead(){
             + '<td><code>0x' + v.toString(16).padStart(4,'0').toUpperCase() + '</code></td>'
             + '<td>' + v + '</td>'
             + '<td>' + s + '</td>'
-            + '<td style="color:var(--link);font-size:12px;">' + name + '</td>'
-            + '<td style="color:var(--acc);font-size:12px;">' + interp + '</td>'
+            + '<td class="c-name">' + name + '</td>'
+            + '<td class="c-interp">' + interp + '</td>'
             + '</tr>';
     }
     tbody.innerHTML = html;

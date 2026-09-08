@@ -277,18 +277,25 @@ static esp_err_t devices_handler(httpd_req_t *req)
     mb_dev_live_t dl[MB_MAX_DEVICES];
     int n = modbus_tcp_get_device_live(dl, MB_MAX_DEVICES);
     char j[1280];
-    size_t o = 0;
-    o += snprintf(j + o, sizeof(j) - o, "[");
+    size_t o = 1;
+    j[0] = '[';
     for (int i = 0; i < n; i++) {
-        o += snprintf(j + o, sizeof(j) - o,
-                      "%s{\"name\":\"%s\",\"ip\":\"%s\",\"slave\":%u,\"mfr\":\"%s\",\"role\":\"%s\",\"conn\":%d,"
-                      "\"pv\":%.0f,\"w\":%.0f,\"soc\":%.0f}",
-                      i ? "," : "", dl[i].name, dl[i].ip, dl[i].slave,
-                      modbus_tcp_mfr_name(dl[i].mfr), modbus_tcp_role_name(dl[i].role),
-                      dl[i].connected ? 1 : 0, dl[i].pv_w, dl[i].w, dl[i].soc);
-        if (o > sizeof(j) - 128) break;
+        /* snprintf returns the length it WANTED to write. Adding that to o
+         * before checking meant o could pass sizeof(j) on a truncated row,
+         * and the closing "]" below then computed sizeof(j) - o as a huge
+         * size_t and wrote past the buffer. Check first, advance only on a
+         * row that fit; a truncated row is dropped whole. */
+        int w = snprintf(j + o, sizeof(j) - o,
+                         "%s{\"name\":\"%s\",\"ip\":\"%s\",\"slave\":%u,\"mfr\":\"%s\",\"role\":\"%s\",\"conn\":%d,"
+                         "\"pv\":%.0f,\"w\":%.0f,\"soc\":%.0f}",
+                         i ? "," : "", dl[i].name, dl[i].ip, dl[i].slave,
+                         modbus_tcp_mfr_name(dl[i].mfr), modbus_tcp_role_name(dl[i].role),
+                         dl[i].connected ? 1 : 0, dl[i].pv_w, dl[i].w, dl[i].soc);
+        if (w < 0 || o + (size_t)w >= sizeof(j) - 2) break;   /* room for "]\0" */
+        o += (size_t)w;
     }
-    snprintf(j + o, sizeof(j) - o, "]");
+    j[o++] = ']';
+    j[o]   = '\0';
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     return httpd_resp_sendstr(req, j);

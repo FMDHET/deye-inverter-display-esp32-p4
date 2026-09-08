@@ -21,6 +21,9 @@ esp_err_t assets_fs_mount(void)
     };
 
     esp_err_t err = esp_vfs_spiffs_register(&conf);
+    if (err == ESP_ERR_INVALID_STATE) {
+        return ESP_OK;                  /* already mounted -- nothing to do */
+    }
     if (err != ESP_OK) {
         /* Not fatal: the firmware runs fine without the asset image, the UI
          * just reports the FS build as "n/a". */
@@ -35,6 +38,18 @@ esp_err_t assets_fs_mount(void)
                  ASSETS_MOUNT, (unsigned)used, (unsigned)total);
     }
     return ESP_OK;
+}
+
+esp_err_t assets_fs_unmount(void)
+{
+    if (!esp_spiffs_mounted(ASSETS_PARTITION)) {
+        return ESP_OK;
+    }
+    esp_err_t err = esp_vfs_spiffs_unregister(ASSETS_PARTITION);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "SPIFFS unmount failed (%s)", esp_err_to_name(err));
+    }
+    return err;
 }
 
 int assets_fs_build_number(void)

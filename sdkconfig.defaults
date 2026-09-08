@@ -33,6 +33,28 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_HEX=y
 CONFIG_SPIRAM_SPEED_200M=y
 
+# CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL NICHT hochsetzen -- gemessen wirkungslos.
+#
+# Hintergrund: OTA ueber WLAN stuerzt sporadisch mitten im Firmware-Schreiben ab.
+# Die Stelle ist der esp_hosted-SDIO-Treiber, der seinen Empfangspuffer im
+# Streaming-Modus zur Laufzeit wachsen laesst (alten freigeben, groesseren per
+# malloc holen). Der Puffer muss DMA-faehig sein, und scheitert das malloc,
+# quittiert der Treiber das mit assert(*buf) -- also Absturz statt Fehlerpfad:
+#     assert failed: sdio_rx_get_buffer sdio_drv.c:953 (*buf)
+#     want=5120 prev_size=4608 int_largest=31744 dma_free=9627 dma_largest=4608
+# Der interne RAM reichte also (31 KB am Stueck), der DMA-faehige nicht.
+#
+# Naheliegend war, die DMA-Reserve zu vergroessern (32 KB -> 96 KB). Wirkungslos:
+# der Pool war nachweislich aktiv ("Reserving pool of 96K"), doch waehrend des
+# Schreibens fiel er auf dma_free=4743 dma_largest=1344 -- noch tiefer als die
+# 4608 B, an denen es vorher krachte. Der Verbrauch richtet sich nach dem, was
+# gerade hereinkommt: mehr Reserve heisst nur, dass der Netzwerkstack mehr
+# puffert, und der freie Rest bleibt gleich knapp. Die 64 KB internen RAM sind
+# damit umsonst gebunden, deshalb steht hier wieder die Vorgabe (32 KB).
+#
+# Messwerte liefert GET /ota (dma, dma_max, dma_min) sowie die Zeilen
+# "OTA <n> KB: dma_free=... dma_largest=..." waehrend eines laufenden Updates.
+
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
 # ---------------------------- LVGL 9 -------------------------------------
@@ -82,6 +104,27 @@ CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
 CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
 
+# SDIO-Transportpuffer im PSRAM statt im internen DMA-Pool.
+#
+# Der eigentliche Hebel gegen den OTA-Absturz (assert in sdio_rx_get_buffer,
+# siehe oben bei SPIRAM_MALLOC_RESERVE_INTERNAL): esp_hosted holt seine
+# Empfangspuffer per hosted_malloc_align() -- mit dieser Option zuerst aus
+# DMA-faehigem PSRAM (32 MB, nie knapp) und erst bei Misserfolg aus dem
+# internen RAM. Espressif hat die Option ausdruecklich fuer den P4 gebaut, dessen
+# GDMA den PSRAM ueber den Cache erreicht. Rein hostseitig: der mit dem C6
+# ausgehandelte Streaming-Modus bleibt unangetastet. Preis laut Kconfig etwas
+# Transportlatenz -- fuer Modbus-Polling und MQTT ohne Belang.
+CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y
+
+# SDIO-Empfangsmodus NICHT umstellen.
+# CONFIG_ESP_HOSTED_SDIO_OPTIMIZATION_RX_MAX_SIZE wurde probiert, um den
+# waehrend eines OTA scheiternden Neuallokations-Pfad im Streaming-Modus zu
+# umgehen (assert(*buf) in sdio_rx_get_buffer). Ergebnis: Bootschleife.
+#     assert failed: process_init_event transport_drv.c:879 (0)
+# Der Modus wird beim Verbindungsaufbau mit dem C6 ausgehandelt; die auf dem
+# Modul geflashte Co-Prozessor-Firmware erwartet Streaming. Host und C6 sind ein
+# Paar -- der Modus laesst sich nur zusammen mit der C6-Firmware aendern.
+
 # Bigger main-task stack: WiFi+netif init + LVGL UI builds together at
 # boot push the default 3.5 KB main stack close to its limit.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
@@ -116,6 +159,21 @@ CONFIG_LWIP_MAX_SOCKETS=16
 # (=10 s TIME_WAIT) frees sockets fast; safe on LAN. Doubly important now that
 # the pool cannot be grown -- see above.
 CONFIG_LWIP_TCP_MSL=5000
+
+# tcpip-Task-Stack: die Vorgabe sind 3072 B. WireGuard laeuft aber IM
+# tcpip-Thread (netif->input/output, wireguardif_tmr): x25519-Handshake,
+# BLAKE2s, ChaCha20-Poly1305. Das README der Komponente verlangt 5 KB. Trifft
+# ein Handshake ein, waehrend ein TCP-Segment verarbeitet wird, ist die
+# Stack-Canary weg -- Panic im tcpip_thread, Neustart, und wenn das der erste
+# Start nach einem OTA war, ein Rollback.
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=6144
+
+# Task-Watchdog: mit der Vorgabe schreibt er nur alle 5 s eine Logzeile. Eine
+# Task, die den Leerlauf aushungert, laesst das Geraet an der Wand damit
+# halbtot haengen, bis jemand den Stecker zieht -- und "TASK_WDT" in /ota
+# konnte nie vorkommen. Jetzt Panic + Neustart; der Rollback faengt es, wenn
+# es die frisch geflashte Firmware war.
+CONFIG_ESP_TASK_WDT_PANIC=y
 
 # Enable bridge support purely to flip LWIP_ESP_NETIF_DATA=1, so esp_netif stores
 # its handle in lwIP client-data (not netif->state). Required so the WireGuard

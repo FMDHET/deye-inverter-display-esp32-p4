@@ -97,6 +97,12 @@
   #tab-meter tbody tr.sum td { font-weight:600; border-top:1px solid var(--bd); }
   #tab-meter td.big { font-size:15px; }
   #tab-meter input[type=number] { width:110px; text-align:right; }
+  /* Zellklassen statt Inline-Styles: Inline-Styles schlagen jede Media Query. */
+  #tab-meter td.c-mode, #tab-meter td.c-eff { text-align:left; }
+  #tab-meter td.c-mode select { width:100%; }
+  #tab-meter td.c-pw { text-align:left; padding-left:18px; }
+  /* Name/IP/Typ/Rolle sind Text -- linksbuendig wie ihre Kopfzellen. */
+  #devBody > tr > td:nth-child(-n+4) { text-align:left; }
   .pos { color:var(--warn); }   /* Bezug        */
   .neg { color:var(--acc); }    /* Einspeisung  */
   .man { color:var(--man); }    /* manipuliert  */
@@ -124,8 +130,13 @@
   .tile .val  { font-size:20px; font-variant-numeric:tabular-nums; margin-top:2px; }
   .tile .foot { color:var(--mut); font-size:11px; margin-top:2px; min-height:1.25em; }
   .stale { opacity:.45; }
-  /* Neun Spalten passen auf kein Handy. Statt zu quetschen scrollt die Tabelle
-   * in sich -- die Seite selbst bleibt an der Bildschirmbreite. */
+  /* Breite Tabellen (bis zu zehn Spalten) passen auf kein Handy. Statt zu
+   * quetschen scrollt jede in sich -- die Seite selbst bleibt an der
+   * Bildschirmbreite. Betrifft alle mehrspaltigen Tabellen im Zaehler-Tab
+   * (Phasenuebersicht, Phasenmanipulation, Geraeteliste, Deye je Phase);
+   * anders als beim Register-Tab wird hier bewusst NICHT auf Karten
+   * umgebaut -- die Werte gehoeren spaltenweise zusammen und sollen als
+   * Tabelle vergleichbar bleiben, nicht als Fliesstext auseinanderfallen. */
   .xscroll { overflow-x:auto; }
   .xscroll > table { min-width:640px; }
 
@@ -167,7 +178,7 @@
 
 /* ---- iPhone / schmale Schirme ---------------------------------------
  * Ein Breakpoint. Der Zaehler-Tab bleibt bewusst unangetastet: seine
- * neunspaltige Tabelle scrollt per .xscroll in sich, das ist oben schon
+ * mehrspaltigen Tabellen scrollen per .xscroll in sich, das ist oben schon
  * so entschieden worden. Hier geht es um alles andere. */
   @media (max-width:640px) {
     body { padding-left:calc(12px + env(safe-area-inset-left));
@@ -176,19 +187,34 @@
     /* iOS Safari zoomt beim Fokus ungefragt in die Seite, sobald ein
        Bedienfeld kleiner als 16px rendert. Deshalb hier exakt 16px. */
     input, select, button { font-size:16px; }
+    input[type=file] { font-size:16px; }   /* eigener Selektor oben, sonst bleibt es bei 13px */
     button { min-height:44px; padding:8px 14px; }
     input, select { min-height:40px; }
 
-    header.hub { gap:8px 12px; }
-    .theme button { min-height:36px; padding:6px 12px; font-size:13px; }
+    /* System-Tab: lange Werte ("123 kB (Minimum seit Start: 98 kB)") brechen
+       rechtsbuendig um, statt die Zeile zu sprengen. */
+    .kv { flex-wrap:wrap; gap:0 8px; }
+    .kv b { margin-left:auto; text-align:right; overflow-wrap:anywhere; }
 
-    /* Drei Tabs nebeneinander statt umgebrochen, dabei fingergerecht hoch. */
-    nav.tabs { gap:4px; }
-    nav.tabs button { flex:1 1 auto; padding:10px 8px; font-size:13px; min-height:44px; }
+    header.hub { gap:8px 12px; }
+    header.hub a.ext { padding:8px 0; }               /* Fingerziel statt 12-px-Textzeile */
+    .theme button { min-height:40px; padding:6px 12px; font-size:13px; }
+    .pill { font-size:12px; }
+    .tile .foot { font-size:12px; }
+
+    /* Drei Tabs nebeneinander statt umgebrochen, dabei fingergerecht hoch.
+       flex-basis 0 + nowrap: bei 375 px teilen sie sich die Breite, statt
+       dass der dritte in eine zweite Zeile faellt. */
+    nav.tabs { gap:4px; flex-wrap:nowrap; }
+    nav.tabs button { flex:1 1 0; min-width:0; padding:10px 4px; font-size:12px; min-height:44px;
+                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    nav.tabs button.on { font-size:12px; }   /* 12 px: alle drei Titel passen bei 375 px ohne "..." */
 
     .card { padding:10px; }
     .formrow { gap:8px; }
-    .formrow label, .formrow .hint { flex:0 0 100%; }
+    /* Nur direkte Kinder: das Label neben der Checkbox in .sw ist ein eigener
+       Flex-Container und darf nicht auf 100 % gezwungen werden. */
+    .formrow > label, .formrow > .hint { flex:0 0 100%; }
     .num { flex:1 1 6.5em; width:auto; min-width:0; }
 
     /* Kein Scroll-Container im Scroll-Container: verschachteltes Wischen ist
@@ -215,6 +241,78 @@
 
     /* Bedeutung/Interpretation sind am Handy der Fliesstext der Karte. */
     #probeResult td.c-name, #probeResult td.c-interp { font-size:13px; }
+
+    /* ---- Zaehler-Tab: Tabellenzeilen werden Karten ----
+     * Seitliches Scrollen hat sich am Telefon nicht bewaehrt: genau die
+     * Spalten, um die es geht (an den Deye gesendet, Phasenleistung je
+     * Geraet, Wert der Manipulation), lagen ausserhalb des Bildes. Jede
+     * Zeile ist jetzt eine Karte, die erste Zelle ihr Titel, die uebrigen
+     * Zellen ein Raster aus Label (data-l, vom JS gesetzt) und Wert. */
+    #tab-meter .xscroll { overflow:visible; }
+    #tab-meter .xscroll > table { min-width:0; display:block; }
+    #tab-meter .xscroll thead { display:none; }
+    #tab-meter .xscroll tbody { display:block; }
+    #tab-meter .xscroll tbody > tr {
+      display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 12px;
+      border:1px solid var(--bd); border-radius:8px; padding:8px 10px; margin-bottom:8px;
+      background:var(--tbg); }
+    #tab-meter .xscroll tbody > tr.sum { background:var(--acc-soft); }
+    #tab-meter .xscroll tbody > tr > td {
+      display:block; border:0; padding:0; text-align:left; font-size:14px; min-width:0; }
+    #tab-meter .xscroll tbody > tr > td:first-child {
+      grid-column:1 / -1; font-size:14px; font-weight:600;
+      border-bottom:1px solid var(--bd); padding-bottom:4px; }
+    #tab-meter .xscroll td[data-l]::before {
+      content:attr(data-l); display:block; color:var(--mut); font-size:11px;
+      text-transform:uppercase; letter-spacing:.04em; margin-bottom:1px; }
+    #tab-meter .xscroll td:empty { display:none; }
+    #tab-meter .xscroll td.big { font-size:18px; }
+
+    /* Phasenuebersicht: gemessen und gesendet nebeneinander ganz oben, der
+       Rest darunter. Reihenfolge ueber order, das Markup bleibt Tabellenlogik. */
+    #phaseBody > tr > td:nth-child(4) { order:1; }   /* gemessen [W]  */
+    #phaseBody > tr > td:nth-child(7) { order:2; }   /* an Deye [W]   */
+    #phaseBody > tr > td:nth-child(2) { order:3; }   /* U             */
+    #phaseBody > tr > td:nth-child(3) { order:4; }   /* I             */
+    #phaseBody > tr > td:nth-child(8) { order:5; }   /* an Deye [A]   */
+    #phaseBody > tr > td:nth-child(5) { order:6; }   /* Sollwert      */
+    #phaseBody > tr > td:nth-child(6) { order:7; grid-column:1 / -1; }  /* Manipulation */
+
+    /* Manipulation: Auswahl volle Breite, Wert + Einheit in einer Zeile,
+       Wirkung als Fliesstext darunter. */
+    #manipBody > tr > td { grid-column:1 / -1; }
+    #manipBody > tr > td.c-val { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    #manipBody > tr > td.c-val::before { flex:0 0 100%; }
+    #manipBody > tr > td.c-val input { flex:1 1 8em; width:auto; }
+    #manipBody > tr > td.c-eff { font-size:12px; }
+
+    /* Geraete: Name + Status als Kopfzeile, darunter IP/Typ/Rolle, dann die
+       drei Phasen nebeneinander, Leistung und Alter zum Schluss. */
+    /* Jede Zelle bekommt ihren festen Platz -- die automatische Platzierung
+       schob die Statuspille ueber den Namen und verteilte den Rest je nach
+       Textlaenge anders. Zeile 1: Name + Status. Zeile 2: IP (zwei Drittel,
+       sonst zu lang) + Typ. Zeile 3: Rolle. Zeile 4: L1 L2 L3. Zeile 5:
+       Leistung + Alter. Die Meta-Zeilen sind Beiwerk, deshalb kleiner. */
+    #devBody > tr { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    #tab-meter #devBody > tr > td:first-child { grid-column:1 / 3; grid-row:1; }
+    #devBody > tr > td.c-st { grid-column:3; grid-row:1; justify-self:end;
+                              border-bottom:1px solid var(--bd); padding-bottom:4px; align-self:stretch; }
+    #devBody > tr > td:nth-child(2)  { grid-column:1 / 3; grid-row:2; }
+    #devBody > tr > td:nth-child(3)  { grid-column:3;     grid-row:2; }
+    #devBody > tr > td:nth-child(4)  { grid-column:1 / -1; grid-row:3; }
+    #devBody > tr > td:nth-child(6)  { grid-column:1; grid-row:4; }
+    #devBody > tr > td:nth-child(7)  { grid-column:2; grid-row:4; }
+    #devBody > tr > td:nth-child(8)  { grid-column:3; grid-row:4; }
+    #devBody > tr > td.c-pw          { grid-column:1 / 3; grid-row:5; padding-left:0; }
+    #devBody > tr > td:nth-child(10) { grid-column:3;     grid-row:5; }
+    #devBody > tr > td:nth-child(2), #devBody > tr > td:nth-child(3),
+    #devBody > tr > td:nth-child(4) { font-size:12px; color:var(--mut); }
+    #tab-meter #devBody > tr > td[colspan] { grid-column:1 / -1; grid-row:auto; }
+    /* Summenzeile: die Platzhalter fuer U/I tragen nichts. */
+    #phaseBody > tr.sum > td:nth-child(2), #phaseBody > tr.sum > td:nth-child(3) { display:none; }
+
+    /* Deye je Phase: drei Gruppen zu je drei Werten -> Dreierraster. */
+    #lvPhaseBody > tr { grid-template-columns:repeat(3,minmax(0,1fr)); }
   }
 </style></head>
 <body>
@@ -252,6 +350,7 @@
 
 <div class="card">
   <h2>Phasenübersicht</h2>
+  <div class="xscroll">
   <table>
     <thead>
       <tr class="grp">
@@ -269,6 +368,7 @@
     </thead>
     <tbody id="phaseBody"></tbody>
   </table>
+  </div>
   <p class="hint" style="margin:10px 0 0;">
     Vorzeichen wie beim Zähler: <span class="pos">+ = Netzbezug</span>,
     <span class="neg">&minus; = Einspeisung</span>. Spannung und Strom in der
@@ -292,6 +392,7 @@
     <label for="sp">Netz-Sollwert [W]</label>
     <input type="number" id="sp" step="10" min="-30000" max="30000">
   </div>
+  <div class="xscroll">
   <table>
     <thead><tr>
       <th style="width:64px;">Phase</th><th style="width:200px;text-align:left;">Modus</th>
@@ -299,6 +400,7 @@
     </tr></thead>
     <tbody id="manipBody"></tbody>
   </table>
+  </div>
   <div class="formrow" style="margin:14px 0 0;">
     <button class="primary" id="btnSave">Übernehmen</button>
     <button class="danger" id="btnOff">Sofort abschalten</button>
@@ -309,6 +411,7 @@
 
 <div class="card">
   <h2>Modbus-TCP Zähler / Geräte</h2>
+  <div class="xscroll">
   <table>
     <thead><tr>
       <th style="text-align:left;">Name</th><th style="text-align:left;">IP</th>
@@ -317,6 +420,7 @@
     </tr></thead>
     <tbody id="devBody"></tbody>
   </table>
+  </div>
   <p class="hint" style="margin:10px 0 0;">
     Eltako-Zähler liefern L1…L3 direkt (Eingangsregister 0…17). Beim Fronius
     kennt SunSpec <b>keine</b> Wirkleistung je Phase &ndash; nur Strom und
@@ -485,7 +589,15 @@
 /* ---------------- System & Update ---------------- */
 (function () {
   var S = document.getElementById("sysStatus");
-  function set(t) { S.textContent = t; }
+  function set(t, bad) { S.textContent = t; S.style.color = bad ? "var(--err)" : ""; }
+  var curBuild = null;   /* zuletzt gesehener Build, um nach dem OTA den Wechsel zu erkennen */
+  var busy = false;
+  function setBusy(b) {
+    busy = b;
+    ["btnFw", "btnFs", "btnRollback", "btnReboot"].forEach(function (id) {
+      document.getElementById(id).disabled = b;
+    });
+  }
 
   function fmtUptime(s) {
     s = s | 0;
@@ -499,6 +611,7 @@
   window.sysLoadInfo = function () {
     fetch("/ota", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
       var v = j.version + " (#" + j.build + ")";
+      curBuild = j.build;
       document.getElementById("sVer").textContent = v;
       document.getElementById("hubVer").textContent = v;
       document.getElementById("sFs").textContent  = "#" + j.fs_build;
@@ -518,31 +631,79 @@
         : "-";
       document.getElementById("sMac").textContent = j.mac;
       document.getElementById("sIdf").textContent = j.idf;
-    }).catch(function () { set("Geraet nicht erreichbar."); });
+    }).catch(function () { if (!busy) set("Geraet nicht erreichbar.", true); });
   };
 
+  /* Nach einem Firmware-OTA startet das Geraet neu und braucht mit WLAN ueber
+   * den C6 gut 10-20 s. Ein fester 4-s-Timer meldete deshalb nach JEDEM
+   * erfolgreichen Update "nicht erreichbar". Stattdessen /ota pollen, bis es
+   * antwortet, und dann sagen, ob der Build tatsaechlich gewechselt hat --
+   * bei PANIC hat der Rollback gegriffen und das alte Image laeuft weiter. */
+  function waitBack(oldBuild, tries) {
+    fetch("/ota", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
+      window.sysLoadInfo();
+      setBusy(false);
+      if (j.build !== oldBuild) {
+        set("Neustart fertig: Build #" + oldBuild + " \u2192 #" + j.build + " auf " + j.running +
+            " (Neustartgrund " + j.reset + ")");
+      } else {
+        set("Geraet ist wieder da, laeuft aber noch Build #" + j.build + " -- Neustartgrund " + j.reset +
+            ". Bei PANIC hat der Rollback gegriffen: Update einfach noch einmal senden.", true);
+      }
+    }).catch(function () {
+      if (tries <= 0) { setBusy(false); set("Geraet meldet sich nach 90 s nicht. Seite neu laden oder Recovery-Seite pruefen.", true); return; }
+      set("Geraet startet neu \u2026 warte auf Antwort (" + tries + ")");
+      setTimeout(function () { waitBack(oldBuild, tries - 1); }, 3000);
+    });
+  }
+
   function flash(inputId, url, barId) {
+    if (busy) return;
     var f = document.getElementById(inputId).files[0];
     if (!f) { set("Bitte zuerst eine Datei waehlen."); return; }
+    var isFw = (url === "/ota");
+    /* /ota/fs nimmt jede Datei, die in die Partition passt -- eine firmware.bin
+     * dort loescht das Dateisystem und schreibt Muell. Beim Namen nachfragen. */
+    if ((isFw && /storage|spiffs/i.test(f.name)) || (!isFw && /firmware/i.test(f.name))) {
+      if (!confirm("Der Dateiname \u201e" + f.name + "\u201c passt nicht zum Ziel (" +
+                   (isFw ? "Firmware" : "Dateisystem") + "). Trotzdem flashen?")) return;
+    }
     var bar = document.getElementById(barId), fill = bar.firstElementChild;
     bar.style.display = "block"; fill.style.width = "0";
     set("Lade " + f.name + " (" + Math.round(f.size / 1024) + " KB) hoch \u2026");
+    setBusy(true);
     var xhr = new XMLHttpRequest();
     xhr.open("POST", url, true);
     xhr.upload.onprogress = function (e) {
-      if (e.lengthComputable) fill.style.width = (e.loaded / e.total * 100) + "%";
+      if (!e.lengthComputable) return;
+      fill.style.width = (e.loaded / e.total * 100) + "%";
+      if (e.loaded === e.total) set("Hochgeladen \u2013 Geraet prueft und schreibt \u2026");
     };
-    xhr.onload  = function () { set(xhr.responseText || ("Fertig (HTTP " + xhr.status + ")")); setTimeout(window.sysLoadInfo, 4000); };
-    xhr.onerror = function () { set("Verbindung getrennt \u2013 das Geraet startet vermutlich neu. Seite gleich neu laden."); };
+    xhr.onload = function () {
+      if (xhr.status >= 400) {
+        fill.style.width = "0"; setBusy(false);
+        set("Fehler (HTTP " + xhr.status + "): " + xhr.responseText, true);
+        return;
+      }
+      set(xhr.responseText || ("Fertig (HTTP " + xhr.status + ")"));
+      if (isFw) setTimeout(function () { waitBack(curBuild, 30); }, 3000);
+      else { setBusy(false); window.sysLoadInfo(); }
+    };
+    xhr.onerror = function () {
+      set("Verbindung getrennt \u2013 das Geraet startet vermutlich neu \u2026");
+      if (isFw) setTimeout(function () { waitBack(curBuild, 30); }, 3000); else setBusy(false);
+    };
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
     xhr.send(f);
   }
 
   function act(url, msg) {
-    if (!confirm(msg)) return;
+    if (busy || !confirm(msg)) return;
     set("\u2026");
+    setBusy(true);
     fetch(url, { method: "POST" }).then(function (r) { return r.text(); })
-      .then(set).catch(function () { set("Befehl gesendet, Geraet startet neu \u2026"); });
+      .then(function (t) { set(t); setTimeout(function () { waitBack(curBuild, 30); }, 3000); })
+      .catch(function () { set("Befehl gesendet, Geraet startet neu \u2026"); setTimeout(function () { waitBack(curBuild, 30); }, 3000); });
   }
 
   document.getElementById("btnFw").addEventListener("click", function () { flash("fwFile", "/ota", "fwBar"); });
@@ -575,11 +736,21 @@ let last = null;
 
 function fmt(x, dec) {
   if (x === undefined || x === null || !isFinite(x)) return "–";
-  return x.toFixed(dec === undefined ? 0 : dec);
+  const s = x.toFixed(dec === undefined ? 0 : dec);
+  return /^-0(\.0+)?$/.test(s) ? s.slice(1) : s;   /* (-0.4).toFixed(0) ist "-0" */
+}
+/* Servertext (Geraetename, IP, Rolle) ist Nutzereingabe und kommt nur JSON-,
+ * nicht HTML-escaped -- vor innerHTML immer hier durch. */
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 function cls(w) { return w > 0.5 ? "pos" : (w < -0.5 ? "neg" : ""); }
-function td(txt, klass) {
-  return '<td' + (klass ? ' class="' + klass + '"' : '') + '>' + txt + '</td>';
+/* data-l ist der Spaltenname fuer das Handy: dort verschwindet der Tabellen-
+ * kopf und jede Zeile wird eine Karte, die Zelle traegt ihr Label selbst. */
+function td(txt, klass, label) {
+  return '<td' + (klass ? ' class="' + klass + '"' : '') +
+         (label ? ' data-l="' + label + '"' : '') + '>' + txt + '</td>';
 }
 
 /* ---------- Manipulations-Formular (einmal aufbauen) ---------- */
@@ -589,9 +760,9 @@ function buildManipRows() {
     let opts = MODES.map(m => '<option value="' + m.v + '">' + m.label + '</option>').join("");
     h += '<tr>' +
          '<td><b>' + PH[k] + '</b></td>' +
-         '<td style="text-align:left;"><select id="m' + k + '" style="width:100%;">' + opts + '</select></td>' +
-         '<td><input type="number" id="v' + k + '" step="10" value="0"> <span class="hint" id="u' + k + '"></span></td>' +
-         '<td style="text-align:left;" class="hint" id="h' + k + '"></td>' +
+         '<td class="c-mode" data-l="Modus"><select id="m' + k + '">' + opts + '</select></td>' +
+         '<td class="c-val" data-l="Wert"><input type="number" id="v' + k + '" step="10" min="-30000" max="30000" value="0"> <span class="hint" id="u' + k + '"></span></td>' +
+         '<td class="c-eff hint" id="h' + k + '"></td>' +
          '</tr>';
   }
   $("manipBody").innerHTML = h;
@@ -654,20 +825,20 @@ function render(d, live) {
     const mm = m.en ? m.ph[k] : { mode: 0, val: 0 };
     h += "<tr>" +
       "<td><b>" + PH[k] + "</b></td>" +
-      td(fmt(s.per_phase && d.gridPh ? d.gridPh.v[k] : NaN, 1)) +
-      td(fmt(s.per_phase && d.gridPh ? d.gridPh.i[k] : NaN, 2)) +
-      td('<span class="' + cls(meas) + '">' + fmt(meas) + "</span>", "big") +
-      td(fmt(-spPhase)) +
-      td('<span class="' + (mm.mode ? "man" : "") + '">' + manipText(mm.mode, mm.val) + "</span>") +
-      td('<span class="' + cls(out) + '">' + fmt(out) + "</span>", "big") +
-      td(fmt(s.i[k], 2)) +
+      td(fmt(s.per_phase && d.gridPh ? d.gridPh.v[k] : NaN, 1), "", "U [V]") +
+      td(fmt(s.per_phase && d.gridPh ? d.gridPh.i[k] : NaN, 2), "", "I [A]") +
+      td('<span class="' + cls(meas) + '">' + fmt(meas) + "</span>", "big", "gemessen [W]") +
+      td(fmt(-spPhase), "", "Sollwert [W]") +
+      td('<span class="' + (mm.mode ? "man" : "") + '">' + manipText(mm.mode, mm.val) + "</span>", "", "Manipulation") +
+      td('<span class="' + cls(out) + '">' + fmt(out) + "</span>", "big", "an Deye [W]") +
+      td(fmt(s.i[k], 2), "", "an Deye [A]") +
       "</tr>";
   }
   h += '<tr class="sum">' +
     "<td>Summe</td><td>–</td><td>–</td>" +
-    td('<span class="' + cls(s.real_total) + '">' + fmt(s.real_total) + "</span>", "big") +
-    td(fmt(-s.sp)) + td("") +
-    td('<span class="' + cls(s.total) + '">' + fmt(s.total) + "</span>", "big") +
+    td('<span class="' + cls(s.real_total) + '">' + fmt(s.real_total) + "</span>", "big", "gemessen [W]") +
+    td(fmt(-s.sp), "", "Sollwert [W]") + td("") +
+    td('<span class="' + cls(s.total) + '">' + fmt(s.total) + "</span>", "big", "an Deye [W]") +
     td("") + "</tr>";
   $("phaseBody").innerHTML = h;
 
@@ -709,16 +880,16 @@ function render(d, live) {
   for (const g of d.meters) {
     const p = g.phases ? g.p : null;
     dh += "<tr>" +
-      "<td>" + (g.name || g.mfr) + "</td>" +
-      "<td>" + g.ip + ":" + g.slave + "</td>" +
-      "<td>" + g.mfr + "</td>" +
-      "<td>" + g.role + "</td>" +
-      td(g.conn ? '<span class="pill ok">ok</span>' : '<span class="pill bad">weg</span>') +
-      td(p ? '<span class="' + cls(p[0]) + '">' + fmt(p[0]) + "</span>" : "–") +
-      td(p ? '<span class="' + cls(p[1]) + '">' + fmt(p[1]) + "</span>" : "–") +
-      td(p ? '<span class="' + cls(p[2]) + '">' + fmt(p[2]) + "</span>" : "–") +
-      '<td style="text-align:left;padding-left:18px;">' + powerCell(g) + "</td>" +
-      td(g.phases ? (g.age / 1000).toFixed(1) + " s" : "–") +
+      "<td>" + esc(g.name || g.mfr) + "</td>" +
+      td(esc(g.ip) + ":" + g.slave, "", "IP") +
+      td(esc(g.mfr), "", "Typ") +
+      td(esc(g.role), "", "Rolle") +
+      td(g.conn ? '<span class="pill ok">ok</span>' : '<span class="pill bad">weg</span>', "c-st") +
+      td(p ? '<span class="' + cls(p[0]) + '">' + fmt(p[0]) + "</span>" : "–", "", "L1 [W]") +
+      td(p ? '<span class="' + cls(p[1]) + '">' + fmt(p[1]) + "</span>" : "–", "", "L2 [W]") +
+      td(p ? '<span class="' + cls(p[2]) + '">' + fmt(p[2]) + "</span>" : "–", "", "L3 [W]") +
+      td(powerCell(g), "c-pw", "Leistung") +
+      td(g.phases ? (g.age / 1000).toFixed(1) + " s" : "–", "", "Phasen-Alter") +
       "</tr>";
   }
   /* Der Deye haengt nicht am Modbus-TCP, sondern am RTU-Master-Bus -- er
@@ -728,16 +899,15 @@ function render(d, live) {
     const iv = live.inv, on = live.online && (live.blocks & BLK.out);
     dh += '<tr' + (on ? "" : ' class="stale"') + ">" +
       "<td>Deye (AC-Ausgang)</td>" +
-      '<td class="hint">RS485 / RTU</td>' +
-      "<td>Deye</td>" +
-      "<td>Wechselrichter</td>" +
-      td(live.online ? '<span class="pill ok">ok</span>' : '<span class="pill bad">weg</span>') +
-      td(span(cls(iv.p[0]), fmt(iv.p[0]))) +
-      td(span(cls(iv.p[1]), fmt(iv.p[1]))) +
-      td(span(cls(iv.p[2]), fmt(iv.p[2]))) +
-      '<td style="text-align:left;padding-left:18px;">' +
-        span(cls(iv.total), fmt(iv.total) + " W") + "</td>" +
-      td((live.age / 1000).toFixed(1) + " s") +
+      td("RS485 / RTU", "hint", "IP") +
+      td("Deye", "", "Typ") +
+      td("Wechselrichter", "", "Rolle") +
+      td(live.online ? '<span class="pill ok">ok</span>' : '<span class="pill bad">weg</span>', "c-st") +
+      td(span(cls(iv.p[0]), fmt(iv.p[0])), "", "L1 [W]") +
+      td(span(cls(iv.p[1]), fmt(iv.p[1])), "", "L2 [W]") +
+      td(span(cls(iv.p[2]), fmt(iv.p[2])), "", "L3 [W]") +
+      td(span(cls(iv.total), fmt(iv.total) + " W"), "c-pw", "Leistung") +
+      td((live.age / 1000).toFixed(1) + " s", "", "Phasen-Alter") +
       "</tr>";
   }
   $("devBody").innerHTML = dh || '<tr><td colspan="10" class="hint">Kein Modbus-TCP-Gerät konfiguriert.</td></tr>';
@@ -817,24 +987,24 @@ function renderLive(l, served) {
   let h = "";
   for (let k = 0; k < 3; k++) {
     h += "<tr><td><b>" + PH[k] + "</b></td>" +
-      td(span(cls(gr.ct[k]), fmt(gr.ct[k])), "big" + gs) +
-      td(span(cls(gr.inner[k]), fmt(gr.inner[k])), gs.trim()) +
-      td(span(cls(gr.p[k]),     fmt(gr.p[k])),     gs.trim()) +
-      td(fmt(inv.v[k], 1), os.trim()) +
-      td(fmt(inv.i[k], 2), os.trim()) +
-      td(span(cls(inv.p[k]), fmt(inv.p[k])), "big" + os) +
-      td(fmt(ld.p[k]),   os.trim()) +
-      td(fmt(ld.ups[k]), os.trim()) +
+      td(span(cls(gr.ct[k]), fmt(gr.ct[k])), "big" + gs, "Netz CT [W]") +
+      td(span(cls(gr.inner[k]), fmt(gr.inner[k])), gs.trim(), "Netz intern [W]") +
+      td(span(cls(gr.p[k]),     fmt(gr.p[k])),     gs.trim(), "Netz gesamt [W]") +
+      td(fmt(inv.v[k], 1), os.trim(), "WR U [V]") +
+      td(fmt(inv.i[k], 2), os.trim(), "WR I [A]") +
+      td(span(cls(inv.p[k]), fmt(inv.p[k])), "big" + os, "WR P [W]") +
+      td(fmt(ld.p[k]),   os.trim(), "Last [W]") +
+      td(fmt(ld.ups[k]), os.trim(), "Backup [W]") +
       "</tr>";
   }
   h += '<tr class="sum"><td>Summe</td>' +
-    td(span(cls(gr.ct_total), fmt(gr.ct_total)), "big" + gs) +
-    td(span(cls(gr.inner_total), fmt(gr.inner_total)), gs.trim()) +
-    td(span(cls(gr.total),       fmt(gr.total)),       gs.trim()) +
-    td("–") + td("–") +
-    td(span(cls(inv.total), fmt(inv.total)), "big" + os) +
-    td(fmt(ld.total),     os.trim()) +
-    td(fmt(ld.ups_total), os.trim()) +
+    td(span(cls(gr.ct_total), fmt(gr.ct_total)), "big" + gs, "Netz CT [W]") +
+    td(span(cls(gr.inner_total), fmt(gr.inner_total)), gs.trim(), "Netz intern [W]") +
+    td(span(cls(gr.total),       fmt(gr.total)),       gs.trim(), "Netz gesamt [W]") +
+    td("–", "", "WR U [V]") + td("–", "", "WR I [A]") +
+    td(span(cls(inv.total), fmt(inv.total)), "big" + os, "WR P [W]") +
+    td(fmt(ld.total),     os.trim(), "Last [W]") +
+    td(fmt(ld.ups_total), os.trim(), "Backup [W]") +
     "</tr>";
   $("lvPhaseBody").innerHTML = h;
 
@@ -844,17 +1014,22 @@ function renderLive(l, served) {
 /* Nacheinander, nicht parallel: der :80-Server hat vier Sockets, und zwei
  * gleichzeitige Anfragen pro Sekunde wuerden dem Browser eine zweite
  * Verbindung aufmachen, die neben OTA-Upload und Register-Export fehlt. */
+/* Timeout pro Anfrage; ohne haengt ein Poll bei einem neustartenden Geraet
+ * minutenlang und blockiert den Socket. AbortSignal.timeout fehlt in aelteren
+ * Safaris -- dann eben ohne. */
+function sig(ms) { try { return AbortSignal.timeout(ms); } catch (e) { return undefined; } }
+
 async function poll() {
   /* Live-Werte zuerst: die Geraetetabelle in render() zeigt den Deye mit an. */
   let live = null;
   try {
-    const rl = await fetch("/api/deye/live", { cache: "no-store" });
+    const rl = await fetch("/api/deye/live", { cache: "no-store", signal: sig(4000) });
     if (rl.ok) live = await rl.json();
   } catch (e) { /* renderLive() meldet das gleich selbst */ }
 
   let served = null;
   try {
-    const r = await fetch("/api/meter", { cache: "no-store" });
+    const r = await fetch("/api/meter", { cache: "no-store", signal: sig(4000) });
     const d = await r.json();
     /* U/I der Phasentabelle kommen vom Netz-Zähler selbst (Rolle "Netz"). */
     d.gridPh = d.meters.find(g => g.phases && g.grid) || null;
@@ -881,17 +1056,37 @@ async function send(params, msg) {
   setTimeout(() => { $("saveMsg").textContent = ""; }, 4000);
 }
 
+/* Leere oder unlesbare Felder gehen NICHT als 0 an den Wechselrichter: ein
+ * geloeschter Sollwert waere sonst ein Netz-Sollwert von 0 W. Die Meldung
+ * steht am Feld, gesendet wird nichts. Nur Bereich und Lesbarkeit werden
+ * geprueft -- step="10" bleibt Schrittweite der Pfeile, kein Zwang. */
+function formValid() {
+  const fields = [$("sp")];
+  for (let k = 0; k < 3; k++) if (!$("v" + k).disabled) fields.push($("v" + k));
+  for (const el of fields) {
+    const v = el.validity;
+    if (el.value.trim() === "" || v.badInput || v.rangeOverflow || v.rangeUnderflow) {
+      el.focus();
+      $("saveMsg").textContent = "Bitte Zahl pruefen: " +
+        (el.id === "sp" ? "Netz-Sollwert (±30000 W)" : "Wert " + PH[+el.id.slice(1)]);
+      return false;
+    }
+  }
+  return true;
+}
+
 function formParams() {
-  const q = ["en=" + ($("mEn").checked ? 1 : 0), "sp=" + (parseInt($("sp").value, 10) || 0)];
+  const q = ["en=" + ($("mEn").checked ? 1 : 0), "sp=" + Math.round(+$("sp").value)];
   for (let k = 0; k < 3; k++) {
     q.push("m" + (k + 1) + "=" + $("m" + k).value);
-    q.push("v" + (k + 1) + "=" + (parseFloat($("v" + k).value) || 0));
+    /* eine Nachkommastelle -- mehr speichert die Firmware nicht (%.1f) */
+    q.push("v" + (k + 1) + "=" + (Math.round(+$("v" + k).value * 10) / 10));
   }
   return q.join("&");
 }
 
 buildManipRows();
-$("btnSave").addEventListener("click", () => send(formParams()));
+$("btnSave").addEventListener("click", () => { if (formValid()) send(formParams()); });
 $("btnOff").addEventListener("click", () => {
   $("mEn").checked = false;
   send("en=0", "Manipulation abgeschaltet");
@@ -905,12 +1100,28 @@ $("btnReset").addEventListener("click", () => {
 
 /* Nur im sichtbaren Tab pollen: der :80-Server hat vier Sockets, und ein
  * Sekundentakt im Hintergrund wuerde beim Register-Export oder einem OTA-Upload
- * genau den Slot wegnehmen, den die gerade brauchen. */
-let timer = null;
+ * genau den Slot wegnehmen, den die gerade brauchen.
+ *
+ * Selbst nachziehend statt setInterval: der naechste Poll startet erst, wenn
+ * der vorige fertig ist. Mit setInterval stapelten sich bei einem langsamen
+ * Geraet (OTA laeuft, RTU-Bus belegt) offene Anfragen, bis alle vier Sockets
+ * dieser Seite gehoerten -- und Antworten kamen in falscher Reihenfolge an.
+ * Jede Anfrage hat ausserdem ein Timeout, und ein Browser-Tab im Hintergrund
+ * (document.hidden) pollt gar nicht. */
+let polling = false, pollTimer = null, inFlight = false;
+async function pollLoop() {
+  if (!polling || inFlight) return;
+  inFlight = true;
+  try { if (!document.hidden) await poll(); } finally { inFlight = false; }
+  if (polling) pollTimer = setTimeout(pollLoop, 1000);
+}
 window.meterTabVisible = function (visible) {
-  if (visible && !timer) { poll(); timer = setInterval(poll, 1000); }
-  if (!visible && timer) { clearInterval(timer); timer = null; }
+  if (visible && !polling) { polling = true; pollLoop(); }
+  if (!visible && polling) { polling = false; clearTimeout(pollTimer); pollTimer = null; }
 };
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && polling) { clearTimeout(pollTimer); pollLoop(); }
+});
 })();
 </script>
 
@@ -1379,7 +1590,7 @@ function renderInterp(info, v) {
     let rows = '';
     for (const k of Object.keys(info.options)) {
       const active = (+k === v);
-      const bg = active ? 'background:#3aa67533;color:#3aa675;font-weight:600;' : 'color:#9bb1d1;';
+      const bg = active ? 'background:var(--acc-soft);color:var(--acc);font-weight:600;' : 'color:var(--link);';
       rows += '<tr style="' + bg + '"><td style="padding:1px 6px;">' + k + '</td>'
             + '<td style="padding:1px 6px;">' + info.options[k] + '</td></tr>';
     }
@@ -1398,7 +1609,7 @@ async function probeRead(){
   const totalCount = +document.getElementById('probeCount').value;
   const status = document.getElementById('probeStatus');
   const tbody  = document.querySelector('#probeResult tbody');
-  status.textContent = 'lese...'; status.style.color = '#d4823b';
+  status.textContent = 'lese...'; status.style.color = 'var(--warn)';
   tbody.innerHTML = '';
 
   const CHUNK = 50;   // Bloecke -> werden zusammengefuegt (Backend-Limit 64)
@@ -1418,7 +1629,7 @@ async function probeRead(){
       const j = await r.json();
       if (!j.ok) {
         status.textContent = 'FEHLER bei Adresse ' + curAddr + ' (bereits ' + allData.length + ' gelesen)';
-        status.style.color = '#d44b3b';
+        status.style.color = 'var(--err)';
         break;
       }
       for (const v of j.data) allData.push(v);
@@ -1450,11 +1661,11 @@ async function probeRead(){
     if (allData.length === totalCount) {
       const known = Object.keys(REG_INFO).filter(a => a >= startAddr && a < startAddr + allData.length).length;
       status.textContent = allData.length + ' Register gelesen (' + known + ' bekannt' + (totalChunks > 1 ? ', ' + totalChunks + ' Bloecke' : '') + ')';
-      status.style.color = '#3aa675';
+      status.style.color = 'var(--acc)';
     }
   } catch (e){
     status.textContent = 'Fehler: ' + e;
-    status.style.color = '#d44b3b';
+    status.style.color = 'var(--err)';
   }
 }
 
@@ -1463,15 +1674,15 @@ async function probeWrite(){
   const val  = +document.getElementById('wrVal').value;
   // Einzel-Register: ohne Rueckfrage direkt schreiben (Massen-Import fragt weiter).
   const status = document.getElementById('probeStatus');
-  status.textContent = 'schreibe...'; status.style.color = '#d4823b';
+  status.textContent = 'schreibe...'; status.style.color = 'var(--warn)';
   try {
-    const r = await fetch('/deye/write?addr=' + addr + '&val=' + val);
+    const r = await fetch('/deye/write?addr=' + addr + '&val=' + val, {cache:'no-store'});
     const j = await r.json();
     status.textContent = j.ok ? ('OK -> Adr ' + addr + ' = ' + val) : 'FEHLER';
-    status.style.color = j.ok ? '#3aa675' : '#d44b3b';
+    status.style.color = j.ok ? 'var(--acc)' : 'var(--err)';
   } catch (e){
     status.textContent = 'Fehler: ' + e;
-    status.style.color = '#d44b3b';
+    status.style.color = 'var(--err)';
   }
 }
 
@@ -1540,9 +1751,9 @@ async function exportRegs(){
   const to   = +document.getElementById('expTo').value;
   const st   = document.getElementById('ioStatus');
   if (!Number.isInteger(from) || !Number.isInteger(to) || to < from || from < 0 || to > 65535){
-    st.textContent = 'Bereich ungueltig'; st.style.color = '#d44b3b'; return;
+    st.textContent = 'Bereich ungueltig'; st.style.color = 'var(--err)'; return;
   }
-  st.style.color = '#d4823b';
+  st.style.color = 'var(--warn)';
   const total = to - from + 1;
   try{
     const rows = await readRangeAdaptive(from, to, (done)=>{
@@ -1569,9 +1780,9 @@ async function exportRegs(){
     a.href = url; a.download = fname; document.body.appendChild(a); a.click();
     setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1500);
     st.textContent = 'Export: ' + readN + '/' + total + ' Register gelesen -> ' + fname;
-    st.style.color = '#3aa675';
+    st.style.color = 'var(--acc)';
   }catch(e){
-    st.textContent = 'Export-Fehler: ' + e; st.style.color = '#d44b3b';
+    st.textContent = 'Export-Fehler: ' + e; st.style.color = 'var(--err)';
   }
 }
 async function importRegs(input){
@@ -1580,10 +1791,10 @@ async function importRegs(input){
   input.value = '';                       // erlaubt erneutes Waehlen derselben Datei
   if (!file) return;
   let text;
-  try{ text = await file.text(); }catch(e){ st.textContent='Datei-Fehler: '+e; st.style.color='#d44b3b'; return; }
+  try{ text = await file.text(); }catch(e){ st.textContent='Datei-Fehler: '+e; st.style.color='var(--err)'; return; }
 
   let lines = text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(l => l.trim().length && l[0] !== '#');
-  if (!lines.length){ st.textContent='Datei leer'; st.style.color='#d44b3b'; return; }
+  if (!lines.length){ st.textContent='Datei leer'; st.style.color='var(--err)'; return; }
   const sep = (lines[0].indexOf(';') >= 0) ? ';' : ',';
   let addrIdx = 0, valIdx = 1, start = 0;
   const head = lines[0].split(sep).map(s => s.trim().toLowerCase());
@@ -1610,20 +1821,20 @@ async function importRegs(input){
     if (addr < 0 || addr > 65535) continue;
     items.push({addr, val: ((val % 65536) + 65536) % 65536});
   }
-  if (!items.length){ st.textContent='Keine gueltigen Zeilen gefunden (Spalten addr / signed?)'; st.style.color='#d44b3b'; return; }
+  if (!items.length){ st.textContent='Keine gueltigen Zeilen gefunden (Spalten addr / signed?)'; st.style.color='var(--err)'; return; }
 
   if (!confirm('ACHTUNG: ' + items.length + ' Register werden per FC16 in den Wechselrichter GESCHRIEBEN.\n'
              + 'Falsche Werte koennen den WR fehlkonfigurieren.\n\nFortfahren?')){
-    st.textContent='Import abgebrochen'; st.style.color='#8a8f99'; return;
+    st.textContent='Import abgebrochen'; st.style.color='var(--mut)'; return;
   }
-  st.style.color = '#d4823b';
+  st.style.color = 'var(--warn)';
   let okN=0, failN=0;
   for (let i=0;i<items.length;i++){
     const it = items[i];
     st.textContent = 'schreibe ' + (i+1) + '/' + items.length + '  Adr ' + it.addr + ' = ' + it.val
                    + '   (ok ' + okN + ', Fehler ' + failN + ')';
     try{
-      const r = await fetch('/deye/write?addr=' + it.addr + '&val=' + it.val);
+      const r = await fetch('/deye/write?addr=' + it.addr + '&val=' + it.val, {cache:'no-store'});
       const j = await r.json();
       if (j.ok) okN++; else failN++;
     }catch(e){ failN++; }
@@ -1631,7 +1842,7 @@ async function importRegs(input){
   }
   st.textContent = 'Import fertig: ' + okN + ' geschrieben, ' + failN + ' Fehler (von ' + items.length
                  + ') — zur Kontrolle erneut exportieren.';
-  st.style.color = failN ? '#d4823b' : '#3aa675';
+  st.style.color = failN ? 'var(--warn)' : 'var(--acc)';
 }
 
 // ---- ziehbare Spaltenbreiten (Probe-Tabelle) ----

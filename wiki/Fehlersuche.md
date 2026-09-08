@@ -85,7 +85,10 @@ Das ist kein Fehler, sondern Absicht: die Quelle ist weg (Gerät aus, entfernt o
 Ein langsam mitwachsender Zähler ist auf so einer Leitung völlig normal — elektrische Störungen gibt es immer, und eine kaputte Nachricht wird einfach weggeworfen. Wächst er aber ähnlich schnell wie der Zähler der erfolgreichen Abfragen, stimmt etwas mit Abschlusswiderständen, Masse, Baudrate oder Leitungsführung nicht.
 
 **Der Deye meldet „Zähler verloren".**
-Unser gefälschter Zähler antwortet nicht. Prüfen: ist der Bus eingeschaltet, steht er auf *Slave*, und stimmt die Slave-ID? Der Slave-Zähler im Menükopf muss steigen — wenn nicht, kommen die Fragen des Deye nicht bei uns an.
+Unser gefälschter Zähler antwortet nicht. Prüfen: ist der Bus eingeschaltet, steht er auf *Slave*, und stimmt die Slave-ID? Der Slave-Zähler im Menükopf muss steigen — wenn nicht, kommen die Fragen des Deye nicht bei uns an. Auf `/deye` heißt derselbe Zähler „Anfragen vom Deye"; im Normalbetrieb zählt er mehrmals pro Sekunde.
+
+**Der Zähler bleibt bei 0, obwohl Verdrahtung und Einstellungen stimmen — und ein Neustart hilft nicht.**
+Dann das Display einmal **komplett stromlos** machen (Stecker ziehen, nicht nur neu starten). Das ist einmal genau so passiert: nach einer minutenlangen Boot-Schleife (fehlgeschlagenes Firmware-Experiment) blieb der Empfänger des Slave-Transceivers dauerhaft auf 0 hängen — die Leitung zeigte keine einzige Flanke mehr, auch nicht, als die Firmware ihre Pins komplett freigab. Rund 40 Warmstarts (Reset-Taste, Neustart nach Update) änderten daran nichts; Strom weg, Strom dran, und der Deye fragte sofort wieder. Der Master-Bus auf dem zweiten Transceiver lief die ganze Zeit — dass sich Register lesen lassen, sagt also nichts über den Zähler-Bus aus.
 
 **Der Deye regelt nicht auf den eingestellten Sollwert.**
 Sehr wahrscheinlich meldet die Emulation gerade 0 Watt, weil **kein frischer Netzmesswert** vorliegt. Mögliche Ursachen: kein Gerät mit der Rolle `Netz-Zaehler` eingerichtet, dieses Gerät antwortet nicht, oder die Geräteliste wurde eben gespeichert (dann gilt der Wert bis zum ersten Lesen absichtlich als ungültig).

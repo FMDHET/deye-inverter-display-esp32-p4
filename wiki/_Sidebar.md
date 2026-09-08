@@ -29,6 +29,7 @@
 **Wenn es klemmt**
 
 * [Fehlersuche](Fehlersuche)
+* [Code-Review 09/2026](Code-Review-2026-09) — offene Funde
 
 ---
 

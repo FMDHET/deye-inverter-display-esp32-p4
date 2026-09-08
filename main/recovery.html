@@ -16,20 +16,24 @@ if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)
      DUNKLER Schrift: Blau/Orange/Rot sind Mitteltoene, weisse Schrift darauf
      lag bei 2.1-3.7:1, dunkle schafft 7-9:1 -- auf hell wie auf dunkel. */
   :root{color-scheme:light;--bg:#f2f4f7;--card:#ffffff;--fg:#1b1f27;--mut:#5a6270;
-      --bd:#dde1e7;--bdi:#7f889a;--inp:#ffffff;--ghost:#e8ebf0;--barbg:#dde1e7;--focus:#1f5fbf}
+      --bd:#dde1e7;--bdi:#7f889a;--inp:#ffffff;--ghost:#e8ebf0;--barbg:#dde1e7;--focus:#1f5fbf;--err:#b42318}
   @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#0b0d10;--card:#1c1f24;--fg:#e5e7eb;--mut:#9aa0a8;
-      --bd:#3a4048;--bdi:#697482;--inp:#22262d;--ghost:#2a2e35;--barbg:#2a2e35;--focus:#4ea8ff}}
+      --bd:#3a4048;--bdi:#697482;--inp:#22262d;--ghost:#2a2e35;--barbg:#2a2e35;--focus:#4ea8ff;--err:#f2705f}}
   :root[data-theme="dark"]{color-scheme:dark;--bg:#0b0d10;--card:#1c1f24;--fg:#e5e7eb;--mut:#9aa0a8;
-      --bd:#3a4048;--bdi:#697482;--inp:#22262d;--ghost:#2a2e35;--barbg:#2a2e35;--focus:#4ea8ff}
+      --bd:#3a4048;--bdi:#697482;--inp:#22262d;--ghost:#2a2e35;--barbg:#2a2e35;--focus:#4ea8ff;--err:#f2705f}
   body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--fg);margin:0;padding:18px;max-width:620px;margin:0 auto}
   h1{font-size:21px;margin:.2em 0}
   h2{font-size:15px;color:var(--mut);margin:1.4em 0 .4em;font-weight:600}
   .card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin:10px 0}
-  .kv{display:flex;justify-content:space-between;font-size:14px;padding:2px 0}
+  .kv{display:flex;justify-content:space-between;flex-wrap:wrap;gap:0 8px;font-size:14px;padding:2px 0}
   .kv span:first-child{color:var(--mut)}
-  input[type=file]{width:100%;font-size:14px;margin:6px 0;color:var(--fg);
+  .kv b{margin-left:auto;text-align:right;overflow-wrap:anywhere}
+  .kv b.bad{color:var(--err)}
+  /* 16px: darunter zoomt iOS Safari beim Antippen in die Seite. */
+  input[type=file]{width:100%;font-size:16px;margin:6px 0;color:var(--fg);
                    background:var(--inp);border:1px solid var(--bdi);border-radius:8px;padding:8px}
-  button{font-size:15px;padding:11px 14px;border-radius:9px;border:none;width:100%;margin:6px 0;font-weight:600;cursor:pointer}
+  button{font-size:16px;padding:11px 14px;border-radius:9px;border:none;width:100%;margin:6px 0;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.5;cursor:default}
   .primary{background:#4ea8ff;color:#0b0d10}
   .warn{background:#f5a23a;color:#0b0d10}
   .danger{background:#f07a70;color:#0b0d10}
@@ -38,6 +42,7 @@ if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)
   .bar{height:10px;background:var(--barbg);border-radius:6px;overflow:hidden;margin:6px 0;display:none}
   .bar>div{height:100%;width:0;background:#4cd97b;transition:width .15s}
   #status{font-size:14px;color:var(--mut);min-height:1.2em;margin-top:8px;white-space:pre-wrap}
+  #status.bad{color:var(--err)}
 </style>
 </head>
 <body>
@@ -45,9 +50,11 @@ if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)
 
   <div class="card" id="info">
     <div class="kv"><span>Version</span><b id="ver">&hellip;</b></div>
+    <div class="kv"><span>Dateisystem-Build</span><b id="fsb">&hellip;</b></div>
     <div class="kv"><span>Laufender Slot</span><b id="run">&hellip;</b></div>
     <div class="kv"><span>Ziel-Slot (OTA)</span><b id="tgt">&hellip;</b></div>
     <div class="kv"><span>Laufzeit</span><b id="upt">&hellip;</b></div>
+    <div class="kv"><span>Letzter Neustart</span><b id="rst">&hellip;</b></div>
     <div class="kv"><span>IDF</span><b id="idf">&hellip;</b></div>
   </div>
 
@@ -69,7 +76,14 @@ if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)
 
 <script>
   var S = document.getElementById('status');
-  function setStatus(t){ S.textContent = t; }
+  function setStatus(t, bad){ S.textContent = t; S.className = bad ? 'bad' : ''; }
+
+  var curBuild = null;   /* zuletzt gesehener Build -- um nach dem OTA den Wechsel zu erkennen */
+  var busy = false;
+  function setBusy(b){
+    busy = b;
+    document.querySelectorAll('button').forEach(function(x){ x.disabled = b; });
+  }
 
   function fmtUptime(s){
     s = s|0;
@@ -81,41 +95,86 @@ if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)
   }
 
   function loadInfo(){
-    fetch('/ota').then(function(r){return r.json();}).then(function(j){
+    return fetch('/ota', {cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+      curBuild = j.build;
       document.getElementById('ver').textContent = j.version + ' (#' + j.build + ')';
+      document.getElementById('fsb').textContent = (j.fs_build >= 0) ? '#' + j.fs_build : 'fehlt';
       document.getElementById('run').textContent = j.running;
       document.getElementById('tgt').textContent = j.target_slot;
       document.getElementById('upt').textContent = (j.uptime != null) ? fmtUptime(j.uptime) : '-';
+      /* SW = eigener Neustart nach Update, POWERON/EXT/USB harmlos -- der Rest ist ein Befund. */
+      var rst = j.reset || '-', bad = ['PANIC','INT_WDT','TASK_WDT','WDT','BROWNOUT'].indexOf(rst) >= 0;
+      var e = document.getElementById('rst'); e.textContent = rst; e.className = bad ? 'bad' : '';
       document.getElementById('idf').textContent = j.idf;
-    }).catch(function(){ setStatus('Geraet nicht erreichbar.'); });
+      return j;
+    });
+  }
+
+  /* Nach einem Firmware-OTA startet das Geraet neu und braucht mit WLAN ueber
+   * den C6 gut 10-20 s. Ein fester 4-s-Timer meldete deshalb nach JEDEM
+   * erfolgreichen Update "nicht erreichbar". Stattdessen pollen, bis es
+   * antwortet, und sagen, ob der Build tatsaechlich gewechselt hat -- bei
+   * PANIC hat der Rollback gegriffen und das alte Image laeuft weiter. */
+  function waitBack(oldBuild, tries){
+    loadInfo().then(function(j){
+      setBusy(false);
+      if (j.build !== oldBuild)
+        setStatus('Neustart fertig: Build #' + oldBuild + ' → #' + j.build + ' auf ' + j.running + ' (Neustartgrund ' + j.reset + ')');
+      else
+        setStatus('Geraet ist wieder da, laeuft aber noch Build #' + j.build + ' – Neustartgrund ' + j.reset +
+                  '. Bei PANIC hat der Rollback gegriffen: Update einfach noch einmal senden.', true);
+    }).catch(function(){
+      if (tries <= 0){ setBusy(false); setStatus('Geraet meldet sich nach 90 s nicht. Seite neu laden.', true); return; }
+      setStatus('Geraet startet neu … warte auf Antwort (' + tries + ')');
+      setTimeout(function(){ waitBack(oldBuild, tries - 1); }, 3000);
+    });
   }
 
   function flash(inputId, url, barId){
+    if (busy) return;
     var f = document.getElementById(inputId).files[0];
     if(!f){ setStatus('Bitte zuerst eine Datei waehlen.'); return; }
+    var isFw = (url === '/ota');
+    /* /ota/fs nimmt jede Datei, die in die Partition passt -- eine firmware.bin
+     * dort loescht das Dateisystem und schreibt Muell. Beim Namen nachfragen. */
+    if ((isFw && /storage|spiffs/i.test(f.name)) || (!isFw && /firmware/i.test(f.name))) {
+      if (!confirm('Der Dateiname „' + f.name + '“ passt nicht zum Ziel (' + (isFw ? 'Firmware' : 'Dateisystem') + '). Trotzdem flashen?')) return;
+    }
     var bar = document.getElementById(barId), fill = bar.firstElementChild;
     bar.style.display='block'; fill.style.width='0';
     setStatus('Lade ' + f.name + ' (' + Math.round(f.size/1024) + ' KB) hoch …');
+    setBusy(true);
     var xhr = new XMLHttpRequest();
     xhr.open('POST', url, true);
     xhr.upload.onprogress = function(e){
-      if(e.lengthComputable){ fill.style.width = (e.loaded/e.total*100) + '%'; }
+      if(!e.lengthComputable) return;
+      fill.style.width = (e.loaded/e.total*100) + '%';
+      if (e.loaded === e.total) setStatus('Hochgeladen – Geraet prueft und schreibt …');
     };
-    xhr.onload = function(){ setStatus(xhr.responseText || ('Fertig (HTTP ' + xhr.status + ')')); setTimeout(loadInfo, 4000); };
-    xhr.onerror = function(){ setStatus('Verbindung getrennt – das Geraet startet vermutlich neu. Seite gleich neu laden.'); };
+    xhr.onload = function(){
+      if (xhr.status >= 400){ fill.style.width='0'; setBusy(false); setStatus('Fehler (HTTP ' + xhr.status + '): ' + xhr.responseText, true); return; }
+      setStatus(xhr.responseText || ('Fertig (HTTP ' + xhr.status + ')'));
+      if (isFw) setTimeout(function(){ waitBack(curBuild, 30); }, 3000);
+      else { setBusy(false); loadInfo().catch(function(){}); }
+    };
+    xhr.onerror = function(){
+      setStatus('Verbindung getrennt – das Geraet startet vermutlich neu …');
+      if (isFw) setTimeout(function(){ waitBack(curBuild, 30); }, 3000); else setBusy(false);
+    };
     xhr.setRequestHeader('Content-Type','application/octet-stream');
     xhr.send(f);
   }
 
   function act(url, confirmMsg){
-    if(!confirm(confirmMsg)) return;
+    if(busy || !confirm(confirmMsg)) return;
     setStatus('…');
+    setBusy(true);
     fetch(url, {method:'POST'}).then(function(r){return r.text();})
-      .then(function(t){ setStatus(t); })
-      .catch(function(){ setStatus('Befehl gesendet, Geraet startet neu …'); });
+      .then(function(t){ setStatus(t); setTimeout(function(){ waitBack(curBuild, 30); }, 3000); })
+      .catch(function(){ setStatus('Befehl gesendet, Geraet startet neu …'); setTimeout(function(){ waitBack(curBuild, 30); }, 3000); });
   }
 
-  loadInfo();
+  loadInfo().catch(function(){ setStatus('Geraet nicht erreichbar.', true); });
 </script>
 </body>
 </html>

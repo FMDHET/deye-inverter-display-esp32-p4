@@ -75,10 +75,18 @@ void app_main(void)
      * credentials, with AP fallback. Once WiFi is up we start the captive
      * portal so a phone joining the SoftAP is auto-redirected to the WLAN
      * setup page. */
+    esp_err_t err;
 #if DEYE_ENABLE_WIFI
-    esp_err_t err = wifi_mgr_init();
+    err = wifi_mgr_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "wifi_mgr_init failed: %s", esp_err_to_name(err));
+        /* No network -- but the RS485 side must run regardless: the Eastron
+         * emulation is the inverter's meter. */
+        err = modbus_rtu_start();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "modbus_rtu_start failed: %s", esp_err_to_name(err));
+        }
+        deye_ctrl_start();
     } else {
         /* Live web mirror of the display (MJPEG stream + touch) and the
          * captive portal that auto-opens it when joining the SoftAP. */
@@ -89,18 +97,15 @@ void app_main(void)
         err = captive_start();
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "captive_start failed: %s", esp_err_to_name(err));
-        } else {
-            /* The captive portal's HTTP server is what serves /ota, so this is
-             * the exact moment a bad build could still be replaced remotely.
-             * Confirm the image here and nowhere earlier -- see ota.c. */
-            ota_mark_app_valid();
         }
         /* Poll the Deye inverter over Modbus-TCP and feed the energy-flow UI. */
         err = modbus_tcp_start();
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "modbus_tcp_start failed: %s", esp_err_to_name(err));
         }
-        /* Modbus-RTU: emulate an Eastron meter for the Deye + read the Deye. */
+        /* Modbus-RTU: emulate an Eastron meter for the Deye + read the Deye.
+         * Deliberately AFTER wifi_mgr_init: started before it, the slave bus
+         * never saw a single request from the inverter (2026-09-08). */
         err = modbus_rtu_start();
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "modbus_rtu_start failed: %s", esp_err_to_name(err));
@@ -128,6 +133,11 @@ void app_main(void)
             ESP_LOGE(TAG, "wg_start failed: %s", esp_err_to_name(err));
         }
     }
+    /* A freshly OTA'd image runs on probation. It is confirmed once the device
+     * has been up a while and is reachable over the network -- not here, where
+     * nothing has run yet -- and after ten minutes regardless, so a failed
+     * WiFi init cannot leave a good image unconfirmed. See ota.c. */
+    ota_arm_confirm();
 #else
     ESP_LOGW(TAG, "WiFi disabled");
     /* No network by design, so there is no remote-rescue milestone to wait for.

@@ -8,7 +8,9 @@
   :root{color-scheme:dark}
   html,body{margin:0;height:100%;background:#000;overflow:hidden}
   #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
-  #scr{aspect-ratio:800/480;max-width:100vw;max-height:100vh;background:#0b0d10;
+  /* dvh nach vh: 100vh reicht auf dem iPhone hinter Safaris Leisten, das Bild
+     wurde unten beschnitten. Browser ohne dvh behalten die vh-Zeile. */
+  #scr{aspect-ratio:800/480;max-width:100vw;max-height:100vh;max-height:100dvh;background:#0b0d10;
        cursor:pointer;touch-action:none;user-select:none;-webkit-user-select:none;
        -webkit-touch-callout:none}
 </style>
@@ -40,28 +42,46 @@
   pollSize();
   setInterval(pollSize, 2000);
 
-  function send(clientX, clientY, down) {
+  function toDevice(clientX, clientY) {
     var r = img.getBoundingClientRect();
     var x = Math.round((clientX - r.left) / r.width  * W);
     var y = Math.round((clientY - r.top)  / r.height * H);
-    x = Math.max(0, Math.min(W - 1, x));
-    y = Math.max(0, Math.min(H - 1, y));
-    fetch('/touch?x=' + x + '&y=' + y + '&down=' + (down ? 1 : 0)).catch(function () {});
+    return { x: Math.max(0, Math.min(W - 1, x)), y: Math.max(0, Math.min(H - 1, y)) };
+  }
+  function send(p, down) {
+    return fetch('/touch?x=' + p.x + '&y=' + p.y + '&down=' + (down ? 1 : 0)).catch(function () {});
   }
 
-  var pressing = false;
+  // Ziehen: iOS liefert 60+ pointermove pro Sekunde, und jeder war ein eigener
+  // Request an einen Server mit vier Sockets, der nebenbei den MJPEG-Strom
+  // liefert. Jetzt geht immer nur EINE Bewegung raus; solange sie unterwegs
+  // ist, wird nur die letzte Position gemerkt und danach nachgereicht.
+  var pressing = false, moveInFlight = false, pendingMove = null;
+  function flushMove() {
+    if (moveInFlight || !pendingMove) return;
+    var p = pendingMove; pendingMove = null; moveInFlight = true;
+    send(p, 1).then(function () {
+      moveInFlight = false;
+      if (pendingMove) requestAnimationFrame(flushMove);
+    });
+  }
   img.addEventListener('pointerdown', function (e) {
     pressing = true;
     try { img.setPointerCapture(e.pointerId); } catch (_) {}
-    send(e.clientX, e.clientY, 1); e.preventDefault();
+    pendingMove = null;
+    send(toDevice(e.clientX, e.clientY), 1); e.preventDefault();
   });
   img.addEventListener('pointermove', function (e) {
-    if (pressing) { send(e.clientX, e.clientY, 1); e.preventDefault(); }
+    if (!pressing) return;
+    pendingMove = toDevice(e.clientX, e.clientY);
+    requestAnimationFrame(flushMove);
+    e.preventDefault();
   });
   function up(e) {
     if (!pressing) return;
     pressing = false;
-    send(e.clientX, e.clientY, 0); e.preventDefault();
+    pendingMove = null;                       // das Loslassen ist wichtiger als die letzte Bewegung
+    send(toDevice(e.clientX, e.clientY), 0); e.preventDefault();
   }
   img.addEventListener('pointerup', up);
   img.addEventListener('pointercancel', up);

@@ -14,8 +14,13 @@
 extern "C" {
 #endif
 
-/* Mount the "storage" partition at /assets (read-only). Safe to call once. */
+/* Mount the "storage" partition at /assets (read-only). Idempotent. */
 esp_err_t assets_fs_mount(void);
+
+/* Unmount before the partition is rewritten (FS OTA): SPIFFS caches page and
+ * object state in RAM, so writing underneath a mounted FS leaves it describing
+ * the OLD image until the next boot. Idempotent. */
+esp_err_t assets_fs_unmount(void);
 
 /* Build number read from /assets/build.txt, or -1 if the FS is absent,
  * unmounted or unreadable. */

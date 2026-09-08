@@ -95,7 +95,13 @@ static esp_err_t ldo_phy_init(void)
  * source clock allows up to ~78 kHz, so all 1024 dim steps are kept. */
 #define BL_LEDC_FREQ_HZ  25000
 
-static uint8_t s_brightness = 80;                /* percent, 0..100 */
+static uint8_t s_brightness = 80;                /* percent, MIN..100 */
+
+/* Floor for the USER brightness. 0 % used to be a legal setting: slider to the
+ * left stop, panel dark, the slider to undo it now invisible -- and after a
+ * reboot the stored 0 came back. A completely dark panel exists only as the
+ * internal "off" of display_backlight(false). */
+#define DISPLAY_BRIGHTNESS_MIN  5
 
 static void backlight_apply(uint8_t pct)
 {
@@ -129,8 +135,14 @@ static void backlight_init(void)
 void display_set_brightness(uint8_t pct)
 {
     if (pct > 100) pct = 100;
+    if (pct < DISPLAY_BRIGHTNESS_MIN) pct = DISPLAY_BRIGHTNESS_MIN;
     s_brightness = pct;
     backlight_apply(pct);
+}
+
+uint8_t display_brightness_min(void)
+{
+    return DISPLAY_BRIGHTNESS_MIN;
 }
 
 /* on -> last set brightness, off -> 0 (used to hide flash flicker). */

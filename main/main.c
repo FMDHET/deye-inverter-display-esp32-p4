@@ -56,8 +56,17 @@ void app_main(void)
     esp_lcd_panel_io_handle_t io    = NULL;
     ESP_ERROR_CHECK(display_init(&panel, &io));
 
+    /* Touch is optional. ESP_ERROR_CHECK here turned a GT911 that did not
+     * answer (loose connector, wrong I2C address) into a panic BEFORE LVGL and
+     * WiFi came up -- and since the rollback then boots the identical code, an
+     * endless loop with a black screen and no way to reach the device. The
+     * web mirror injects its own pointer, so the device stays usable and
+     * repairable without touch. */
     esp_lcd_touch_handle_t tp = NULL;
-    ESP_ERROR_CHECK(touch_init(&tp));
+    if (touch_init(&tp) != ESP_OK) {
+        ESP_LOGE(TAG, "touch controller unavailable -- continuing without touch");
+        tp = NULL;
+    }
 
     ESP_ERROR_CHECK(app_lvgl_start(panel, io, tp));
 

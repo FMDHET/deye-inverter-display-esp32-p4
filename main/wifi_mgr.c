@@ -134,8 +134,47 @@ static esp_err_t apply_sta_cfg(const char *ssid, const char *psk)
 #define WMGR_NOTIFY_FALLBACK_AP  (1u << 0)
 #define WMGR_NOTIFY_RECONNECT    (1u << 1)
 #define WMGR_NOTIFY_CONNECT      (1u << 2)
+#define WMGR_NOTIFY_AP_DOWN      (1u << 3)
 
 static TaskHandle_t s_worker;
+
+/* The fallback SoftAP used to stay up until the next reboot: once STA had lost
+ * the router for 20 s the AP came on, and IP_EVENT_STA_GOT_IP never switched
+ * back. After every nightly router restart the device therefore advertised an
+ * open door -- documented PSK, no password on /ota or the inverter control --
+ * to anyone in radio range, for as long as it ran. Now the AP is torn down a
+ * grace period after STA has an IP again, unless someone is still using it. */
+#define AP_TEARDOWN_GRACE_MS    60000
+static TimerHandle_t s_ap_down_timer;
+
+static void ap_down_timer_cb(TimerHandle_t t)
+{
+    (void)t;
+    if (s_worker) xTaskNotify(s_worker, WMGR_NOTIFY_AP_DOWN, eSetBits);
+}
+
+static void stop_fallback_ap(void)
+{
+    if (!s_ap_active || s_state != WIFI_MGR_STA_CONNECTED) return;
+
+    /* Someone provisioning through the captive portal is on the AP right now:
+     * kicking them would drop the very page they are looking at. Look again
+     * in a minute. */
+    wifi_sta_list_t clients = { 0 };
+    if (esp_wifi_ap_get_sta_list(&clients) == ESP_OK && clients.num > 0) {
+        ESP_LOGI(TAG, "fallback AP still has %d client(s) -- keeping it for now", clients.num);
+        if (s_ap_down_timer) xTimerStart(s_ap_down_timer, 0);
+        return;
+    }
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "AP teardown failed: %s", esp_err_to_name(err));
+        return;
+    }
+    s_ap_active = false;
+    s_ap_ip[0]  = '\0';
+    ESP_LOGI(TAG, "STA is back on %s -- fallback AP torn down", s_sta_ssid);
+}
 
 /* Heavy esp_wifi calls (set_config/connect) -- run only from a task with a big
  * stack (worker / app_main / httpd / lvgl), never the event-loop/timer task. */
@@ -159,6 +198,9 @@ static void wifi_worker_task(void *arg)
         }
         if (bits & WMGR_NOTIFY_CONNECT) {
             do_connect(s_try_idx);          /* index chosen by the event handler */
+        }
+        if (bits & WMGR_NOTIFY_AP_DOWN) {
+            stop_fallback_ap();
         }
         if (bits & WMGR_NOTIFY_RECONNECT) {
             /* Slow single retry: step to the next saved network and try one. */
@@ -219,7 +261,15 @@ static void do_connect(int idx)
     s_sta_ssid[sizeof(s_sta_ssid) - 1] = '\0';
     ESP_LOGI(TAG, "STA try [%d/%d] %s", idx + 1, s_cred_count, s_creds[idx].ssid);
     apply_sta_cfg(s_creds[idx].ssid, s_creds[idx].psk);
-    esp_wifi_connect();
+    esp_err_t err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        /* No connect, no DISCONNECTED event -- and the retry chain is driven
+         * by that event alone. Re-arm the slow retry ourselves, or the device
+         * would sit in AP fallback forever after one refused call (e.g. an
+         * attempt already in flight, or an esp_hosted RPC timeout). */
+        ESP_LOGW(TAG, "esp_wifi_connect: %s -- retrying later", esp_err_to_name(err));
+        if (s_reconnect_timer) xTimerStart(s_reconnect_timer, 0);
+    }
 }
 
 /* Ask the worker to connect to saved index `idx` (safe from the event loop). */
@@ -255,7 +305,19 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
              * so we pick the right saved network -- don't auto-connect here
              * (would fire with stale/empty cfg, e.g. when scanning in AP mode). */
             break;
-        case WIFI_EVENT_STA_DISCONNECTED:
+        case WIFI_EVENT_STA_DISCONNECTED: {
+            /* ASSOC_LEAVE is the reason the station itself puts on the wire
+             * when WE call esp_wifi_disconnect() -- begin_attempt() does that
+             * before every user-initiated connect. Treating it as a failed
+             * attempt advanced s_try_idx to the NEXT saved network: tap network
+             * B in the list, end up on C. Nobody else ever produces this code
+             * (an AP that throws us out uses its own reasons), so drop it. */
+            wifi_event_sta_disconnected_t *e = data;
+            if (e && e->reason == WIFI_REASON_ASSOC_LEAVE) {
+                s_sta_ip[0] = '\0';
+                s_rssi = 0;
+                break;
+            }
             s_sta_ip[0] = '\0';
             s_rssi = 0;
             if (s_state == WIFI_MGR_STA_CONNECTED) {
@@ -284,6 +346,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
                 if (s_reconnect_timer) xTimerStart(s_reconnect_timer, 0);
             }
             break;
+        }
         case WIFI_EVENT_SCAN_DONE: {
             uint16_t n = SCAN_MAX_APS;
             /* static, NOT on the stack: this handler runs on the small
@@ -324,6 +387,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
             if (s_fallback_timer) xTimerStop(s_fallback_timer, 0);
             if (s_reconnect_timer) xTimerStop(s_reconnect_timer, 0);
             ESP_LOGI(TAG, "STA got IP %s on %s, RSSI %d", s_sta_ip, s_sta_ssid, s_rssi);
+            /* Router is back: give the fallback AP a grace period, then drop it
+             * (see stop_fallback_ap). Runs on the worker, not here. */
+            if (s_ap_active && s_ap_down_timer) {
+                xTimerReset(s_ap_down_timer, 0);
+                xTimerStart(s_ap_down_timer, 0);
+            }
         }
     }
 }
@@ -358,6 +427,9 @@ esp_err_t wifi_mgr_init(void)
     s_reconnect_timer = xTimerCreate("wifi_rc",
                                     pdMS_TO_TICKS(STA_RETRY_PERIOD_MS),
                                     pdFALSE, NULL, reconnect_timer_cb);
+    s_ap_down_timer   = xTimerCreate("wifi_apdn",
+                                    pdMS_TO_TICKS(AP_TEARDOWN_GRACE_MS),
+                                    pdFALSE, NULL, ap_down_timer_cb);
 
     /* Worker that runs the stack-heavy WiFi actions off the timer task. */
     xTaskCreate(wifi_worker_task, "wifi_mgr_wk", 5120, NULL, 5, &s_worker);
@@ -457,9 +529,12 @@ static void begin_attempt(void)
         esp_wifi_set_mode(WIFI_MODE_STA);
         esp_wifi_start();
     }
-    esp_wifi_disconnect();
+    /* State first, then disconnect: the DISCONNECTED event is asynchronous and
+     * must not find us still in CONNECTED (it would "re-select from the top"). */
     s_state = WIFI_MGR_STA_CONNECTING;
     s_fast  = true;
+    if (s_ap_down_timer) xTimerStop(s_ap_down_timer, 0);
+    esp_wifi_disconnect();
     if (s_fallback_timer) {
         xTimerReset(s_fallback_timer, 0);
         xTimerStart(s_fallback_timer, 0);

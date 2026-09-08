@@ -18,8 +18,13 @@ esp_err_t display_init(esp_lcd_panel_handle_t *panel_out,
  * panel flicker while flashing. */
 void display_backlight(bool on);
 
-/* Set backlight brightness in percent (0..100) via LEDC PWM. */
+/* Set backlight brightness in percent via LEDC PWM. Values below
+ * display_brightness_min() are raised to it: a user setting of 0 % was a black
+ * panel that came back after every reboot. */
 void display_set_brightness(uint8_t pct);
+
+/* Lowest user brightness (percent). The settings slider starts here. */
+uint8_t display_brightness_min(void);
 
 #ifdef __cplusplus
 }

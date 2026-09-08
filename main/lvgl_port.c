@@ -83,17 +83,23 @@ esp_err_t app_lvgl_start(esp_lcd_panel_handle_t panel,
     app_lvgl_apply_orientation(nvs_store_get_orientation());
     lvgl_port_unlock();
 
-    lvgl_port_touch_cfg_t touch_cfg = {
-        .disp   = disp,
-        .handle = tp,
-    };
-    if (!lvgl_port_add_touch(&touch_cfg)) {
-        ESP_LOGE(TAG, "add_touch failed");
-        return ESP_FAIL;
+    /* No touch controller is not fatal: the UI still renders, the web mirror
+     * brings its own input device, and OTA stays reachable -- which is worth
+     * more than a boot loop over a flaky connector (see touch_init). */
+    if (tp) {
+        lvgl_port_touch_cfg_t touch_cfg = {
+            .disp   = disp,
+            .handle = tp,
+        };
+        if (!lvgl_port_add_touch(&touch_cfg)) {
+            ESP_LOGE(TAG, "add_touch failed -- running without touch");
+        }
+    } else {
+        ESP_LOGW(TAG, "no touch controller -- running without touch");
     }
 
-    ESP_LOGI(TAG, "LVGL up via esp_lvgl_port, %dx%d landscape",
-             BOARD_LV_HOR_RES, BOARD_LV_VER_RES);
+    ESP_LOGI(TAG, "LVGL up via esp_lvgl_port, %dx%d landscape%s",
+             BOARD_LV_HOR_RES, BOARD_LV_VER_RES, tp ? "" : " (no touch)");
     return ESP_OK;
 }
 

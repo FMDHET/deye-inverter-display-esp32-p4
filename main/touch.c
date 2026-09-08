@@ -30,8 +30,28 @@ static void gt911_hw_reset(void)
     vTaskDelay(pdMS_TO_TICKS(50));
 }
 
+/* One probe of the controller at a given I2C address. Frees the panel IO on
+ * failure so the caller can try again on the same bus. */
+static esp_err_t gt911_probe(i2c_master_bus_handle_t bus, uint8_t addr,
+                             const esp_lcd_touch_config_t *tp_cfg,
+                             esp_lcd_touch_handle_t *tp_out)
+{
+    esp_lcd_panel_io_handle_t tp_io = NULL;
+    esp_lcd_panel_io_i2c_config_t tp_io_cfg = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+    tp_io_cfg.dev_addr = addr;
+    esp_err_t err = esp_lcd_new_panel_io_i2c(bus, &tp_io_cfg, &tp_io);
+    if (err != ESP_OK) return err;
+
+    err = esp_lcd_touch_new_i2c_gt911(tp_io, tp_cfg, tp_out);
+    if (err != ESP_OK) {
+        esp_lcd_panel_io_del(tp_io);
+    }
+    return err;
+}
+
 esp_err_t touch_init(esp_lcd_touch_handle_t *tp_out)
 {
+    *tp_out = NULL;
     gt911_hw_reset();
 
     i2c_master_bus_config_t i2c_cfg = {
@@ -45,11 +65,6 @@ esp_err_t touch_init(esp_lcd_touch_handle_t *tp_out)
     i2c_master_bus_handle_t bus = NULL;
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&i2c_cfg, &bus), TAG, "i2c bus");
 
-    esp_lcd_panel_io_handle_t tp_io = NULL;
-    esp_lcd_panel_io_i2c_config_t tp_io_cfg = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
-    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i2c(bus, &tp_io_cfg, &tp_io),
-                        TAG, "tp io");
-
     esp_lcd_touch_config_t tp_cfg = {
         .x_max        = BOARD_LCD_H_RES,
         .y_max        = BOARD_LCD_V_RES,
@@ -62,11 +77,24 @@ esp_err_t touch_init(esp_lcd_touch_handle_t *tp_out)
         },
     };
 
-    esp_lcd_touch_handle_t tp = NULL;
-    ESP_RETURN_ON_ERROR(esp_lcd_touch_new_i2c_gt911(tp_io, &tp_cfg, &tp),
-                        TAG, "gt911");
+    /* The GT911 driver gives up hard if the product-ID read fails. With INT not
+     * wired on this board the address cannot be forced, so if 0x5D stays quiet
+     * try the alternate 0x14 before declaring the controller absent. Either
+     * way the failure is reported, not fatal: main.c runs without touch. */
+    esp_err_t err = gt911_probe(bus, ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS, &tp_cfg, tp_out);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "GT911 at 0x%02X: %s -- trying 0x%02X",
+                 ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS, esp_err_to_name(err),
+                 ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP);
+        err = gt911_probe(bus, ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP, &tp_cfg, tp_out);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "no GT911 found (%s)", esp_err_to_name(err));
+        i2c_del_master_bus(bus);
+        *tp_out = NULL;
+        return err;
+    }
 
-    *tp_out = tp;
     ESP_LOGI(TAG, "GT911 ready");
     return ESP_OK;
 }

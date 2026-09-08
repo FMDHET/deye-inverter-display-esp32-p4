@@ -1,10 +1,12 @@
 #include "wg_client.h"
 #include "nvs_store.h"
 #include "ntp_client.h"
+#include "wifi_mgr.h"
 
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_wireguard.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -13,6 +15,16 @@ static const char *TAG = "wg";
 
 #define DEF_PORT       51820
 #define DEF_KEEPALIVE  25
+
+/* Retry cadence. The tunnel used to be attempted exactly once, right after the
+ * NTP wait: esp_wireguard_connect() resolves the endpoint with a blocking
+ * getaddrinfo(), which fails without a STA IP -- after a power cut the router
+ * is routinely slower than this display, so the one attempt failed and the
+ * documented remote-rescue path stayed dead until someone re-saved the VPN
+ * settings. Now: retry while down, and re-resolve when a tunnel that was up
+ * stays silent (DynDNS endpoint moved, peer restarted). */
+#define WG_RETRY_S     30
+#define WG_STALE_S     180
 
 static wg_cfg_t            s_cfg;
 static bool               s_loaded;
@@ -99,17 +111,41 @@ static void wg_task(void *arg)
     for (int i = 0; i < 60 && s_cfg.enabled && !ntp_is_synced(); i++)
         vTaskDelay(pdMS_TO_TICKS(500));
 
-    wg_apply();
-
+    int64_t last_try_s = 0, last_up_s = 0;
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        int64_t now_s = esp_timer_get_time() / 1000000;
+
         if (s_restart) {
             s_restart = false;
             wg_apply();
+            last_try_s = now_s;
+            last_up_s  = now_s;
         }
+
         if (s_inited) {
             s_up = (esp_wireguardif_peer_is_up(&s_ctx) == ESP_OK);
+            if (s_up) {
+                last_up_s = now_s;
+            } else if (now_s - last_up_s >= WG_STALE_S) {
+                ESP_LOGW(TAG, "no handshake for %d s -- re-resolving endpoint and reconnecting",
+                         WG_STALE_S);
+                wg_apply();                     /* disconnects first, then a fresh init */
+                last_try_s = now_s;
+                last_up_s  = now_s;
+            }
+        } else if (s_cfg.enabled && now_s - last_try_s >= WG_RETRY_S) {
+            /* Only worth trying with a STA address: without one the endpoint
+             * lookup fails immediately and just fills the log. */
+            wifi_mgr_status_t st;
+            wifi_mgr_get_status(&st);
+            if (st.state == WIFI_MGR_STA_CONNECTED && st.sta_ip[0]) {
+                last_try_s = now_s;
+                wg_apply();
+                last_up_s  = now_s;
+            }
         }
+
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
 

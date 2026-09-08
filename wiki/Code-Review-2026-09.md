@@ -56,9 +56,9 @@ Weitere Funde mittlerer Schwere: Netz-Sollwert ohne Grenzen im Modul (`modbus_rt
 
 ### Kern und Sicherheit
 
-* **Notfall-WLAN wird nie wieder abgebaut.** Nach 20 s ohne Router geht der SoftAP an und bleibt bis zum Neustart — mit dem in README und Wiki veröffentlichten Passwort und ohne Passwort auf `/ota`, `/ota/rollback` und der Deye-Steuerung. Wer nachts in Funkreichweite ist, kann nach einem Router-Neustart Firmware flashen. Vorschlag: nach `GOT_IP` den AP mit Nachfrist abbauen; das AP-Passwort einstellbar machen (`nvs_store_set_ap_psk` existiert, hat aber keinen Aufrufer).
-* **Netzwerkwahl:** `begin_attempt()` ruft `esp_wifi_disconnect()`, dessen Ereignis als *fehlgeschlagener* Versuch gewertet wird — der Manager springt zum nächsten gespeicherten Netz statt zum gewählten. Vorschlag: Generationszähler oder `s_expect_disconnect`.
-* **WireGuard wird genau einmal versucht.** Ist der Router nach einem Stromausfall langsamer als das Display, bleibt der Tunnel bis zum nächsten Speichern der Einstellungen tot. Vorschlag: Wiederholung im `wg`-Task, solange STA verbunden und Tunnel nicht oben.
+* ~~Notfall-WLAN wird nie wieder abgebaut~~ — **behoben (Nachtrag, siehe unten).** Offen bleibt: das AP-Passwort ist weiterhin die veröffentlichte Konstante (`nvs_store_set_ap_psk` hat keinen Aufrufer), und `/ota` sowie die Deye-Steuerung haben kein Passwort.
+* ~~Netzwerkwahl springt zum falschen Netz~~ — **behoben (Nachtrag).**
+* ~~WireGuard wird genau einmal versucht~~ — **behoben (Nachtrag).**
 * `mqtt_apply()` läuft auf dem LVGL-Task und zerstört den Client, während der MQTT-Task ihn benutzen kann; MQTT-Kommandos: unbekannter Modus wird als Normal *angewendet*, `atoi("abc")` = 0 W wird auf 1000 W geklemmt und angewendet, kein Schalter „Steuerung per MQTT erlauben".
 * Konfigurations-Blobs `mqtt`/`ntp`/`wg` ohne Versionsfeld: ein Feld anhängen, OTA, Rollback → die ältere Firmware verwirft die Einstellungen stillschweigend.
 * Reproduzierbarkeit: `platform` folgt dem Git-HEAD, `dependencies.lock` ist gitignored, `sdkconfig.guition-p4` ist eingecheckt und schlägt `sdkconfig.defaults` — Änderungen dort wirken auf bestehenden Checkouts nicht. `CONFIG_COMPILER_OPTIMIZATION_DEBUG` (`-Og`) im Produktivbetrieb.
@@ -66,8 +66,8 @@ Weitere Funde mittlerer Schwere: Netz-Sollwert ohne Grenzen im Modul (`modbus_rt
 
 ### Display-Oberfläche (LVGL)
 
-* **Touch-Ausfall beim Start = Endlosschleife.** `main.c:60` `ESP_ERROR_CHECK(touch_init(&tp))`: ein GT911, der sich nicht meldet (Steckerkontakt, Adresse 0x14 statt 0x5D), löst eine Panic vor dem LVGL-Start aus; der Rollback bootet ein Image mit identischem Code — schwarze Anzeige, kein WLAN, kein OTA. Touch wird für den Betrieb nicht gebraucht (der Web-Spiegel hat sein eigenes Eingabegerät). Vorschlag: nicht fatal, `tp = NULL`, Ersatzadresse probieren. **Kleiner Eingriff, große Wirkung.**
-* **Helligkeit 0 % wird gespeichert.** Slider bis 0, `display_set_brightness(0)`, in NVS, beim Aufwachen und nach OTA wiederhergestellt: dauerhaft schwarzes Panel, nur über den Web-Spiegel zu retten. Vorschlag: Untergrenze 5 %.
+* ~~Touch-Ausfall beim Start = Endlosschleife~~ — **behoben (Nachtrag).**
+* ~~Helligkeit 0 % wird gespeichert~~ — **behoben (Nachtrag).**
 * Der Aufweck-Tipp wird an das Widget darunter durchgereicht — links liegt der Netz-Sollwert-Slider über die volle Höhe.
 * Vier Speicher-Callbacks (Geräte, MQTT, NTP, VPN) bauen die Struktur aus Nullen neu und schreiben Default-Literale als Nutzerwahl in NVS — das Muster, das schon `gw_max_clients` blockiert hatte.
 * VPN-Tastatur schwebt über andere Tabs; jeder RTU-Dropdown-Tick schreibt synchron in NVS und blendet die Deye-Anzeige aus; Scan-Liste kann bei „scanne…" hängen; Deye-Leistungsslider 0–22000 gegen Backend 1000–20000; kein `max_length` auf Textfeldern (40-Zeichen-MQTT-Passwort wird stumm auf 39 gekürzt).
@@ -80,6 +80,18 @@ Weitere Funde mittlerer Schwere: Netz-Sollwert ohne Grenzen im Modul (`modbus_rt
 * `/ota/rollback` prüft den Zustand des anderen Slots nicht (`ABORTED`/`INVALID` → Neustart ohne Wirkung).
 * DNS-Hijack im Captive Portal hängt die Antwort hinter einen mitkopierten EDNS-OPT-Record; Clients mit EDNS0 (Windows, Chrome) sehen eine kaputte Antwort.
 * Register-Tab: `probeRead` ohne Wiedereintrittsschutz; `dirty`-Flag im Zähler-Tab wird nur durch Senden gelöscht; Spaltengriffe ohne `pointercancel`; Theme-Markierung ignoriert `?theme=`.
+
+## Nachtrag (gleicher Tag): fünf weitere Punkte behoben
+
+| Was | Datei | Wie |
+| --- | --- | --- |
+| Touch-Ausfall beim Start | `main/touch.c`, `main/main.c`, `main/lvgl_port.c` | GT911 wird an 0x5D und dann 0x14 gesucht; fehlt er, läuft das Gerät ohne Touch weiter (Meldung im Log, Web-Spiegel bleibt bedienbar). Kein `ESP_ERROR_CHECK` mehr, I2C-Bus wird im Fehlerfall freigegeben. |
+| Helligkeit 0 % | `main/display.c/.h`, `main/ui_settings.c` | Untergrenze 5 % in `display_set_brightness()`; der Slider beginnt dort, ein gespeicherter Wert darunter springt hoch. 0 gibt es nur noch als internes „aus" von `display_backlight(false)`. |
+| Notfall-WLAN bleibt an | `main/wifi_mgr.c` | Nach `GOT_IP` startet eine 60-s-Nachfrist; danach schaltet der Worker auf reinen STA-Modus, sofern kein Client mehr am AP hängt (sonst in einer Minute noch einmal). Der DNS-Hijack des Captive Portals folgt `ap_active` von selbst. |
+| Netzwerkwahl springt weiter | `main/wifi_mgr.c` | `WIFI_REASON_ASSOC_LEAVE` — der Code, den nur unser eigenes `esp_wifi_disconnect()` erzeugt — wird nicht mehr als gescheiterter Versuch gewertet. Zustand wird vor dem Disconnect gesetzt, nicht danach. Dazu: schlägt `esp_wifi_connect()` selbst fehl, wird der langsame Retry neu gestartet statt ewig zu warten. |
+| WireGuard nur ein Versuch | `main/wg_client.c` | Alle 30 s erneut, sobald STA eine IP hat; ein Tunnel ohne Handshake seit 3 min wird neu aufgebaut (Endpoint neu aufgelöst). |
+
+Verifiziert am Gerät: Boot sauber, Zähler-Emulation läuft, OTA über WLAN (diesmal ohne USB — der Fix aus dem Hauptteil in der Praxis). Touch-Ausfall und AP-Abbau sind Codepfade, die ohne Hardware-Eingriff bzw. Router-Ausfall nicht provozierbar waren.
 
 ## Gut gemacht — nicht anfassen
 

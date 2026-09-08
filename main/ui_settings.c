@@ -578,8 +578,16 @@ static void display_tab_build(lv_obj_t *parent)
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(parent, 14, 0);
 
-    labeled_slider(parent, "Helligkeit", nvs_store_get_brightness(),
-                   &s_bright_val, bright_change_cb, bright_release_cb);
+    /* The slider's left stop is the display's floor, not 0: at 0 % the panel
+     * went dark with the slider to undo it now invisible, and the stored 0 came
+     * back on every boot. A stored value below the floor snaps up. */
+    lv_obj_t *bs = labeled_slider(parent, "Helligkeit", nvs_store_get_brightness(),
+                                  &s_bright_val, bright_change_cb, bright_release_cb);
+    lv_slider_set_range(bs, display_brightness_min(), 100);
+    if (lv_slider_get_value(bs) < display_brightness_min()) {
+        lv_slider_set_value(bs, display_brightness_min(), LV_ANIM_OFF);
+        lv_label_set_text_fmt(s_bright_val, "%d %%", (int)display_brightness_min());
+    }
     labeled_slider(parent, "Kontrast", nvs_store_get_contrast(),
                    &s_contrast_val, contrast_change_cb, contrast_release_cb);
 

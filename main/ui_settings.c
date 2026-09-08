@@ -180,9 +180,15 @@ static void tab_btn_cb(lv_event_t *e)
     tab_select(id);
 }
 
+/* Number of scan results last rendered. wifi_refresh() only redraws the list
+ * when this changes -- so a rescan that finds the SAME number of networks as
+ * the previous one left "scanne..." on screen forever. Reset per scan. */
+static size_t s_scan_rendered;
+
 static void scan_btn_cb(lv_event_t *e)
 {
     (void)e;
+    s_scan_rendered = 0;
     lv_obj_clean(s_wifi_list);
     lv_obj_t *busy = lv_label_create(s_wifi_list);
     lv_label_set_text(busy, "scanne...");
@@ -356,10 +362,9 @@ static void wifi_refresh(void)
 
     /* Populate scan list when finished. */
     if (!wifi_mgr_scan_busy()) {
-        static size_t last_render_count = 0;
         static wifi_mgr_ap_t aps[16];   /* static: keep off the LVGL-task stack */
         size_t n = wifi_mgr_scan_results(aps, 16);
-        if (n != last_render_count && n > 0) {
+        if (n != s_scan_rendered && n > 0) {
             lv_obj_clean(s_wifi_list);
             for (size_t i = 0; i < n; i++) {
                 char line[64];
@@ -376,7 +381,7 @@ static void wifi_refresh(void)
                                         LV_EVENT_CLICKED, ssid_storage[i]);
                 }
             }
-            last_render_count = n;
+            s_scan_rendered = n;
         }
     }
 
@@ -919,6 +924,9 @@ static void open_dev_dialog(int idx)
     lv_label_set_text(nl, "Name (Anzeige)"); lv_obj_set_style_text_color(nl, COL_SUB, 0);
     lv_obj_align(nl, LV_ALIGN_TOP_LEFT, 16, 62);
     s_mb_name = mb_textarea(s_mb_dialog, "z. B. PV Garage", c.name, 560);
+    /* Field limits = struct limits. Without them the save silently cut the
+     * text (strncpy) and a paste could drop a newline into a one-line field. */
+    lv_textarea_set_max_length(s_mb_name, sizeof(c.name) - 1);
     lv_obj_align(s_mb_name, LV_ALIGN_TOP_LEFT, 16, 86);
 
     s_mb_en = lv_switch_create(s_mb_dialog);
@@ -960,30 +968,40 @@ static void open_dev_dialog(int idx)
     lv_label_set_text(ipl, "IP-Adresse"); lv_obj_set_style_text_color(ipl, COL_SUB, 0);
     lv_obj_align(ipl, LV_ALIGN_TOP_LEFT, 16, 206);
     s_mb_ip = mb_textarea(s_mb_dialog, "192.168.1.50", c.ip, 250);
+    lv_textarea_set_max_length(s_mb_ip, sizeof(c.ip) - 1);
+    lv_textarea_set_accepted_chars(s_mb_ip, "0123456789.");
     lv_obj_align(s_mb_ip, LV_ALIGN_TOP_LEFT, 16, 230);
 
     lv_obj_t *pl = lv_label_create(s_mb_dialog);
     lv_label_set_text(pl, "Port"); lv_obj_set_style_text_color(pl, COL_SUB, 0);
     lv_obj_align(pl, LV_ALIGN_TOP_LEFT, 286, 206);
     s_mb_port = mb_textarea(s_mb_dialog, "502", pb, 100);
+    lv_textarea_set_max_length(s_mb_port, 5);
+    lv_textarea_set_accepted_chars(s_mb_port, "0123456789");
     lv_obj_align(s_mb_port, LV_ALIGN_TOP_LEFT, 286, 230);
 
     lv_obj_t *ul = lv_label_create(s_mb_dialog);
     lv_label_set_text(ul, "Slave-ID"); lv_obj_set_style_text_color(ul, COL_SUB, 0);
     lv_obj_align(ul, LV_ALIGN_TOP_LEFT, 398, 206);
     s_mb_unit = mb_textarea(s_mb_dialog, "1", ub, 90);
+    lv_textarea_set_max_length(s_mb_unit, 3);
+    lv_textarea_set_accepted_chars(s_mb_unit, "0123456789");
     lv_obj_align(s_mb_unit, LV_ALIGN_TOP_LEFT, 398, 230);
 
     lv_obj_t *ql = lv_label_create(s_mb_dialog);
     lv_label_set_text(ql, "Poll (ms)"); lv_obj_set_style_text_color(ql, COL_SUB, 0);
     lv_obj_align(ql, LV_ALIGN_TOP_LEFT, 510, 206);
     s_mb_poll = mb_textarea(s_mb_dialog, "2000", qb, 120);
+    lv_textarea_set_max_length(s_mb_poll, 5);
+    lv_textarea_set_accepted_chars(s_mb_poll, "0123456789");
     lv_obj_align(s_mb_poll, LV_ALIGN_TOP_LEFT, 510, 230);
 
     lv_obj_t *tl2 = lv_label_create(s_mb_dialog);
     lv_label_set_text(tl2, "Timeout (ms)"); lv_obj_set_style_text_color(tl2, COL_SUB, 0);
     lv_obj_align(tl2, LV_ALIGN_TOP_LEFT, 642, 206);
     s_mb_tmo = mb_textarea(s_mb_dialog, "500", tb, 130);
+    lv_textarea_set_max_length(s_mb_tmo, 5);
+    lv_textarea_set_accepted_chars(s_mb_tmo, "0123456789");
     lv_obj_align(s_mb_tmo, LV_ALIGN_TOP_LEFT, 642, 230);
 
     /* Delete (only when editing): placed below the IP row (y=280, clear of y≈274). */
@@ -1688,6 +1706,20 @@ static void vpn_tab_build(lv_obj_t *parent)
     s_vpn_addr     = vpn_field(parent, "Tunnel-IP (dieses Geraet)",           c.address,       false);
     s_vpn_mask     = vpn_field(parent, "Netzmaske",                           c.netmask,       false);
     s_vpn_keep     = vpn_field(parent, "Keepalive (s, 0 = aus)",              keepb,           true);
+    /* Field limits = struct limits (a 44-char key pasted with a trailing
+     * newline used to be cut to 47 and fail with "Handshake..." forever). */
+    lv_textarea_set_max_length(s_vpn_privkey,  sizeof(c.private_key)   - 1);
+    lv_textarea_set_max_length(s_vpn_pubkey,   sizeof(c.public_key)    - 1);
+    lv_textarea_set_max_length(s_vpn_psk,      sizeof(c.preshared_key) - 1);
+    lv_textarea_set_max_length(s_vpn_endpoint, sizeof(c.endpoint)      - 1);
+    lv_textarea_set_max_length(s_vpn_addr,     sizeof(c.address)       - 1);
+    lv_textarea_set_max_length(s_vpn_mask,     sizeof(c.netmask)       - 1);
+    lv_textarea_set_max_length(s_vpn_port, 5);
+    lv_textarea_set_max_length(s_vpn_keep, 4);
+    lv_textarea_set_accepted_chars(s_vpn_port, "0123456789");
+    lv_textarea_set_accepted_chars(s_vpn_keep, "0123456789");
+    lv_textarea_set_accepted_chars(s_vpn_addr, "0123456789.");
+    lv_textarea_set_accepted_chars(s_vpn_mask, "0123456789.");
 
     /* Keyboard overlays the whole settings screen bottom (not the scrolling
      * page), so it stays put while the focused field scrolls above it. */
@@ -1749,6 +1781,14 @@ static void tab_select(tab_id_t id)
         if (tab_has_save(id)) lv_obj_remove_flag(s_save_bar, LV_OBJ_FLAG_HIDDEN);
         else                  lv_obj_add_flag(s_save_bar,    LV_OBJ_FLAG_HIDDEN);
     }
+    /* An on-screen keyboard left open belongs to the tab we are leaving. The
+     * VPN one lives on the screen (not the page), so it stayed floating over
+     * the new tab -- still bound to the now-hidden field, and PC keystrokes
+     * from the web mirror kept landing there. */
+    if (s_vpn_kbd)  lv_obj_add_flag(s_vpn_kbd,  LV_OBJ_FLAG_HIDDEN);
+    if (s_mqtt_kbd) lv_obj_add_flag(s_mqtt_kbd, LV_OBJ_FLAG_HIDDEN);
+    if (s_ntp_kbd)  lv_obj_add_flag(s_ntp_kbd,  LV_OBJ_FLAG_HIDDEN);
+    s_active_ta = NULL;
     s_active_tab = id;
 }
 

@@ -60,7 +60,6 @@
 #define BATT_MAX_KW     10.0f
 
 /* Max forced charge/discharge power selectable in the Deye battery popup (W). */
-#define DEYE_FORCE_MAX_W  22000
 
 typedef struct {
     lv_obj_t   *arc;
@@ -1004,7 +1003,10 @@ static void deye_node_cb(lv_event_t *e)
     s_deye_pwr_slider = lv_slider_create(s_deye_pwr_row);
     lv_obj_set_width(s_deye_pwr_slider, LV_PCT(100));
     lv_obj_set_height(s_deye_pwr_slider, 16);
-    lv_slider_set_range(s_deye_pwr_slider, 0, DEYE_FORCE_MAX_W);
+    /* Same range the backend accepts -- 0..22000 here let the user pick values
+     * that deye_ctrl_apply() then silently clamped, so the popup showed one
+     * number and the inverter got another. */
+    lv_slider_set_range(s_deye_pwr_slider, DEYE_POWER_MIN, DEYE_POWER_MAX);
     lv_slider_set_value(s_deye_pwr_slider, pw, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(s_deye_pwr_slider, COL_PANEL2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_deye_pwr_slider, COL_BTN, LV_PART_INDICATOR);

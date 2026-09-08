@@ -37,11 +37,15 @@ static const char *deye_ha_mode(deye_mode_t m)
     }
 }
 
+/* DEYE_MODE_COUNT = not one of ours. Anything else on the command topic used
+ * to map to NORMAL and be APPLIED -- a typo in an automation reset the
+ * inverter's battery mode. Unknown payloads are rejected instead. */
 static deye_mode_t deye_mode_from_ha(const char *s)
 {
     if (!strcmp(s, "Laden"))    return DEYE_MODE_FORCE_CHARGE;
     if (!strcmp(s, "Entladen")) return DEYE_MODE_FORCE_DISCHARGE;
-    return DEYE_MODE_NORMAL;
+    if (!strcmp(s, "Normal"))   return DEYE_MODE_NORMAL;
+    return DEYE_MODE_COUNT;
 }
 
 /* HA-discovery sensor table (value_json keys match the state JSON below). */
@@ -132,7 +136,9 @@ static void publish_state(void)
         "\"byd_w\":%.0f,\"byd_soc\":%.0f,\"deye_w\":%.0f,\"deye_soc\":%.0f,"
         "\"deye_mode\":\"%s\",\"deye_power\":%d}",
         st.pv_w, st.house_w, st.grid_w, st.byd_w, st.byd_soc, st.deye_w, st.deye_soc,
-        deye_ha_mode(deye_ctrl_get_mode()), deye_ctrl_get_power());
+        /* The HA number entity is the USER setpoint. Reporting the throttled
+         * value made the slider jump every time the SLS guard stepped in. */
+        deye_ha_mode(deye_ctrl_get_mode()), deye_ctrl_get_user_power());
     esp_mqtt_client_publish(s_client, s_t_state, j, 0, 0, s_cfg.retain);
     portENTER_CRITICAL(&s_mux); s_st.published++; portEXIT_CRITICAL(&s_mux);
 }
@@ -167,13 +173,28 @@ static void mqtt_event_handler(void *args, esp_event_base_t base,
 
         if (is_mode) {
             deye_mode_t m = deye_mode_from_ha(d);
+            if (m == DEYE_MODE_COUNT) {
+                ESP_LOGW(TAG, "MQTT mode cmd '%s' unknown -- ignored", d);
+                publish_state();               /* re-assert the real state to HA */
+                break;
+            }
             ESP_LOGI(TAG, "MQTT mode cmd '%s' -> %s", d, deye_ctrl_mode_name(m));
-            deye_ctrl_apply(m, deye_ctrl_get_power());
+            deye_ctrl_apply(m, deye_ctrl_get_user_power());
             publish_state();
         } else if (is_pwr) {
-            int w = atoi(d);
-            ESP_LOGI(TAG, "MQTT power cmd %d W", w);
-            deye_ctrl_apply(deye_ctrl_get_mode(), w);
+            /* atoi("abc") is 0, which the clamp turned into 1000 W and applied.
+             * Parse strictly: digits only, within the advertised range. */
+            char *end = NULL;
+            long w = strtol(d, &end, 10);
+            if (end == d || (*end != '\0' && *end != '.') ||
+                w < DEYE_POWER_MIN || w > DEYE_POWER_MAX) {
+                ESP_LOGW(TAG, "MQTT power cmd '%s' invalid (need %d..%d) -- ignored",
+                         d, DEYE_POWER_MIN, DEYE_POWER_MAX);
+                publish_state();
+                break;
+            }
+            ESP_LOGI(TAG, "MQTT power cmd %ld W", w);
+            deye_ctrl_apply(deye_ctrl_get_mode(), (int)w);
             publish_state();
         }
         break;
@@ -183,10 +204,23 @@ static void mqtt_event_handler(void *args, esp_event_base_t base,
     }
 }
 
-/* (Re)create the client from the current config. */
+/* (Re)create the client from the current config. Runs ONLY on the mqtt task:
+ * mqtt_fwd_set_cfg() used to call this on the LVGL task, which destroyed
+ * s_client while publish_state() on this task could be between its NULL check
+ * and the publish -- and esp_mqtt_client_stop() blocks the UI for the whole
+ * network timeout when the broker is unreachable. */
+static volatile bool s_restart;
+
 static void mqtt_apply(void)
 {
     if (s_client) {
+        /* Retained "offline" before we vanish, or HA keeps showing the device
+         * as available with frozen values -- the last will only fires for an
+         * unclean disconnect, not for esp_mqtt_client_stop(). */
+        if (s_st.connected) {
+            esp_mqtt_client_publish(s_client, s_t_avail, "offline", 0, 1, true);
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
         esp_mqtt_client_stop(s_client);
         esp_mqtt_client_destroy(s_client);
         s_client = NULL;
@@ -234,9 +268,18 @@ static void mqtt_task(void *arg)
     load_cfg();
     mqtt_apply();
 
+    int tick = 0;
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        publish_state();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (s_restart) {                  /* settings saved -> re-create here */
+            s_restart = false;
+            mqtt_apply();
+            tick = 0;
+        }
+        if (++tick >= 5) {
+            tick = 0;
+            publish_state();
+        }
     }
 }
 
@@ -264,7 +307,7 @@ esp_err_t mqtt_fwd_set_cfg(const mqtt_cfg_t *cfg)
     esp_err_t e = nvs_store_set_mqtt(cfg, sizeof(*cfg));
     if (e == ESP_OK) {
         portENTER_CRITICAL(&s_mux); s_cfg = *cfg; s_loaded = true; portEXIT_CRITICAL(&s_mux);
-        mqtt_apply();
+        s_restart = true;                 /* applied by the mqtt task, see mqtt_apply() */
     }
     return e;
 }

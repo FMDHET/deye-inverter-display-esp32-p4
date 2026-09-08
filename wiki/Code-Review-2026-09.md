@@ -93,6 +93,29 @@ Weitere Funde mittlerer Schwere: Netz-Sollwert ohne Grenzen im Modul (`modbus_rt
 
 Verifiziert am Gerät: Boot sauber, Zähler-Emulation läuft, OTA über WLAN (diesmal ohne USB — der Fix aus dem Hauptteil in der Praxis). Touch-Ausfall und AP-Abbau sind Codepfade, die ohne Hardware-Eingriff bzw. Router-Ausfall nicht provozierbar waren.
 
+## Nachtrag 2: die mittleren Funde ohne Regelpfad-Entscheidung
+
+| Bereich | Was | Wie |
+| --- | --- | --- |
+| MQTT | Unbekannter Modus wurde als „Normal" *angewendet*; `atoi("abc")` = 0 W wurde auf 1000 W geklemmt und angewendet | Unbekannte Payloads werden abgelehnt und der echte Zustand erneut veröffentlicht; Leistung wird streng geparst (`strtol`, Bereich 1000–20000) |
+| MQTT | `mqtt_apply()` lief auf dem LVGL-Task und zerstörte den Client, während der MQTT-Task ihn nutzen konnte; `esp_mqtt_client_stop()` blockierte die Oberfläche | Neuaufbau nur noch im MQTT-Task (`s_restart`); vorher wird retained „offline" veröffentlicht, sonst zeigte HA das Gerät nach dem Abschalten ewig als verfügbar |
+| MQTT | HA-Slider sprang bei jedem Eingriff des SLS-Schutzes | `deye_power` meldet den Nutzer-Sollwert, nicht den gedrosselten Wert |
+| Modbus | Netz-Sollwert ohne Grenzen im Modul und beim Laden aus NVS | ±30 kW (wie das Web-Formular), auch beim Boot; ein Sollwert ≠ 0 wird beim Start protokolliert |
+| Modbus | `deye_req_run` lieferte nach Timeout das Ergebnis der *vorigen* Anfrage an den nächsten Aufrufer | Bus-Task arbeitet auf einer Kopie und schreibt nur zurück, wenn die Anfrage noch wartet; nach Timeout Nachfrist wie in `modbus_rtu_txn` |
+| Modbus | FC16-Echo nicht mit der Anfrage verglichen; verspätete Antworten wurden als Antwort auf die nächste Anfrage akzeptiert | Echo muss Adresse/Anzahl der Anfrage nennen; nach jedem Timeout wird die Leitung bis 50 ms Ruhe geleert; `rtu_raw` prüft den Funktionscode |
+| Web | `/api/devices` brach bei `"` im Gerätenamen | Namen und IPs JSON-escaped |
+| OTA | `/ota/rollback` startete auch in einen vom Bootloader abgelehnten Slot neu — ohne Wirkung | Slot-Zustand wird geprüft (`INVALID`/`ABORTED` → 400 mit Begründung); `GET /ota` liefert `running_state`, `other_state`, `other_version` |
+| Build | `build_number.py` zählte bei IDE-Targets (`idedata`) und Fehl-Builds hoch — `version.json` war nie sauber | Allowlist: nur `upload`/`program`/`buildprog` und ein nacktes `pio run` zählen |
+| LVGL | Scan-Liste blieb bei „scanne…", wenn ein Rescan gleich viele Netze fand | Zähler wird pro Scan zurückgesetzt |
+| LVGL | Bildschirmtastatur schwebte über andere Tabs und fing weiter Tasten | Beim Tab-Wechsel werden alle Tastaturen versteckt, `s_active_ta` gelöscht |
+| LVGL | Kein `max_length` auf Textfeldern (stilles Abschneiden beim Speichern) | Feldgrenzen = Strukturgrenzen; Zahlenfelder nur Ziffern, IP-Felder Ziffern und Punkt |
+| LVGL | Deye-Leistungsslider 0–22000 gegen Backend 1000–20000 | `DEYE_POWER_MIN/MAX` aus `deye_ctrl.h`, eine Definition für Slider, HA-Discovery und MQTT-Parser |
+| `/deye` | `dirty`-Flag nur durch Senden gelöscht — Formular folgte dem Gerät nie wieder | Stimmt das Formular mit dem Gerät überein, ist nichts mehr `dirty` |
+| `/deye` | `probeRead` ohne Wiedereintrittsschutz; leere Anzahl ergab „0 Register gelesen" in Grün | Sperre während des Lesens, Adresse/Anzahl werden geprüft |
+| `/deye` | Jeder Fehler der Live-Werte hieß „Firmware ohne /api/deye/live?" | Netzwerkfehler, 404 und HTTP-Fehler unterschieden; Kacheln werden gedimmt statt alte Zahlen als aktuell stehen zu lassen |
+
+Bewusst **nicht** in diesem Nachtrag: die Klemmung des Ladestroms (`amps = power_w / 50` bis 400 A in Register 128) braucht die Grenze des Akkus/BMS als Konfiguration; die Konfig-Blob-Versionierung ändert das NVS-Layout; der Aufweck-Tipp und die Speicher-Callbacks (Defaults als Nutzerwahl) folgen im nächsten Schritt.
+
 ## Gut gemacht — nicht anfassen
 
 * Frische-Schranke des Netzwerts (`modbus_tcp_grid_w_fresh`): nur ein echter erfolgreicher Read setzt den Zeitstempel, `reconfigure_apply()` invalidiert bewusst, überlaufsichere Zeitarithmetik. Sicherheitsschienen der Manipulation: Hauptschalter aus, nur bei frischem Zähler, NaN abgewiesen, ±100 kW geklemmt, seiteneffektfreies `compute_served()`.

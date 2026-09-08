@@ -271,6 +271,19 @@ static esp_err_t live_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, j);
 }
 
+/* JSON string body for a user-configured label: a quote or backslash in a
+ * device name must not break the document. Same rule as meter_web.c. */
+static void jesc(char *dst, size_t cap, const char *src)
+{
+    size_t o = 0;
+    for (; src && *src && o + 2 < cap; src++) {
+        unsigned char c = (unsigned char)*src;
+        if (c == '"' || c == '\\') { dst[o++] = '\\'; dst[o++] = (char)c; }
+        else if (c >= 0x20)          { dst[o++] = (char)c; }
+    }
+    dst[o] = '\0';
+}
+
 /* Per-device live values (debug / drill-down). */
 static esp_err_t devices_handler(httpd_req_t *req)
 {
@@ -280,6 +293,9 @@ static esp_err_t devices_handler(httpd_req_t *req)
     size_t o = 1;
     j[0] = '[';
     for (int i = 0; i < n; i++) {
+        char name[2 * sizeof(dl[i].name)], ip[2 * sizeof(dl[i].ip)];
+        jesc(name, sizeof(name), dl[i].name);
+        jesc(ip,   sizeof(ip),   dl[i].ip);
         /* snprintf returns the length it WANTED to write. Adding that to o
          * before checking meant o could pass sizeof(j) on a truncated row,
          * and the closing "]" below then computed sizeof(j) - o as a huge
@@ -288,7 +304,7 @@ static esp_err_t devices_handler(httpd_req_t *req)
         int w = snprintf(j + o, sizeof(j) - o,
                          "%s{\"name\":\"%s\",\"ip\":\"%s\",\"slave\":%u,\"mfr\":\"%s\",\"role\":\"%s\",\"conn\":%d,"
                          "\"pv\":%.0f,\"w\":%.0f,\"soc\":%.0f}",
-                         i ? "," : "", dl[i].name, dl[i].ip, dl[i].slave,
+                         i ? "," : "", name, ip, dl[i].slave,
                          modbus_tcp_mfr_name(dl[i].mfr), modbus_tcp_role_name(dl[i].role),
                          dl[i].connected ? 1 : 0, dl[i].pv_w, dl[i].w, dl[i].soc);
         if (w < 0 || o + (size_t)w >= sizeof(j) - 2) break;   /* room for "]\0" */

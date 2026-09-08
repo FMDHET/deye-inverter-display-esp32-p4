@@ -131,11 +131,31 @@ static const char *reset_reason_name(void)
     }
 }
 
+/* What the bootloader thinks of a slot. VALID/NEW are bootable, PENDING_VERIFY
+ * is on probation, INVALID/ABORTED were rejected -- a rollback onto one of
+ * those would just reboot into the same image again. */
+static const char *ota_state_name(const esp_partition_t *p)
+{
+    esp_ota_img_states_t st;
+    if (!p || esp_ota_get_state_partition(p, &st) != ESP_OK) return "UNKNOWN";
+    switch (st) {
+    case ESP_OTA_IMG_NEW:            return "NEW";
+    case ESP_OTA_IMG_PENDING_VERIFY: return "PENDING_VERIFY";
+    case ESP_OTA_IMG_VALID:          return "VALID";
+    case ESP_OTA_IMG_INVALID:        return "INVALID";
+    case ESP_OTA_IMG_ABORTED:        return "ABORTED";
+    case ESP_OTA_IMG_UNDEFINED:      return "UNDEFINED";
+    default:                         return "?";
+    }
+}
+
 static esp_err_t ota_info_handler(httpd_req_t *req)
 {
     const esp_partition_t *run = esp_ota_get_running_partition();
     const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
     const esp_app_desc_t  *app  = esp_app_get_description();
+    esp_app_desc_t other_desc = { 0 };
+    bool other_ok = next && esp_ota_get_partition_description(next, &other_desc) == ESP_OK;
     wifi_mgr_status_t st;
     wifi_mgr_get_status(&st);
 
@@ -146,15 +166,18 @@ static esp_err_t ota_info_handler(httpd_req_t *req)
      * grows its receive buffer from DMA-capable internal RAM while the flash
      * write is running, and asserts if that allocation fails. The overall heap
      * says nothing about it -- it is PSRAM and always looks roomy. */
-    char json[600];
+    char json[760];
     snprintf(json, sizeof(json),
              "{\"version\":\"%s\",\"build\":%d,\"fs_build\":%d,\"running\":\"%s\","
-             "\"target_slot\":\"%s\",\"idf\":\"%s\",\"mac\":\"%s\",\"uptime\":%lld,"
+             "\"running_state\":\"%s\","
+             "\"target_slot\":\"%s\",\"other_state\":\"%s\",\"other_version\":\"%s\","
+             "\"idf\":\"%s\",\"mac\":\"%s\",\"uptime\":%lld,"
              "\"reset\":\"%s\",\"heap\":%u,\"heap_min\":%u,"
              "\"dma\":%u,\"dma_max\":%u,\"dma_min\":%u}",
              DEYE_BUILD_VERSION_FULL, DEYE_BUILD_NUMBER, assets_fs_build_number(),
-             run ? run->label : "?",
-             next ? next->label : "?",
+             run ? run->label : "?", ota_state_name(run),
+             next ? next->label : "?", ota_state_name(next),
+             other_ok ? other_desc.version : "",
              app ? app->idf_ver : "?", st.mac,
              (long long)(esp_timer_get_time() / 1000000),
              reset_reason_name(),
@@ -425,6 +448,19 @@ static esp_err_t ota_rollback_handler(httpd_req_t *req)
     const esp_partition_t *other = esp_ota_get_next_update_partition(NULL);
     if (!other) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no other slot");
+        return ESP_FAIL;
+    }
+    /* A slot the bootloader has already rejected (it panicked on probation, or
+     * was aborted) would boot as NEW, fail its probation again and flip right
+     * back -- the user sees a reboot that changed nothing. Say so instead. */
+    esp_ota_img_states_t ost;
+    if (esp_ota_get_state_partition(other, &ost) == ESP_OK &&
+        (ost == ESP_OTA_IMG_INVALID || ost == ESP_OTA_IMG_ABORTED)) {
+        char why[96];
+        snprintf(why, sizeof(why), "other slot (%s) is %s -- the bootloader rejected it",
+                 other->label, ota_state_name(other));
+        ESP_LOGW(TAG, "rollback refused: %s", why);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, why);
         return ESP_FAIL;
     }
     /* validates the image header before switching */

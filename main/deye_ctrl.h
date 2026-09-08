@@ -15,6 +15,12 @@ typedef enum {
     DEYE_MODE_COUNT,
 } deye_mode_t;
 
+/* Power range deye_ctrl_apply() accepts (W). One definition for the LCD slider,
+ * the HA discovery payload and the MQTT command parser -- the slider used to
+ * offer 0..22000 while the backend silently clamped to this. */
+#define DEYE_POWER_MIN  1000
+#define DEYE_POWER_MAX  20000
+
 /* Start the async writer task. Call once, AFTER modbus_rtu_start(). */
 void        deye_ctrl_start(void);
 

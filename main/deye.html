@@ -784,6 +784,17 @@ function syncHints() {
   }
 }
 
+function formMatches(s, m) {
+  if ($("mEn").checked !== !!m.en) return false;
+  if (Math.round(+$("sp").value) !== Math.round(s.sp)) return false;
+  for (let k = 0; k < 3; k++) {
+    const ph = m.en ? m.ph[k] : { mode: 0, val: 0 };
+    if (+$("m" + k).value !== ph.mode) return false;
+    if (ph.mode && Math.abs(+$("v" + k).value - ph.val) > 0.05) return false;
+  }
+  return true;
+}
+
 function manipText(mode, val) {
   if (mode === 1) return (val >= 0 ? "+" : "") + fmt(val) + " W";
   if (mode === 2) return "= " + fmt(val) + " W";
@@ -842,7 +853,11 @@ function render(d, live) {
     td("") + "</tr>";
   $("phaseBody").innerHTML = h;
 
-  /* Formular nur befüllen, solange der Nutzer nichts angefasst hat */
+  /* Formular nur befüllen, solange der Nutzer nichts angefasst hat. `dirty`
+   * wurde bisher nur durch Senden geloescht: einmal ein Menue angefasst und
+   * es sich anders ueberlegt, und das Formular folgte dem Geraet nie wieder.
+   * Stimmt das Formular mit dem Geraet ueberein, ist nichts mehr "dirty". */
+  if (dirty && formMatches(s, m)) dirty = false;
   if (!dirty) {
     $("mEn").checked = !!m.en;
     $("sp").value    = s.sp;
@@ -929,14 +944,21 @@ function tile(id, fresh, val, klass, foot) {
   e.querySelector(".foot").innerHTML = foot || "";
 }
 
-function renderLive(l, served) {
+function renderLive(l, served, why) {
   const st = $("lvState");
   if (!l) {
-    st.textContent = "Live-Werte nicht verfügbar";
+    /* Jeder Fehler hiess bisher "Firmware ohne /api/deye/live?" -- auch ein
+     * Geraet, das gerade neu startet. Unterscheiden, und die Kacheln dimmen,
+     * statt alte Zahlen als aktuell stehen zu lassen. */
+    st.textContent = why === "net" ? "Live-Werte: keine Verbindung" : "Live-Werte nicht verfügbar";
     st.className   = "pill bad";
-    $("lvInfo").textContent = "Firmware ohne /api/deye/live?";
+    $("lvInfo").textContent = why === "404" ? "Firmware ohne /api/deye/live?"
+                            : why === "net" ? "Gerät antwortet nicht"
+                            : ("Antwort " + why);
+    $("lvTiles").classList.add("stale");
     return;
   }
+  $("lvTiles").classList.remove("stale");
   const ok = !!(l.valid && l.online);
   st.textContent = ok ? "Wechselrichter antwortet"
                       : (l.valid ? "Wechselrichter antwortet NICHT" : "noch keine Antwort");
@@ -1021,11 +1043,12 @@ function sig(ms) { try { return AbortSignal.timeout(ms); } catch (e) { return un
 
 async function poll() {
   /* Live-Werte zuerst: die Geraetetabelle in render() zeigt den Deye mit an. */
-  let live = null;
+  let live = null, liveWhy = "";
   try {
     const rl = await fetch("/api/deye/live", { cache: "no-store", signal: sig(4000) });
     if (rl.ok) live = await rl.json();
-  } catch (e) { /* renderLive() meldet das gleich selbst */ }
+    else liveWhy = rl.status === 404 ? "404" : ("HTTP " + rl.status);
+  } catch (e) { liveWhy = "net"; }
 
   let served = null;
   try {
@@ -1038,7 +1061,7 @@ async function poll() {
   } catch (e) {
     $("pInfo").textContent = "keine Verbindung zum Gerät";
   }
-  renderLive(live, served);
+  renderLive(live, served, liveWhy);
 }
 
 /* ---------- Senden ---------- */
@@ -1604,11 +1627,18 @@ function renderInterp(info, v) {
   return '';
 }
 
+let probeBusy = false;   /* zwei Klicks = zwei Schleifen in EINE Tabelle -- nicht mehr */
 async function probeRead(){
+  if (probeBusy) return;
   const startAddr = +document.getElementById('probeAddr').value;
   const totalCount = +document.getElementById('probeCount').value;
   const status = document.getElementById('probeStatus');
   const tbody  = document.querySelector('#probeResult tbody');
+  if (!(totalCount >= 1) || !(startAddr >= 0)) {   /* leeres Feld ergab "0 Register gelesen" in Gruen */
+    status.textContent = 'Adresse und Anzahl (mindestens 1) angeben'; status.style.color = 'var(--err)';
+    return;
+  }
+  probeBusy = true;
   status.textContent = 'lese...'; status.style.color = 'var(--warn)';
   tbody.innerHTML = '';
 
@@ -1666,6 +1696,8 @@ async function probeRead(){
   } catch (e){
     status.textContent = 'Fehler: ' + e;
     status.style.color = 'var(--err)';
+  } finally {
+    probeBusy = false;
   }
 }
 

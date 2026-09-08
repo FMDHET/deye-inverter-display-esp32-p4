@@ -360,6 +360,20 @@ static void do_slave(int idx, int port, const mb_rtu_bus_cfg_t *c)
 
 /* ----------------------- Deye RTU master ----------------------------- */
 
+/* After a timeout the answer may still be on its way. uart_flush_input()
+ * before the NEXT request only drops what has already arrived; a frame that
+ * lands a moment later was accepted as the reply to that next request (valid
+ * CRC, same id and fc). Wait for the line to be quiet -- 50 ms is ~50 byte
+ * times at 9600 baud -- before letting anyone transmit again. */
+static void rtu_drain(int port)
+{
+    uint8_t junk[64];
+    for (int i = 0; i < 10; i++) {                       /* at most ~500 ms */
+        int n = uart_read_bytes(port, junk, sizeof(junk), pdMS_TO_TICKS(50));
+        if (n <= 0) return;
+    }
+}
+
 static int rtu_read(int port, uint8_t slave, uint16_t addr, uint16_t cnt, uint16_t *out)
 {
     uint8_t req[8] = { slave, 0x03,
@@ -375,7 +389,7 @@ static int rtu_read(int port, uint8_t slave, uint16_t addr, uint16_t cnt, uint16
     uint8_t resp[260];
     if (explen > (int)sizeof(resp)) return -1;
     int got = uart_read_bytes(port, resp, explen, pdMS_TO_TICKS(400));
-    if (got != explen) return -1;
+    if (got != explen) { rtu_drain(port); return -1; }
     if (resp[0] != slave || resp[1] != 0x03) return -2;
     if ((resp[explen - 2] | (resp[explen - 1] << 8)) != crc16(resp, explen - 2)) return -3;
     for (int i = 0; i < cnt; i++)
@@ -402,9 +416,13 @@ static int rtu_write(int port, uint8_t slave, uint16_t addr, uint16_t val)
     /* FC16 response: [id][0x10][addr_hi][addr_lo][qty_hi][qty_lo][crc_lo][crc_hi] */
     uint8_t resp[8];
     int got = uart_read_bytes(port, resp, 8, pdMS_TO_TICKS(400));
-    if (got != 8) return -1;
+    if (got != 8) { rtu_drain(port); return -1; }
     if (resp[0] != slave || resp[1] != 0x10) return -2;
     if ((resp[6] | (resp[7] << 8)) != crc16(resp, 6)) return -3;
+    /* The echo must name OUR register. A late echo of the previous write has
+     * a valid CRC and the same id/fc -- without this check it counted as
+     * success for a register that was never written. */
+    if (memcmp(&resp[2], &req[2], 4) != 0) return -4;
     return 0;
 }
 
@@ -412,13 +430,23 @@ static int rtu_write(int port, uint8_t slave, uint16_t addr, uint16_t val)
 static void serve_deye_req(int port, uint8_t slave)
 {
     if (!s_deye_req.pending) return;
-    if (s_deye_req.is_write) {
-        s_deye_req.rc = rtu_write(port, slave, s_deye_req.addr, s_deye_req.wval);
+    /* Work on a copy: the caller may time out and the NEXT caller may already
+     * be filling s_deye_req while we are still on the bus. Results go back
+     * only if this request is still the one being waited for. */
+    bool     is_write = s_deye_req.is_write;
+    uint16_t addr = s_deye_req.addr, cnt = s_deye_req.count, wval = s_deye_req.wval;
+    uint16_t result[DEYE_REQ_MAX];
+    int rc;
+    if (is_write) {
+        rc = rtu_write(port, slave, addr, wval);
+    } else if (cnt == 0 || cnt > DEYE_REQ_MAX) {
+        rc = -10;
     } else {
-        uint16_t cnt = s_deye_req.count;
-        if (cnt == 0 || cnt > DEYE_REQ_MAX) { s_deye_req.rc = -10; }
-        else s_deye_req.rc = rtu_read(port, slave, s_deye_req.addr, cnt, s_deye_req.result);
+        rc = rtu_read(port, slave, addr, cnt, result);
     }
+    if (!s_deye_req.pending) return;             /* caller gave up meanwhile */
+    if (!is_write && rc == 0) memcpy(s_deye_req.result, result, cnt * sizeof(uint16_t));
+    s_deye_req.rc      = rc;
     s_deye_req.pending = false;
     s_deye_req.done    = true;
 }
@@ -638,7 +666,7 @@ static int rtu_raw(int port, uint8_t req[static MB_RTU_ADU_MAX], int req_len,
     int64_t deadline = esp_timer_get_time() + (int64_t)tmo_ms * 1000;
     int     got;
 
-    if (rtu_read_exact(port, resp, 2, deadline) < 0) return -12;  /* timeout */
+    if (rtu_read_exact(port, resp, 2, deadline) < 0) { rtu_drain(port); return -12; }  /* timeout */
     got = 2;
 
     int body;                       /* bytes still outstanding after the header */
@@ -646,7 +674,7 @@ static int rtu_raw(int port, uint8_t req[static MB_RTU_ADU_MAX], int req_len,
         body = 3;                                   /* exception code + CRC     */
     } else switch (resp[1]) {
     case 0x01: case 0x02: case 0x03: case 0x04: case 0x17:
-        if (rtu_read_exact(port, resp + 2, 1, deadline) < 0) return -12;
+        if (rtu_read_exact(port, resp + 2, 1, deadline) < 0) { rtu_drain(port); return -12; }
         got  = 3;
         body = resp[2] + 2;                         /* data + CRC               */
         break;
@@ -657,11 +685,12 @@ static int rtu_raw(int port, uint8_t req[static MB_RTU_ADU_MAX], int req_len,
         return -13;                                 /* unframeable function     */
     }
     if (got + body > MB_RTU_ADU_MAX) return -14;
-    if (rtu_read_exact(port, resp + got, body, deadline) < 0) return -12;
+    if (rtu_read_exact(port, resp + got, body, deadline) < 0) { rtu_drain(port); return -12; }
     got += body;
 
     if ((resp[got - 2] | (resp[got - 1] << 8)) != crc16(resp, got - 2)) return -15;
     if (resp[0] != req[0]) return -16;              /* answer from another id   */
+    if ((resp[1] & 0x7F) != req[1]) return -17;     /* answer to another request */
 
     return got - 2;                                 /* strip CRC                */
 }
@@ -807,8 +836,21 @@ const char *modbus_rtu_role_name(uint8_t role)
 
 int modbus_rtu_get_grid_setpoint(void) { return s_grid_sp; }
 
+/* The setpoint shifts what the inverter is told the grid does, so a runaway
+ * value here is a runaway inverter. The web form already refuses anything
+ * beyond +-30 kW; the module itself accepted any int -- also straight from
+ * NVS at boot, where a corrupted record would have been applied silently. */
+#define MB_GRID_SP_MAX_W 30000
+static int clamp_grid_sp(int w)
+{
+    if (w >  MB_GRID_SP_MAX_W) return  MB_GRID_SP_MAX_W;
+    if (w < -MB_GRID_SP_MAX_W) return -MB_GRID_SP_MAX_W;
+    return w;
+}
+
 void modbus_rtu_set_grid_setpoint(int w)
 {
+    w = clamp_grid_sp(w);
     s_grid_sp = w;
     nvs_store_set_grid_sp(w);
 }
@@ -915,14 +957,25 @@ static int deye_req_run(bool is_write, uint16_t addr, uint16_t count,
     s_deye_req.pending  = true;                /* set LAST -> bus task picks it up */
 
     int rc = -103;                             /* timeout (no master bus running?) */
+    bool finished = false;
     for (int i = 0; i < 60; i++) {             /* up to ~3 s */
         if (s_deye_req.done) {
             rc = s_deye_req.rc;
             if (rc == 0 && !is_write && out)
                 for (int k = 0; k < count; k++) out[k] = s_deye_req.result[k];
+            finished = true;
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (!finished) {
+        /* The bus task may be mid-exchange on THIS request. Releasing the mutex
+         * now let its completion land on the next caller, who then saw `done`
+         * immediately and took the previous request's rc/result as its own
+         * (a NORMAL-mode write sequence "succeeded" with one register never
+         * written). Give it the same grace modbus_rtu_txn() gives. */
+        for (int i = 0; i < 60 && !s_deye_req.done; i++)
+            vTaskDelay(pdMS_TO_TICKS(50));
     }
     s_deye_req.pending = false;
     xSemaphoreGive(s_deye_req_mtx);
@@ -1024,7 +1077,9 @@ int modbus_rtu_txn(int bus, const uint8_t *req, int req_len,
 
 esp_err_t modbus_rtu_start(void)
 {
-    s_grid_sp = nvs_store_get_grid_sp();
+    s_grid_sp = clamp_grid_sp(nvs_store_get_grid_sp());
+    if (s_grid_sp != 0)
+        ESP_LOGW(TAG, "grid setpoint from NVS: %d W (meter reports real - setpoint)", s_grid_sp);
     load_manip();
     if (!s_deye_req_mtx) s_deye_req_mtx = xSemaphoreCreateMutex();
     for (int i = 0; i < MB_RTU_BUSES; i++) {

@@ -23,13 +23,15 @@ import datetime
 
 from SCons.Script import COMMAND_LINE_TARGETS
 
-# Targets that must NOT bump the counter: filesystem/util operations that
-# either reuse the last firmware build or don't produce firmware at all.
-# Bumping here would silently push the FS/UI ahead of the flashed firmware.
-NO_BUMP_TARGETS = {
-    "flashfs", "uploadfs", "uploadfsota", "buildfs", "download_fs",
-    "erase", "monitor", "clean", "cleanall", "size", "metrics",
-    "compiledb", "menuconfig",
+# Targets that DO produce a firmware image and therefore consume a build
+# number. Everything else -- filesystem-only targets, IDE housekeeping
+# (`idedata`, `__idedata`, `envdump`, `__test`, `checkprogsize`), monitor,
+# clean, compiledb -- holds the counter. This used to be a blocklist, and
+# every IntelliSense refresh in VS Code (`idedata`) bumped version.json,
+# rewrote build_info.h with a fresh timestamp and forced a recompile of
+# everything that includes it; the tree was never clean.
+BUMP_TARGETS = {
+    "upload", "program", "buildprog", "build", "uploadfsota",
 }
 
 PROJECT_DIR = env.subst("$PROJECT_DIR")  # noqa: F821
@@ -77,8 +79,8 @@ def write_if_changed(path, content):
 _targets = list(COMMAND_LINE_TARGETS)
 # A plain `pio run` (no -t) has no command-line targets and builds firmware,
 # so an empty list means "bump". Otherwise bump only if at least one target
-# actually builds firmware.
-should_bump = (not _targets) or any(t not in NO_BUMP_TARGETS for t in _targets)
+# is known to build firmware (`-t upload -t flashfs` bumps once, for upload).
+should_bump = (not _targets) or any(t in BUMP_TARGETS for t in _targets)
 
 data = load_version()
 if should_bump:

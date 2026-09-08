@@ -13,8 +13,7 @@ static const char *TAG = "deye_ctrl";
 #define REG_NORMAL_126  126     /* additional Normal-mode reset registers    */
 #define REG_NORMAL_127  127
 #define REG_NORMAL_128  128
-#define DEYE_POWER_MIN  1000
-#define DEYE_POWER_MAX  20000
+/* DEYE_POWER_MIN/MAX live in deye_ctrl.h (shared with the UI and MQTT). */
 
 /* Last requested mode + power magnitude (W).
  * s_user_power_w = what the user set (slider/MQTT); never changed by the guard.

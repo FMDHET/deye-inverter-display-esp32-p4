@@ -9,7 +9,8 @@ Diese Seite hält fest, **was behoben wurde** (mit Nachweis), **was offen ist** 
 * **OTA über WLAN ist repariert.** Ursache war der WLAN-Treiber esp_hosted, der seine SDIO-Empfangspuffer aus dem knappen internen DMA-Speicher holte und bei Knappheit abstürzte statt einen Fehler zu melden. Mit `CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y` kommen die Puffer aus dem PSRAM. Messreihe: 10 Firmware- und 3 Dateisystem-Updates hintereinander, null Abbrüche (vorher etwa jeder vierte).
 * **Sieben weitere Fehler im OTA-Pfad behoben**, darunter zwei, die das Gerät lahmlegen konnten: ein Upload, der mitten drin stehen bleibt, fror das Gerät dauerhaft ein; eine falsche Datei im Firmware-Feld löschte den einzigen Rückfall-Abschnitt.
 * **Die Web-Oberfläche `/deye` ist jetzt auf dem iPhone benutzbar**: Tabellenzeilen werden zu Karten, die eingegebenen Werte werden vor dem Senden geprüft, das Polling stapelt sich nicht mehr.
-* **Offen und wichtig:** vier Punkte im Modbus-Regelpfad (siehe unten) und die Sicherheit des Notfall-WLANs. Die Display-Oberfläche ist inzwischen abgearbeitet (Nachträge 1–3), darunter die zwei Fehler, die das Gerät unbedienbar machen konnten: Touch-Ausfall beim Start und Helligkeit 0 %.
+* **Der Modbus-Regelpfad ist entschieden und umgesetzt** (Nachtrag 4): ein ausgefallenes Gerät blockiert seine IP-Mitbewohner nicht mehr, der CT-Eingang des Deye ist kein Regelwert mehr (Regel- und Anzeigewert sind jetzt getrennte Variablen), ein Zwangsmodus wird beim Start abgeräumt und läuft nach 2 h ab, und das 0-W-Halten ist eine Brücke mit Ablauf statt eines Dauerzustands.
+* **Offen und wichtig:** die Sicherheit des Notfall-WLANs (AP-Passwort ist die veröffentlichte Konstante, `/ota` und die Deye-Steuerung ohne Passwort) und die Versionierung der Konfig-Blobs. Die Display-Oberfläche ist abgearbeitet (Nachträge 1–3), darunter die zwei Fehler, die das Gerät unbedienbar machen konnten: Touch-Ausfall beim Start und Helligkeit 0 %.
 
 ## Behoben
 
@@ -43,14 +44,16 @@ Diese Seite hält fest, **was behoben wurde** (mit Nachweis), **was offen ist** 
 
 ## Offen — nach Dringlichkeit
 
-### Modbus-Regelpfad (Entscheidung des Betreibers nötig)
+### Modbus-Regelpfad — entschieden und umgesetzt (Nachtrag 4)
 
-Diese Punkte betreffen, was der Wechselrichter zu sehen bekommt. Sie sind absichtlich nicht geändert worden.
+Diese vier Punkte betreffen, was der Wechselrichter zu sehen bekommt, und wurden deshalb nicht „nebenbei" geändert, sondern dem Betreiber vorgelegt. Am 9. September hat er alle vier entschieden; die Umsetzung steht in [Nachtrag 4](#nachtrag-4-9-september-der-modbus-regelpfad). Die Funde im Original:
 
 1. **Gemeinsame IP: ein ausgefallenes Gerät blockiert den Netzzähler.** `modbus_tcp.c` ~721–759: Beim ersten Fehler in der Geräteliste einer IP schließt der Worker den Socket, bricht die Runde ab und schläft 3 s. Fronius-Aufbau mit Smart Meter (Unit 240) und Wechselrichter (Unit 1) auf *derselben* IP: nachts schaltet der Symo ab, die Reads an Unit 1 laufen in den Timeout, der Zähler wird nie mehr gelesen, nach 12 s gilt er als veraltet, die Emulation sendet 0 W — die ganze Nacht. Vorschlag: nur bei Transportfehlern abbrechen, bei Modbus-Exceptions zum nächsten Gerät weitergehen; Netzzähler-Rollen zuerst abfragen.
 2. **Deye-CT als „frischer" Netzwert = Rückkopplung.** `modbus_tcp.c` ~746: Ohne Netzzähler-Rolle wird der CT-Eingang des Deye (Register 619) als gültiger Netzwert übernommen. Das ist aber genau der Wert, den unsere Emulation ihm zuletzt geschickt hat — die Schleife füttert sich selbst. Vorschlag: `s_grid_valid` nie aus `deye_ct` setzen; Anzeige ja, Regelung nein.
 3. **Erzwungener Akku-Modus überlebt keinen Neustart des Displays — der Wechselrichter behält ihn aber.** `deye_ctrl.c`: Modus nur im RAM, Rückgabewerte der zwölf Schreibbefehle werden verworfen, nichts wird zurückgelesen. Nach einem OTA sagt das Display „Normal", der Deye lädt weiter mit 5 kW aus dem Netz. Vorschlag: Modus mit Zeitstempel in NVS, beim Start zurücksetzen oder wiederherstellen, Maximaldauer mit automatischem Rückfall, Schreibbefehle verifizieren.
 4. **0-W-Halten bei veraltetem Zähler ist zeitlich unbegrenzt.** `modbus_rtu.c` ~292 und ~325 (zwei sich widersprechende Kommentare). Zehn Minuten Router-Neustart bei 5 kW Entladung: der Deye hält 5 kW, egal wie sich die Last ändert. Ein *stummer* Zähler würde stattdessen die Zählerausfall-Behandlung des Deye auslösen. Vorschlag: 0 W nur als kurze Überbrückung (30–60 s), danach nicht mehr antworten; am Gerät prüfen, was der Deye bei Zählerausfall tut.
+
+Entschieden wurde: (1) weitergehen statt Runde abbrechen, dazu eine Altersgrenze je Gerät; (2) Regelung sperren, Anzeige behalten; (3) beim Start auf Normal zurücksetzen, mit Maximaldauer und geprüften Schreibbefehlen; (4) 0 W nur 60 s als Überbrückung, danach stumm.
 
 Weitere Funde mittlerer Schwere: Netz-Sollwert ohne Grenzen im Modul (`modbus_rtu_set_grid_setpoint`, auch beim Laden aus NVS); `deye_req_run` kann nach einem Timeout das Ergebnis der *vorigen* Anfrage an den nächsten Aufrufer liefern (die Schwester-Funktion `modbus_rtu_txn` macht es richtig); keine Absicherung gegen verspätete RS485-Antworten, FC16-Echo wird nicht mit der Anfrage verglichen; Modbus-TCP-Transaktions-ID ist konstant `1`; SLS-Exportschutz rechnet mit veralteten Daten und schreibt bei jeder ±200-W-Änderung in EEPROM-Register; Phasenmanipulation bleibt über Neustarts aktiv, ohne Ablauf und ohne Hinweis auf dem Hauptbildschirm; `poll_ms` bis 60 s erlaubt, obwohl der Zähler nach 12 s als veraltet gilt; Selbsttest sendet auf Bus 1 unabhängig von dessen Rolle; die Bridge erlaubt jedem im LAN Schreibzugriff auf alle Deye-Register.
 
@@ -147,6 +150,28 @@ Damit ist der LVGL-Abschnitt abgearbeitet. Build 231 (v1.0.142), alles am Gerät
 * Dateisystem-OTA im Schlaf: `display on (OTA finished, tap kept)` → `UI thawed` → im selben Tick wieder `display off after 120 s`. Genau so soll es sein: Zustand stimmt, und ohne Berührung wird es wieder dunkel.
 
 Mit dem Finger auf dem Glas vom Betreiber bestätigt (9. September): schlafendes Panel angetippt — es wird hell, der Netz-Sollwert bleibt stehen, und der Slider ist danach normal bedienbar. Das war der einzige Weg, diesen Pfad zu prüfen: der Web-Spiegel ist genau dafür ausgenommen.
+
+## Nachtrag 4 (9. September): der Modbus-Regelpfad
+
+Alle vier Punkte vom Betreiber entschieden und umgesetzt, Build 240 (v1.0.151).
+
+| Punkt | Entscheidung | Wie es jetzt läuft |
+| --- | --- | --- |
+| 1 — gemeinsame IP | weitergehen + Altersgrenze | Ein Gerät, das nicht antwortet, beendet die Runde seiner IP nicht mehr: die Verbindung wird verworfen, **sofort neu aufgebaut** und mit dem nächsten Gerät weitergemacht. Neu aufgebaut wird immer — nach einem Zeitablauf kann die Antwort noch unterwegs sein und würde sonst dem nächsten Gerät zugeordnet (dieselbe Falle, gegen die `rtu_drain()` auf der Zweidrahtleitung schützt). Scheitert der Aufbau, gelten die restlichen Geräte als offline und die Runde wartet wie bisher 3 s. Netzzähler- und Deye-Zähler-Rollen werden in jeder Runde **zuerst** abgefragt. Dazu: ein Beitrag zählt nur noch, solange sein Gerät antwortet (3 × Abfrageintervall, mindestens 15 s) — vorher blieb der letzte Wert für immer im Energiemodell, die Solaranzeige zeigte nachts die Leistung vom Abend. |
+| 2 — Deye-CT | Regelung sperren, Anzeige behalten | Register 619 wird nie mehr zum Regelwert. Dabei kam heraus, dass Regel- und Anzeigewert **dieselbe Variable** waren (`s_st.grid_w`): der Aggregator füllt sie auch aus Ersatzquellen, also konnte der Ersatzwert in `modbus_tcp_grid_w_fresh()` landen, obwohl ein echter Zähler existiert. Der Regelpfad hat jetzt seine eigene Variable (`s_grid_ctrl_w`), die **nur** ein Worker beschreibt, der wirklich ein Gerät mit der Rolle Netzzähler gelesen hat. Ist keines eingerichtet, sagt es das beim Start ins Log. |
+| 3 — Zwangsmodus | beim Start auf Normal | Modus und Leistung liegen im NVS, werden beim Start aber nicht wiederhergestellt, sondern **abgeräumt**: findet die Firmware einen gespeicherten Zwang, schreibt sie ~10 s nach dem Hochlaufen aktiv „Normal" in den Wechselrichter (die 10 s geben der Zweidrahtleitung Zeit) und protokolliert es. Ein Zwang läuft zusätzlich nach 2 h von selbst ab. Die entscheidenden Register (142/143, beim Laden 127/128) werden zurückgelesen und verglichen — `reg143 = 5000 verified` bzw. `inverter reports 20000 -- NOT applied`; `/api/deye/live` liefert das unter `ctrl` mit (`checked`, `failed`, `left`). |
+| 4 — 0-W-Halten | 60 s, danach stumm | Die Null ist jetzt eine **Brücke mit Ablauf**: nach `slave_hold_s` Sekunden antwortet die Emulation nicht mehr, der Deye erkennt den Zählerausfall und regelt mit seinem eigenen Wandler weiter — eine echte Messung ist besser als eine stille Fehlregelung. Einstellbar unter Mod RTU: unbegrenzt (altes Verhalten) / 30 / 60 / 120 s, Voreinstellung 60 s. Das Feld nutzt das bisherige `_rsv`-Byte der RTU-Konfiguration, das auf jedem Gerät 0 ist — also kein Layout-Wechsel, und 0 heißt „Voreinstellung". `/deye` zeigt die drei Zustände (frisch / Überbrückung / stumm), das Log meldet `meter emulation going SILENT`. |
+
+Mitgenommen, weil es dieselbe Wurzel hat: der **SLS-Exportschutz** rechnete mit dem Anzeige-Aggregat, das ein Ersatzwert sein kann und keine eigene Altersgrenze hat. Er nutzt jetzt denselben frischegeprüften Regelwert wie die Emulation (`MB_GRID_MAX_AGE_MS` liegt dafür jetzt in `modbus_tcp.h`, eine Definition für beide). Damit ist auch der Fund „SLS-Exportschutz rechnet mit veralteten Daten" erledigt.
+
+Die beiden sich widersprechenden Kommentare bei `modbus_rtu.c` (einer sagte „stumm bleiben", der andere „immer antworten") sind aufgelöst — die Beschreibung entspricht jetzt dem Code.
+
+**Nachweis am Gerät:** Build 240 geflasht, sauberer Start; Zähler-Emulation antwortet weiter (1848 Anfragen in 3 min, Alter 46 ms), Deye-Werte laufen durch, MQTT und Uhr in Ordnung. `/api/meter` liefert die neuen Felder (`quiet: 0`, `hold: 60`, `stale: 0`), `/api/deye/live` den `ctrl`-Block (`mode Normal`, `failed 0`) — das JSON bleibt mit 671 von 1600 Byte im Rahmen. Drei Minuten Log ohne einen einzigen Lesefehler am Netzzähler, also keine Gefahr, dass die 60-s-Brücke im Normalbetrieb überhaupt anspricht. Kein gespeicherter Zwangsmodus vorhanden, das Abräumen beim Start war deshalb nicht zu sehen.
+
+**Zwei Dinge stehen noch aus, weil sie einen Eingriff am laufenden Wechselrichter brauchen:**
+
+* **Was der Deye bei Zählerausfall wirklich tut.** Die Stummschaltung ist nur zu prüfen, indem man den Netzzähler länger als 60 s ausfallen lässt. Das ist ein echter Eingriff (der Deye meldet dann einen Zählerfehler und wechselt auf seinen Wandler) und wartet auf ausdrückliches „ja".
+* **Die Reihenfolge bei gemeinsamer IP.** Bei diesem Aufbau scheitert West (Unit 2) *nach* Ost (Unit 1), das entscheidende „ein Ausfall vor einem funktionierenden Gerät" kommt also nicht vor. Nachstellen ließe es sich nur mit einem erfundenen Gerät in der Liste des Betreibers — dafür wurde nichts an seiner Konfiguration verbogen.
 
 ## Gut gemacht — nicht anfassen
 

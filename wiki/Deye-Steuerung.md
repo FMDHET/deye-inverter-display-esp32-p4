@@ -85,6 +85,18 @@ Nebeneffekt: es entsteht **keine Warteschlange**. Wenn du den Schieber bewegst u
 > [!IMPORTANT]
 > Diese Task darf erst gestartet werden, **nachdem** die Zweidrahtleitung läuft — sie braucht deren Zugriffssperre. War die Reihenfolge falsch, stürzte das Gerät beim Start ab.
 
+## Ein Zwang ist nur geborgt
+
+Ein erzwungener Modus lebt **im Wechselrichter**, nicht im Display. Das Display schickt einmal ein paar Register und hat danach keine Macht mehr darüber. Daraus folgen drei Dinge, die absichtlich so eingebaut sind:
+
+**Ein Neustart hebt den Zwang auf.** Früher lebte der Modus nur im Arbeitsspeicher: nach einem Update stand auf dem Bildschirm „Normal", während der Deye unbeeindruckt weiter mit 5 kW aus dem Netz lud. Der Modus wird deshalb im NVS mitgeschrieben — aber beim Start nicht *wiederhergestellt*, sondern **abgeräumt**: findet die Firmware beim Hochlaufen einen gespeicherten Zwangsmodus, schreibt sie ungefähr zehn Sekunden später aktiv „Normal" in den Wechselrichter und protokolliert das (`stored mode '…' survived the restart … undoing it`). Die zehn Sekunden sind Absicht — so lange braucht die Zweidrahtleitung, bis sie sauber läuft.
+
+Damit ist die Regel einfach: **nach einem Stromausfall, einem Absturz oder einem Update ist der Akku wieder im Normalbetrieb.** Ein Zwang, den niemand mehr beaufsichtigt, ist genau das, was man nach einem unerwarteten Neustart nicht will.
+
+**Ein Zwang läuft nach zwei Stunden ab.** Danach fällt die Firmware selbst auf Normal zurück (`DEYE_FORCE_MAX_S`). Auf `/deye` steht unter `ctrl.left` die restliche Zeit in Sekunden.
+
+**Die Schreibbefehle werden nachgelesen.** Die entscheidenden Register (142/143 bei Normal und Entladen, 127/128 beim Laden) werden nach dem Schreiben zurückgelesen und verglichen. Vorher wurden alle Rückgabewerte verworfen — ein Modus, dessen Schreibvorgänge stillschweigend scheiterten, sah auf dem Bildschirm genauso aus wie einer, der funktionierte. Im Log steht jetzt `reg143 = 5000 verified` oder eben `inverter reports 20000 -- NOT applied`, und `/api/deye/live` liefert unter `ctrl` mit, wie viele Register geprüft wurden und wie viele davon nicht stimmten. Die zwölf Zeitfenster-Register (166–177) werden nur geschrieben, nicht nachgelesen: bei 9600 Baud kostet jeder Nachleser dem Deye-Poll eine Lücke, und ein Fehler zeigt sich dort schon am Rückgabewert.
+
 ## Der SLS-Schutz
 
 ### Das Problem
@@ -102,6 +114,8 @@ maximaler Export  =  Ampere  ×  3 Phasen  ×  230 Volt  ×  0,9
 ```
 
 Der Faktor 0,9 ist ein Sicherheitsabstand: es wird bei 90 Prozent der theoretischen Grenze eingegriffen, nicht erst bei 100.
+
+Gerechnet wird dabei mit dem **Regelwert** des Netzzählers, samt seiner 12-Sekunden-Frischegrenze — nicht mit der Zahl, die auf dem Bildschirm steht. Die kann ein Ersatzwert sein und hat keine eigene Altersgrenze; ein Schutz, der auf einen toten Messwert hin eingreift (oder gerade nicht eingreift), ist keiner. Ist der Netzwert nicht frisch, greift der Schutz nicht ein — und die Zähler-Emulation hört in dieser Lage ohnehin auf zu antworten, sodass der Deye auf seinen eigenen Wandler zurückfällt.
 
 | Hauptschalter | Grenze |
 | --- | --- |

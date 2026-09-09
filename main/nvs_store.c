@@ -400,3 +400,8 @@ esp_err_t nvs_store_set_grid_sp(int w)
 
 uint8_t nvs_store_get_sls_a(void)        { return get_u8(NS_MB, "sls_a", 35); }
 esp_err_t nvs_store_set_sls_a(uint8_t a) { return set_u8(NS_MB, "sls_a", a); }
+
+uint8_t   nvs_store_get_deye_mode(void)        { return get_u8(NS_MB, "dmode", 0); }
+esp_err_t nvs_store_set_deye_mode(uint8_t m)   { return set_u8(NS_MB, "dmode", m); }
+uint16_t  nvs_store_get_deye_power(void)       { return get_u16(NS_MB, "dpwr", 0); }
+esp_err_t nvs_store_set_deye_power(uint16_t w) { return set_u16(NS_MB, "dpwr", w); }

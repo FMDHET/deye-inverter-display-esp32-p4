@@ -48,6 +48,10 @@ Für jeden der beiden Busse (A hängt an GPIO 52/51, B an GPIO 50/49):
 
 Darunter der **Selbsttest** — der prüft die eigene Hardware, ohne dass der Wechselrichter beteiligt ist. Sehr nützlich zum Eingrenzen von Verkabelungsfehlern, siehe [Modbus-RTU](Modbus-RTU#der-selbsttest).
 
+| Feld | Werte |
+| --- | --- |
+| **Bei Zählerausfall 0 W liefern für** | unbegrenzt / 30 s / 60 s / 120 s (Voreinstellung 60 s). Wie lange der emulierte Zähler nach dem Ausfall des echten Netzzählers noch mit „0 Watt" antwortet, bevor er ganz verstummt. Danach erkennt der Deye den Zählerausfall und regelt mit seinem eigenen Stromwandler weiter. Warum das die sichere Reihenfolge ist: [Modbus-RTU](Modbus-RTU#und-jetzt-der-wichtige-teil). |
+
 Ganz unten der Abschnitt **TCP-Bridge**. Damit wird das Display zum Modbus-Gateway: Programme im Netzwerk erreichen über Port 502 die Register des Deye, ohne eigenen RS485-Adapter.
 
 | Feld | Werte |

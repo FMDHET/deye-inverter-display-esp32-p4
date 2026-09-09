@@ -33,12 +33,8 @@ _Static_assert(sizeof(mb_rtu_cfg_t) == 24, "mb_rtu_cfg_t layout");
 /* Interval of the regular Deye battery poll on a MASTER bus. */
 #define DEYE_POLL_MS    2000
 
-/* Max age of the grid reading we still feed the Deye as a REAL value through the
- * Eastron emulation. Within this -> report real grid power (zero-export works,
- * tolerant of a congested multi-device poll cycle). Older (poll stalled / no
- * grid meter) -> report a balanced 0 instead (see do_slave): keeps the meter
- * alive for the Deye while giving it no frozen value to chase. */
-#define MB_GRID_MAX_AGE_MS  12000
+/* MB_GRID_MAX_AGE_MS (the age at which the grid reading stops counting as real)
+ * lives in modbus_tcp.h -- the same bound guards the SLS export protection. */
 
 /* Nominal values the emulation synthesises around: the Deye only uses P, but a
  * plausible U/I keeps meter-detection happy. */
@@ -64,6 +60,8 @@ static volatile int          s_grid_sp;      /* grid setpoint (W) for zero-expor
 static mb_manip_cfg_t        s_manip;         /* master switch defaults to OFF */
 static uint32_t              s_requests;      /* SDM630 requests answered       */
 static uint32_t              s_request_ms;    /* ms of the last answered request */
+static bool                  s_slave_quiet;   /* bridge over -> not answering   */
+static uint32_t              s_stale_ms;      /* how long the value is stale    */
 static volatile bool         s_selftest_req  = false;
 static mb_rtu_selftest_result_t s_selftest_result = { .state = MB_RTU_SELFTEST_IDLE, .latency_ms = -1 };
 
@@ -268,7 +266,8 @@ static int sdm630_response(const uint8_t *req, uint8_t *out, const float p[3], f
  * split evenly, which is exactly what this emulation did before -- so an
  * unmanipulated three-phase-blind setup behaves bit-for-bit as it used to.
  * When the reading is STALE every phase is served as 0 (see do_slave): the
- * meter stays alive for the Deye but gives it nothing to chase.
+ * meter stays alive for the Deye but gives it nothing to chase -- and only for
+ * slave_hold_s seconds, after which do_slave() stops answering entirely.
  *
  * Deliberately SIDE-EFFECT FREE, so the /meter page can call it to show the
  * chain even while no Deye is polling us -- otherwise the page would read all
@@ -324,24 +323,58 @@ static void do_slave(int idx, int port, const mb_rtu_bus_cfg_t *c)
 
     /* Zero-export trick: report (real grid - setpoint) so the Deye drives the
      * real grid point to the setpoint instead of to 0. CRITICAL: only do this
-     * with a FRESH grid reading. A stale/frozen value here is a dead sensor in
-     * the inverter's control loop -- it once drove a 15 kW export runaway. If
-     * the reading is stale, stay silent: the Deye sees a meter timeout and
-     * falls back to its own CT. */
-    /* When fresh, report the real grid power; when stale (poll slow/stalled),
-     * report a BALANCED 0 -- but ALWAYS answer. Going silent makes the Deye flag
-     * "meter lost / not connected". A frozen real value would let it chase a
-     * dead sensor (the 15 kW runaway). 0 keeps the meter alive AND gives the
-     * Deye no error to chase, so it just holds until fresh data returns. */
-    static bool s_grid_was_fresh = true;
+     * with a FRESH grid reading -- a frozen value here is a dead sensor in the
+     * inverter's control loop, it once drove a 15 kW export runaway. What
+     * happens instead when it is stale is the bridge below. */
+    /* When fresh, report the real grid power. When stale, report a BALANCED 0 --
+     * never the frozen real value, which would be a dead sensor in the
+     * inverter's control loop (that caused a 15 kW export runaway).
+     *
+     * But 0 W is a BRIDGE, not a resting state: it keeps the meter alive for the
+     * Deye, and the Deye then holds whatever it was doing -- fine for a hiccup,
+     * wrong for a ten-minute router reboot at 5 kW discharge, because it holds
+     * that 5 kW however the house load moves. So after slave_hold_s seconds we
+     * stop answering: the Deye reports a meter failure and falls back to its own
+     * CT, i.e. to a real measurement instead of our silence.
+     * slave_hold_s = MB_SLAVE_HOLD_FOREVER keeps the old unbounded behaviour. */
+    static bool     s_grid_was_fresh = true;
+    static uint32_t s_stale_since;              /* ms when freshness was lost */
+    static bool     s_quiet_logged;
     float grid_w = 0.0f;
     bool fresh = modbus_tcp_grid_w_fresh(&grid_w, MB_GRID_MAX_AGE_MS);
+    uint32_t nowm = (uint32_t)(esp_timer_get_time() / 1000);
+
+    uint8_t hold_cfg;
+    portENTER_CRITICAL(&s_mux);
+    hold_cfg = s_cfg.slave_hold_s;
+    portEXIT_CRITICAL(&s_mux);
+    uint16_t hold_s = hold_cfg ? hold_cfg : MB_SLAVE_HOLD_DEFAULT_S;
+
     if (fresh != s_grid_was_fresh) {
+        if (!fresh) { s_stale_since = nowm; s_quiet_logged = false; }
         ESP_LOGW(TAG, "grid reading %s -> meter reports %s",
                  fresh ? "fresh again" : "STALE",
-                 fresh ? "real grid power" : "0 W (balanced; Deye holds)");
+                 fresh ? "real grid power" : "0 W (bridge; Deye holds)");
         s_grid_was_fresh = fresh;
     }
+
+    if (!fresh && hold_cfg != MB_SLAVE_HOLD_FOREVER &&
+        (uint32_t)(nowm - s_stale_since) > (uint32_t)hold_s * 1000u) {
+        if (!s_quiet_logged) {
+            ESP_LOGW(TAG, "grid reading stale for >%u s -- meter emulation going "
+                          "SILENT so the Deye falls back to its own CT", (unsigned)hold_s);
+            s_quiet_logged = true;
+        }
+        portENTER_CRITICAL(&s_mux);
+        s_slave_quiet = true;
+        s_stale_ms    = (uint32_t)(nowm - s_stale_since);
+        portEXIT_CRITICAL(&s_mux);
+        return;                                 /* no response at all */
+    }
+    portENTER_CRITICAL(&s_mux);
+    s_slave_quiet = false;
+    s_stale_ms    = fresh ? 0 : (uint32_t)(nowm - s_stale_since);
+    portEXIT_CRITICAL(&s_mux);
 
     float served_p[3], served_total;
     compute_served(fresh, grid_w, NULL, NULL, served_p, &served_total);
@@ -936,6 +969,11 @@ void modbus_rtu_get_served(mb_served_t *out)
     for (int i = 0; i < MB_RTU_BUSES; i++)
         if (s_cfg.bus[i].enabled && s_cfg.bus[i].role == MB_RTU_SLAVE) slave = true;
     out->slave_running = slave;
+    out->quiet   = s_slave_quiet;
+    out->hold_s  = (s_cfg.slave_hold_s == MB_SLAVE_HOLD_FOREVER)
+                       ? 0 : (s_cfg.slave_hold_s ? s_cfg.slave_hold_s
+                                                 : MB_SLAVE_HOLD_DEFAULT_S);
+    out->stale_s = s_stale_ms / 1000u;
     portEXIT_CRITICAL(&s_mux);
 }
 

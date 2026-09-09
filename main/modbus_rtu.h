@@ -53,8 +53,21 @@ typedef struct {
     uint16_t gw_port;         /* listen port (0 -> MB_GW_DEFAULT_PORT)       */
     uint16_t gw_timeout_ms;   /* RTU response timeout (0 -> default 800)     */
     uint8_t  gw_max_clients;  /* concurrent TCP clients (0 -> default 4)     */
-    uint8_t  _rsv;
+    /* How long the meter emulation keeps answering 0 W after the grid reading
+     * has gone stale, before it stops answering at all. Takes over the byte
+     * that used to be `_rsv` -- stored as 0 on every existing device, which is
+     * exactly "use the default" here, so no layout change and no migration.
+     * 0 = default (MB_SLAVE_HOLD_DEFAULT_S), 255 = never go quiet, else seconds. */
+    uint8_t  slave_hold_s;
 } mb_rtu_cfg_t;
+
+/* A stale reading is a dead sensor in the inverter's control loop. 0 W keeps
+ * the meter alive and gives the Deye nothing to chase -- right for a hiccup,
+ * wrong for ten minutes: the Deye then holds its last power regardless of the
+ * real load. After the bridge the emulation goes SILENT, so the Deye reports a
+ * meter failure and falls back to its own CT, i.e. to a real measurement. */
+#define MB_SLAVE_HOLD_DEFAULT_S   60
+#define MB_SLAVE_HOLD_FOREVER     255
 
 #define MB_GW_DEFAULT_PORT       502
 #define MB_GW_DEFAULT_TIMEOUT_MS 800
@@ -135,6 +148,9 @@ typedef struct {
     uint32_t requests;        /* SDM630 requests answered since boot          */
     uint32_t age_ms;          /* since the last answered request (0 = never)  */
     bool     slave_running;   /* a bus is actually in SDM630-slave mode       */
+    bool     quiet;           /* bridge over: emulation is not answering      */
+    uint16_t hold_s;          /* the bridge window in force (0 = never quiet) */
+    uint32_t stale_s;         /* seconds the grid reading has been stale      */
 } mb_served_t;
 
 void        modbus_rtu_get_served(mb_served_t *out);

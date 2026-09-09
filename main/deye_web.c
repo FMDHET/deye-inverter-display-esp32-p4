@@ -1,5 +1,6 @@
 #include "deye_web.h"
 #include "modbus_rtu.h"
+#include "deye_ctrl.h"
 
 #include <stdarg.h>
 
@@ -143,11 +144,22 @@ static esp_err_t live_handler(httpd_req_t *req)
              "\"grid\":{\"freq\":%.2f,\"v\":[%.1f,%.1f,%.1f],"
              "\"ct_total\":%.0f,\"ct\":[%.0f,%.0f,%.0f],"
              "\"total\":%.0f,\"p\":[%.0f,%.0f,%.0f],"
-             "\"inner_total\":%.0f,\"inner\":[%.0f,%.0f,%.0f]}}",
+             "\"inner_total\":%.0f,\"inner\":[%.0f,%.0f,%.0f]},",
              l.grid_freq, l.grid_v[0], l.grid_v[1], l.grid_v[2],
              l.grid_ct_total, l.grid_ct_p[0], l.grid_ct_p[1], l.grid_ct_p[2],
              l.grid_total, l.grid_p[0], l.grid_p[1], l.grid_p[2],
              l.grid_inner_total, l.grid_inner_p[0], l.grid_inner_p[1], l.grid_inner_p[2]);
+    /* Battery mode: what is in force, how long it still has, and whether its
+     * register writes actually verified -- a forced mode whose writes failed
+     * used to look exactly like one that worked. */
+    deye_ctrl_status_t cs;
+    deye_ctrl_get_status(&cs);
+    o = jcat(s_live_json, LIVE_CAP, o,
+             "\"ctrl\":{\"mode\":%d,\"mode_name\":\"%s\",\"power\":%d,\"user_power\":%d,"
+             "\"age\":%u,\"left\":%u,\"checked\":%u,\"failed\":%u}}",
+             (int)cs.mode, deye_ctrl_mode_name(cs.mode), cs.power_w, cs.user_power_w,
+             (unsigned)cs.age_s, (unsigned)cs.left_s,
+             (unsigned)cs.checked, (unsigned)cs.failed);
     (void)o;
 
     httpd_resp_set_type(req, "application/json");

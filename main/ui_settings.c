@@ -98,6 +98,7 @@ static lv_obj_t       *s_rtu_role[MB_RTU_BUSES];
 static lv_obj_t       *s_rtu_id[MB_RTU_BUSES];
 static lv_obj_t       *s_rtu_baud[MB_RTU_BUSES];
 static lv_obj_t       *s_rtu_selftest_lbl;
+static lv_obj_t       *s_rtu_hold;        /* meter-failure bridge window */
 static lv_obj_t       *s_gw_sw;
 static lv_obj_t       *s_gw_port;
 static lv_obj_t       *s_gw_bus[MB_RTU_BUSES];
@@ -1088,6 +1089,13 @@ static const uint32_t RTU_BAUDS[] = { 4800, 9600, 19200, 38400 };
  * this tab has no keyboard, and 502 is the standard Modbus-TCP port -- the rest
  * are the usual fallbacks for when something else already owns 502. */
 static const uint32_t GW_PORTS[] = { 502, 503, 1502, 5020 };
+
+/* How long the meter emulation answers 0 W after the grid reading went stale,
+ * before it goes silent. MB_SLAVE_HOLD_FOREVER = never go silent (the old
+ * unbounded behaviour). A stored 0 means "default" -> shows as 60 s. */
+static const uint32_t RTU_HOLDS[]   = { MB_SLAVE_HOLD_FOREVER, 30, 60, 120 };
+#define RTU_HOLD_OPTS   "unbegrenzt\n30 s\n60 s\n120 s"
+#define RTU_HOLD_DFLT   2                    /* index of "60 s" */
 #define GW_PORT_OPTS "502\n503\n1502\n5020"
 
 static void mb_rtu_refresh(void)
@@ -1218,6 +1226,8 @@ static void rtu_save_cb(lv_event_t *e)
             if (s_gw_bus[i] && lv_obj_has_state(s_gw_bus[i], LV_STATE_CHECKED))
                 c.gw_bus_mask |= (uint8_t)(1u << i);
     }
+    if (s_rtu_hold)
+        c.slave_hold_s = (uint8_t)RTU_HOLDS[lv_dropdown_get_selected(s_rtu_hold)];
     modbus_rtu_set_cfg(&c);
     mb_rtu_refresh();
 }
@@ -1359,7 +1369,26 @@ static void modbus_rtu_tab_build(lv_obj_t *parent)
     /* em-dash = "no self-test run yet" */
     s_rtu_selftest_lbl = wrap_label(parent, 560, 196, 272, "\xe2\x80\x94");
 
-    gw_section_build(parent, &c, 320);
+    /* What the emulated meter does when the grid reading goes stale. */
+    lv_obj_t *hl = lv_label_create(parent);
+    lv_label_set_text(hl, "Bei Z\xc3\xa4hlerausfall 0 W liefern f\xc3\xbcr");
+    lv_obj_set_style_text_color(hl, COL_SUB, 0);
+    lv_obj_align(hl, LV_ALIGN_TOP_LEFT, 0, 322);
+    s_rtu_hold = lv_dropdown_create(parent);
+    lv_dropdown_set_options(s_rtu_hold, RTU_HOLD_OPTS);
+    lv_dropdown_set_selected(s_rtu_hold,
+                             opt_idx(RTU_HOLDS, ARRAY_LEN(RTU_HOLDS),
+                                     c.slave_hold_s, RTU_HOLD_DFLT));
+    lv_obj_set_width(s_rtu_hold, 150);
+    lv_obj_align(s_rtu_hold, LV_ALIGN_TOP_LEFT, 0, 344);
+    lv_obj_add_event_cb(s_rtu_hold, rtu_save_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    /* Width 380: the tab's content starts at x=234 on screen, so anything wider
+     * than ~380 from x=166 runs off the right edge of the 800 px panel. */
+    wrap_label(parent, 380, 166, 344,
+               "danach antwortet der Z\xc3\xa4hler nicht mehr \xe2\x80\x94 der Deye "
+               "nutzt seinen eigenen CT.");
+
+    gw_section_build(parent, &c, 420);
 
     /* Save button is in the top menu bar (header_save_cb). */
 

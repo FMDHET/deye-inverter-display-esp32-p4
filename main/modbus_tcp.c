@@ -60,6 +60,13 @@ static int           s_live_count;
 static uint32_t s_grid_ms;        /* esp_timer ms of last fresh grid update */
 static bool     s_grid_valid;     /* grid_w ever read since (re)config       */
 static bool     s_have_grid_role; /* any enabled device has role GRID        */
+/* The value the CONTROL path gets (modbus_tcp_grid_w_fresh -> RTU emulation,
+ * SLS guard). Deliberately NOT s_st.grid_w: that one is the display value and
+ * the aggregator also fills it from substitutes (the Deye's own CT input, see
+ * agg_task). Feeding a substitute back into the control loop means the Deye
+ * chases the number our own emulation just sent it. Written ONLY by a worker
+ * that really read a device with role GRID. */
+static float    s_grid_ctrl_w;
 
 /* Cached SunSpec layout per device. Walking the model list costs one Modbus
  * read per model and was redone for EVERY value on EVERY poll (50-100 reads per
@@ -597,6 +604,15 @@ static int poll_device(int s, const mb_dev_cfg_t *d, int idx, agg_t *a,
 static agg_t   s_contrib[MB_MAX_DEVICES];   /* last good routed contribution */
 static bool    s_valid[MB_MAX_DEVICES];     /* polled OK at least once        */
 static uint32_t s_last_ms[MB_MAX_DEVICES];  /* ms of last poll attempt        */
+static uint32_t s_ok_ms[MB_MAX_DEVICES];    /* ms of last SUCCESSFUL poll     */
+
+/* A contribution counts only while its device still answers. Without this a
+ * device that goes away (a Symo switching off at dusk) kept its last value in
+ * the energy model forever -- the dashboard showed PV at night. Relative to the
+ * device's own interval so a slow 60-s poller is not declared dead between two
+ * polls; floor 15 s. */
+#define MB_DEV_STALE_FACTOR   3
+#define MB_DEV_STALE_MIN_MS   15000
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -621,11 +637,12 @@ static void reconfigure_apply(void)
     memset(s_contrib, 0, sizeof(s_contrib));
     memset(s_valid,   0, sizeof(s_valid));
     memset(s_last_ms, 0, sizeof(s_last_ms));
+    memset(s_ok_ms,   0, sizeof(s_ok_ms));
     memset(s_ss,      0, sizeof(s_ss));            /* re-discover SunSpec layout */
     memset(s_ph,      0, sizeof(s_ph));            /* phase snapshots are stale  */
     memset(s_ph_ms,   0, sizeof(s_ph_ms));
     s_ph_grid_idx    = grid_idx;
-    s_have_grid_role = has_grid;
+    s_have_grid_role = has_grid;   /* diagnostic only, see the warning below */
     for (int i = 0; i < cnt; i++) {
         memset(&s_live[i], 0, sizeof(s_live[i]));
         strncpy(s_live[i].ip, s_devs[i].ip, sizeof(s_live[i].ip) - 1);
@@ -638,9 +655,17 @@ static void reconfigure_apply(void)
     /* Drop stale energy + mark grid INVALID so the RTU emulation stops driving
      * the Deye until a fresh read lands. */
     s_grid_valid = false;
+    s_grid_ctrl_w = 0;
     s_st.grid_w = s_st.pv_w = s_st.house_w = 0;
     s_st.deye_w = s_st.deye_soc = s_st.byd_w = s_st.byd_soc = 0;
     portEXIT_CRITICAL(&s_mux);
+
+    /* Worth saying out loud: without a grid meter there is no control value at
+     * all any more (the Deye's own CT is no longer accepted, see worker_task),
+     * so the meter emulation will bridge with 0 W and then go quiet. */
+    if (!has_grid)
+        ESP_LOGW(TAG, "no device has role '%s' -- no grid value for the meter emulation",
+                 modbus_tcp_role_name(MB_ROLE_GRID));
 }
 
 static bool same_ipport(const mb_dev_cfg_t *a, const char *ip, int port)
@@ -691,17 +716,24 @@ static void worker_task(void *arg)
         int want_prio = critical ? MB_PRIO_CRIT : MB_PRIO_BG;
         if (want_prio != cur_prio) { vTaskPrioritySet(NULL, want_prio); cur_prio = want_prio; }
 
-        /* Which same-IP devices are due now? */
+        /* Which same-IP devices are due now? Control-critical roles FIRST: on a
+         * shared IP (Fronius Smart Meter on unit 240 + inverter on unit 1) the
+         * meter must not end up behind an inverter that is off and eats the
+         * round's time budget. */
         uint32_t now = now_ms();
         int due[MB_MAX_DEVICES], ndue = 0, fastest = MB_MAX_POLL_MS;
-        for (int j = 0; j < cnt; j++) {
-            if (!same_ipport(&devs[j], ip, port)) continue;
-            uint16_t iv = devs[j].poll_ms ? devs[j].poll_ms : MB_DEFAULT_POLL_MS;
-            if (iv < fastest) fastest = iv;
-            uint32_t last; bool valid;
-            portENTER_CRITICAL(&s_mux); last = s_last_ms[j]; valid = s_valid[j]; portEXIT_CRITICAL(&s_mux);
-            if (valid && (uint32_t)(now - last) < iv) continue;
-            due[ndue++] = j;
+        for (int pass = 0; pass < 2; pass++) {
+            for (int j = 0; j < cnt; j++) {
+                if (!same_ipport(&devs[j], ip, port)) continue;
+                bool crit = (devs[j].role == MB_ROLE_GRID || devs[j].role == MB_ROLE_DEYE_METER);
+                if (crit != (pass == 0)) continue;
+                uint16_t iv = devs[j].poll_ms ? devs[j].poll_ms : MB_DEFAULT_POLL_MS;
+                if (iv < fastest) fastest = iv;
+                uint32_t last; bool valid;
+                portENTER_CRITICAL(&s_mux); last = s_last_ms[j]; valid = s_valid[j]; portEXIT_CRITICAL(&s_mux);
+                if (valid && (uint32_t)(now - last) < iv) continue;
+                due[ndue++] = j;
+            }
         }
         int nap = fastest < 250 ? fastest : 250;   /* re-check due devices ~>=4x/s */
         if (ndue == 0) { vTaskDelay(pdMS_TO_TICKS(nap > 0 ? nap : 50)); continue; }
@@ -738,13 +770,19 @@ static void worker_task(void *arg)
             if (r != 0) {
                 s_st.err_count++; s_live[j].connected = false;
             } else {
-                s_contrib[j] = c; s_valid[j] = true;
+                s_contrib[j] = c; s_valid[j] = true; s_ok_ms[j] = fnow;
                 s_live[j].connected = true; s_live[j].pv_w = pv; s_live[j].w = w; s_live[j].soc = soc;
                 /* Keep the control-critical grid value fresh IMMEDIATELY (the RTU
-                 * emulation reads it), independent of the aggregator's cadence. */
-                if (c.netz_v) { s_st.grid_w = c.netz; s_grid_ms = fnow; s_grid_valid = true; }
-                else if (!s_have_grid_role && c.deye_present) {
-                    s_st.grid_w = c.deye_ct; s_grid_ms = fnow; s_grid_valid = true;
+                 * emulation reads it), independent of the aggregator's cadence.
+                 * ONLY from a real grid source: the Deye's CT input (reg 619)
+                 * used to be accepted here when no grid meter was configured,
+                 * but that is the value our own emulation last sent it -- the
+                 * loop fed itself. It is still shown (agg_task), never regulated
+                 * on. Without a grid meter the value simply ages out, and
+                 * do_slave() handles that (bridge, then silence). */
+                if (c.netz_v) {
+                    s_st.grid_w = c.netz; s_grid_ctrl_w = c.netz;
+                    s_grid_ms = fnow; s_grid_valid = true;
                 }
             }
             portEXIT_CRITICAL(&s_mux);
@@ -753,9 +791,24 @@ static void worker_task(void *arg)
                 ESP_LOGW(TAG, "read failed %s id%u (%s/%s) -- reconnecting", ip,
                          devs[j].slave, modbus_tcp_mfr_name(devs[j].mfr),
                          modbus_tcp_role_name(devs[j].role));
-                close(sk); sk = -1;        /* drop on error; reconnect next round */
+                close(sk); sk = -1;
                 trouble = true;
-                break;                     /* don't hammer the rest on a dead link */
+                /* Carry on with the rest of this IP instead of abandoning the
+                 * round. A single dead unit used to starve everyone sharing its
+                 * address: a Fronius Smart Meter on unit 240 was never read
+                 * again once the inverter on unit 1 switched off at dusk.
+                 * The socket is always dropped first and rebuilt here -- after a
+                 * timeout it may be desynced, and reusing it could hand device B
+                 * the late answer meant for device A. If the reconnect fails,
+                 * the `sk < 0` branch above marks the remaining devices as
+                 * failed without further I/O, and the round backs off. */
+                if (k + 1 < ndue) {
+                    int tmo   = devs[slot].timeout_ms ? devs[slot].timeout_ms : MB_DEFAULT_TIMEOUT_MS;
+                    int io_ms = tmo < 2000 ? 2000 : tmo;
+                    sk = connect_timeout(ip, port, tmo, io_ms);
+                    strncpy(sk_ip, ip, sizeof(sk_ip) - 1); sk_ip[sizeof(sk_ip) - 1] = '\0';
+                    sk_port = port;
+                }
             }
         }
 
@@ -776,18 +829,28 @@ static void agg_task(void *arg)
         if (s_reconf) { s_reconf = false; reconfigure_apply(); }
 
         agg_t contrib[MB_MAX_DEVICES]; bool valid[MB_MAX_DEVICES]; int cnt;
+        uint32_t ok_ms[MB_MAX_DEVICES]; uint16_t iv[MB_MAX_DEVICES];
         bool rtu_dv; float rtu_dw, rtu_ds; uint32_t rtu_dms;
         portENTER_CRITICAL(&s_mux);
         cnt = s_dev_count;
         memcpy(contrib, s_contrib, sizeof(contrib));
         memcpy(valid,   s_valid,   sizeof(valid));
+        memcpy(ok_ms,   s_ok_ms,   sizeof(ok_ms));
+        for (int i = 0; i < MB_MAX_DEVICES; i++)
+            iv[i] = s_devs[i].poll_ms ? s_devs[i].poll_ms : MB_DEFAULT_POLL_MS;
         rtu_dv = s_rtu_deye_valid; rtu_dw = s_rtu_deye_w; rtu_ds = s_rtu_deye_soc; rtu_dms = s_rtu_deye_ms;
         portEXIT_CRITICAL(&s_mux);
 
         agg_t a = {0};
         bool has_any = false;
+        uint32_t anow = now_ms();
         for (int i = 0; i < cnt; i++) {
             if (!valid[i]) continue;
+            /* Drop a device that has gone quiet, instead of carrying its last
+             * value forever (PV at night, see MB_DEV_STALE_*). */
+            uint32_t max_age = (uint32_t)iv[i] * MB_DEV_STALE_FACTOR;
+            if (max_age < MB_DEV_STALE_MIN_MS) max_age = MB_DEV_STALE_MIN_MS;
+            if ((uint32_t)(anow - ok_ms[i]) > max_age) continue;
             has_any = true;
             agg_t *c = &contrib[i];
             a.pv += c->pv; if (c->pv_v) a.pv_v = true;
@@ -856,11 +919,17 @@ static void agg_task(void *arg)
          * If export > max: throttle = user_setpoint − overshoot
          * If export ≤ max: restore to user_setpoint.
          * Dead-band ±200 W avoids constant RTU writes from measurement noise. */
-        if (has_any && a.netz_v && deye_ctrl_get_mode() == DEYE_MODE_FORCE_DISCHARGE) {
+        /* A protection function must read the CONTROL value with its age bound,
+         * not the display aggregate: that one can be a substitute (the Deye's
+         * own CT) and carries no age limit, so the guard could throttle -- or
+         * fail to throttle -- on a dead sensor. */
+        float sls_grid_w = 0;
+        if (deye_ctrl_get_mode() == DEYE_MODE_FORCE_DISCHARGE &&
+            modbus_tcp_grid_w_fresh(&sls_grid_w, MB_GRID_MAX_AGE_MS)) {
             uint8_t sls_a = nvs_store_get_sls_a();
             if (sls_a > 0) {
                 float max_export_w = (float)sls_a * 3.0f * 230.0f * 0.9f;
-                float export_w     = -a.netz;   /* netz negative = export; we want positive */
+                float export_w     = -sls_grid_w;  /* netz negative = export */
                 int   user_pw      = deye_ctrl_get_user_power();
                 int   target_pw;
                 if (export_w > max_export_w) {
@@ -980,7 +1049,7 @@ bool modbus_tcp_grid_w_fresh(float *out_w, uint32_t max_age_ms)
     bool ok = false;
     portENTER_CRITICAL(&s_mux);
     if (s_grid_valid && (uint32_t)(now - s_grid_ms) <= max_age_ms) {
-        if (out_w) *out_w = s_st.grid_w;
+        if (out_w) *out_w = s_grid_ctrl_w;
         ok = true;
     }
     portEXIT_CRITICAL(&s_mux);

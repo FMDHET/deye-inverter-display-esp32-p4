@@ -84,6 +84,12 @@ void      modbus_tcp_get_status(modbus_tcp_status_t *out);
  * frozen value (that caused a 15 kW export runaway). */
 bool      modbus_tcp_grid_w_fresh(float *out_w, uint32_t max_age_ms);
 
+/* Max age at which the grid reading still counts as a real value for anything
+ * that steers or protects (the Eastron emulation, the SLS export guard).
+ * Generous enough for a congested multi-device poll cycle, far below the time
+ * in which the household load can change dangerously. */
+#define MB_GRID_MAX_AGE_MS  12000
+
 /* Deye values supplied by the RTU master (modbus_rtu.c) instead of TCP. They
  * feed the Deye node + house balance; SoC also comes from here. */
 void      modbus_tcp_set_rtu_deye(float w, float soc, bool valid);

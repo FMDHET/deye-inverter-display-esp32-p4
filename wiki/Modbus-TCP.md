@@ -133,6 +133,21 @@ Der Grundsatz dahinter: **die Bedienung darf nicht ruckeln, weil ein Datenlogger
 
 Die Verbindungen bleiben übrigens offen, statt für jede Abfrage neu aufgebaut zu werden. Das spart pro Abfrage einige Millisekunden und viele Netzwerkkanäle.
 
+### Mehrere Geräte an einer IP
+
+Ein Fronius-Datenlogger kann mehrere Geräte beherbergen: den Wechselrichter unter Slave-ID 1 und einen Smart Meter unter 240 — dieselbe IP, dieselbe Verbindung. Solche Geräte teilen sich deshalb einen Programmteil, der sie nacheinander über **eine** Verbindung abfragt (viele Datenlogger erlauben ohnehin nur eine).
+
+Zwei Regeln halten das gutartig:
+
+* **Wer in die Regelung geht, wird zuerst gefragt.** Netzzähler- und Deye-Zähler-Rollen kommen in jeder Runde vor allen anderen dran.
+* **Ein stummes Gerät blockiert seine Mitbewohner nicht.** Antwortet eines nicht, wird die Verbindung verworfen, sofort neu aufgebaut und mit dem nächsten Gerät weitergemacht. Früher brach die ganze Runde ab: schaltete der Wechselrichter abends ab, wurde der Smart Meter an derselben IP nie mehr gelesen — die ganze Nacht. Neu aufgebaut wird dabei immer, denn nach einem Zeitablauf kann die verworfene Antwort noch unterwegs sein und würde sonst dem *nächsten* Gerät zugeordnet.
+
+Scheitert auch der Verbindungsaufbau, gelten die restlichen Geräte der Runde als nicht erreichbar und es wird 3 Sekunden gewartet, statt im Sekundentakt anzuklopfen.
+
+### Ein Gerät, das schweigt, verschwindet aus dem Bild
+
+Der letzte gelesene Wert eines Geräts blieb früher für immer im Gesamtbild stehen. Der Effekt: nachts zeigte die Solaranzeige weiter die Leistung von 20:14 Uhr. Ein Beitrag zählt jetzt nur, solange sein Gerät auch antwortet — nach dem Dreifachen seines Abfrageintervalls, mindestens aber 15 Sekunden, fällt er heraus, und der Kreis auf dem Bildschirm zeigt „--" statt einer Zahl, die niemand mehr gemessen hat.
+
 ## Wie der Hausverbrauch berechnet wird
 
 Der Hausverbrauch wird **nicht gemessen** — dafür bräuchte man einen weiteren Zähler. Er wird ausgerechnet:
@@ -184,7 +199,9 @@ Bei den eigentlichen Leseoperationen gilt eine Untergrenze von 2 Sekunden, egal 
 
 Das ist die wichtigste Funktion im ganzen Programm. Sie heißt `modbus_tcp_grid_w_fresh()` und beantwortet die Frage: *„Wie hoch ist die Netzleistung — aber nur, wenn du es wirklich weißt?"*
 
-Sie gibt nur dann einen Wert heraus, wenn er innerhalb einer vorgegebenen Zeitspanne wirklich von einem Zähler gelesen wurde. Sonst sagt sie „nein". „Nein" kommt in drei Fällen: kein Netzzähler eingerichtet, der Wert ist zu alt, oder es wurde gerade umkonfiguriert und noch nichts gelesen.
+Sie gibt nur dann einen Wert heraus, wenn er innerhalb einer vorgegebenen Zeitspanne wirklich von einem Zähler gelesen wurde. Sonst sagt sie „nein". „Nein" kommt in drei Fällen: kein Netzzähler eingerichtet, der Wert ist zu alt, oder es wurde gerade umkonfiguriert und noch nichts gelesen. Die Zeitspanne ist eine gemeinsame Grenze (`MB_GRID_MAX_AGE_MS`, 12 Sekunden) — dieselbe für die Zähler-Emulation und für den SLS-Exportschutz.
+
+**Regelwert und Anzeigewert sind zwei verschiedene Zahlen.** Auf dem Bildschirm darf ein Ersatzwert stehen, damit der Netz-Kreis nicht leer bleibt — in die Regelung darf er nicht. Der wichtigste Fall: der Deye hat einen eigenen Stromwandler und meldet dessen Messwert in Register 619. Der sah wie ein prima Netzwert aus, ist aber genau die Zahl, die unsere eigene Emulation ihm eine Sekunde vorher geschickt hat. Wer damit regelt, hat einen Kreis gebaut, der sich selbst füttert. Deshalb: Register 619 wird angezeigt, aber `modbus_tcp_grid_w_fresh()` liefert ausschließlich Werte von einem Gerät mit der Rolle `Netz-Zaehler`. Ist keines eingerichtet, sagt die Funktion „nein" — und im Log steht beim Start `no device has role 'Netz-Zaehler'`.
 
 > [!WARNING]
 > **Alles, was den Wechselrichter steuert, muss über diese Funktion gehen und bei „nein" die Finger stillhalten.** Ein Regelkreis, der auf eine eingefrorene Zahl reagiert, dreht immer weiter auf — er sieht ja keine Wirkung. Hier hat das einmal 15 kW Einspeisung erzeugt. Die ganze Geschichte: [Fehlersuche](Fehlersuche#die-15-kw-geschichte).

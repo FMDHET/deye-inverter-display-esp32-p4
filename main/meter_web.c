@@ -124,11 +124,13 @@ static esp_err_t values_handler(httpd_req_t *req)
     }
     o = jcat(s_json, JSON_CAP, o,
              "],\"served\":{\"fresh\":%d,\"per_phase\":%d,\"slave\":%d,"
+             "\"quiet\":%d,\"hold\":%u,\"stale\":%u,"
              "\"sp\":%d,\"req\":%u,\"age\":%u,"
              "\"real\":[%.0f,%.0f,%.0f],\"real_total\":%.0f,"
              "\"p\":[%.0f,%.0f,%.0f],\"total\":%.0f,"
              "\"v\":[%.1f,%.1f,%.1f],\"i\":[%.2f,%.2f,%.2f]},",
              sv.fresh ? 1 : 0, sv.per_phase ? 1 : 0, sv.slave_running ? 1 : 0,
+             sv.quiet ? 1 : 0, (unsigned)sv.hold_s, (unsigned)sv.stale_s,
              sv.setpoint, (unsigned)sv.requests, (unsigned)sv.age_ms,
              sv.real_p[0], sv.real_p[1], sv.real_p[2], sv.real_total,
              sv.served_p[0], sv.served_p[1], sv.served_p[2], sv.served_total,

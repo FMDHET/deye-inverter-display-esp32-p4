@@ -65,17 +65,21 @@ Anfragen mit falscher Slave-ID, unbekanntem Funktionscode oder kaputter Prüfsum
 ### Und jetzt der wichtige Teil
 
 > [!WARNING]
-> Der gefälschte Zähler liefert den echten Messwert **nur, wenn dieser frisch ist** — höchstens 12 Sekunden alt. Ist er älter, meldet er **0 Watt**. Nicht den letzten bekannten Wert. Null.
+> Der gefälschte Zähler liefert den echten Messwert **nur, wenn dieser frisch ist** — höchstens 12 Sekunden alt. Ist er älter, meldet er **0 Watt**. Nicht den letzten bekannten Wert. Null. Und das nur als **Überbrückung**: hält der Ausfall länger als 60 Sekunden an, antwortet der Zähler gar nicht mehr.
 
 Warum das so gemacht ist, versteht man am besten, wenn man die drei Möglichkeiten vergleicht:
 
-**Möglichkeit 1: den alten Wert weitermelden.** Das klingt harmlos und ist die gefährlichste Variante. Der Deye regelt dann gegen eine Zahl, die sich nicht mehr bewegt. Er dreht auf, sieht keine Reaktion, dreht weiter auf, sieht weiter keine Reaktion — bis er am Anschlag ist. Genau das ist hier passiert: **15 Kilowatt Einspeisung.** Ein toter Sensor in einem laufenden Regelkreis ist schlimmer als gar kein Sensor.
+**Möglichkeit 1: den alten Wert weitermelden.** Das klingt harmlos und ist die gefährlichste Variante. Der Deye regelt dann gegen eine Zahl, die sich nicht mehr bewegt. Er dreht auf, sieht keine Reaktion, dreht weiter auf, sieht weiter keine Reaktion — bis er am Anschlag ist. Genau das ist hier passiert: **15 Kilowatt Einspeisung.** Ein toter Sensor in einem laufenden Regelkreis ist schlimmer als gar kein Sensor. Diese Möglichkeit ist und bleibt ausgeschlossen.
 
-**Möglichkeit 2: einfach nicht antworten.** Klingt vernünftig, ist aber auch schlecht. Der Deye wertet ausbleibende Antworten als „Zähler verloren", meldet einen Fehler und schaltet auf seinen eigenen eingebauten Stromwandler um. Damit ist unsere ganze Steuerung weg, und man bekommt eine Fehlermeldung im Wechselrichter.
+**Möglichkeit 2: einfach nicht antworten.** Der Deye wertet ausbleibende Antworten als „Zähler verloren", meldet einen Fehler und schaltet auf seinen eigenen eingebauten Stromwandler um. Unsere Steuerung ist damit weg — aber der Wechselrichter regelt weiter, und zwar gegen eine **echte Messung**.
 
-**Möglichkeit 3: null melden — so wird es gemacht.** Wir antworten weiter, der Zähler gilt als lebendig, kein Fehler. Aber die Zahl gibt dem Deye nichts zu regeln: „alles im Gleichgewicht, tu nichts." Er hält seinen Zustand, bis wieder echte Daten kommen. Das ist der sichere Ruhezustand.
+**Möglichkeit 3: null melden.** Wir antworten weiter, der Zähler gilt als lebendig, kein Fehler. Die Zahl gibt dem Deye nichts zu regeln: „alles im Gleichgewicht, tu nichts." Er hält seinen Zustand, bis wieder echte Daten kommen.
 
-Wenn du an diesem Teil der Software arbeitest: **diese Eigenschaft muss erhalten bleiben.** Sie ist der Unterschied zwischen einer nützlichen und einer gefährlichen Funktion.
+**Gemacht wird 3, dann 2.** Für einen Aussetzer von ein paar Sekunden ist Möglichkeit 3 genau richtig: kein Fehler im Wechselrichter, kein Zappeln, nichts zu tun. Als *Ruhezustand* ist sie es nicht — denn „tu nichts" heißt für den Deye: weitermachen wie bisher. Startet der Router neu, während der Deye mit 5 kW entlädt, hält er diese 5 kW zehn Minuten lang durch, ganz egal was das Haus in der Zeit tatsächlich braucht. Deshalb ist die Null eine **Brücke mit Ablauf**: danach wird geschwiegen, der Deye erkennt den Zählerausfall und rechnet mit seinem eigenen Wandler weiter. Ein sichtbarer Fehler am Wechselrichter ist besser als eine stille Fehlregelung.
+
+Die Länge der Brücke steht unter **Einstellungen → Mod RTU → „Bei Zählerausfall 0 W liefern für"**: unbegrenzt (das alte Verhalten), 30, 60 oder 120 Sekunden. Voreinstellung 60 s. Auf `/deye` im Zähler-Tab steht, in welchem der drei Zustände die Emulation gerade ist; im Log erscheint `grid reading STALE` und, wenn die Brücke abläuft, `meter emulation going SILENT`.
+
+Wenn du an diesem Teil der Software arbeitest: **Möglichkeit 1 darf nie zurückkommen.** Sie ist der Unterschied zwischen einer nützlichen und einer gefährlichen Funktion.
 
 ## Der Master-Bus
 

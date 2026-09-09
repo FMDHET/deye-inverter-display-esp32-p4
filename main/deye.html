@@ -809,7 +809,17 @@ function render(d, live) {
 
   /* Status-Pills */
   const stale = $("pStale");
-  stale.textContent = s.fresh ? "Zählerwert frisch" : "Zählerwert VERALTET → 0 W gesendet";
+  /* Drei Zustände statt zwei: frisch, Überbrückung mit 0 W, und stumm (der
+     Zähler antwortet nicht mehr, der Deye regelt mit seinem eigenen CT). */
+  if (s.fresh) {
+    stale.textContent = "Zählerwert frisch";
+  } else if (s.quiet) {
+    stale.textContent = "Zähler STUMM seit " + (s.stale || 0) + " s → Deye nutzt seinen CT";
+  } else if (s.hold) {
+    stale.textContent = "Zählerwert VERALTET → 0 W (Überbrückung, stumm nach " + s.hold + " s)";
+  } else {
+    stale.textContent = "Zählerwert VERALTET → 0 W gesendet";
+  }
   stale.className   = "pill " + (s.fresh ? "ok" : "bad");
 
   const sl = $("pSlave");

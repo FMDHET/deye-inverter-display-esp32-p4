@@ -99,6 +99,15 @@ esp_err_t nvs_store_set_grid_sp(int w);
 uint8_t   nvs_store_get_sls_a(void);
 esp_err_t nvs_store_set_sls_a(uint8_t a);
 
+/* Forced battery mode (deye_mode_t) and its power, persisted so a reboot can
+ * UNDO it: the inverter keeps a forced mode across our restart, the display
+ * used to come back saying "Normal" while the Deye kept charging. Not restored
+ * on boot -- deye_ctrl writes Normal to the inverter instead. */
+uint8_t   nvs_store_get_deye_mode(void);
+esp_err_t nvs_store_set_deye_mode(uint8_t mode);
+uint16_t  nvs_store_get_deye_power(void);
+esp_err_t nvs_store_set_deye_power(uint16_t w);
+
 #ifdef __cplusplus
 }
 #endif

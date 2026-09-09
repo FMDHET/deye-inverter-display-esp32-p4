@@ -1,5 +1,6 @@
 #include "web_mirror.h"
 #include "lvgl_port.h"
+#include "ui_flow.h"
 #include "ui_settings.h"
 #include "board_jc4880p443c.h"
 #include "modbus_tcp.h"
@@ -90,6 +91,12 @@ static void web_indev_read(lv_indev_t *indev, lv_indev_data_t *data)
     data->point.x = rx;
     data->point.y = ry;
     data->state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+
+    /* A tap in the browser must reach the widget even while the panel sleeps --
+     * the mirror user sees what they are aiming at, unlike a finger on dark
+     * glass. This runs right before LVGL dispatches this very press, so the
+     * wake shield is gone by the time the hit test happens. */
+    if (pressed) ui_flow_wake_display("web pointer");
 }
 
 /* --------------------------- snapshot + encode ------------------------- */

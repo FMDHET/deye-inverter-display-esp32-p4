@@ -156,6 +156,27 @@ static lv_obj_t *wrap_label(lv_obj_t *parent, int32_t w, int x, int y, const cha
     return l;
 }
 
+/* Copy a text field into a fixed struct field: truncated, always terminated,
+ * unused tail zeroed. The config structs go to NVS as blobs, so the tail of a
+ * longer previous value (a password, say) would otherwise linger there. */
+static void field_set(char *dst, size_t size, const char *src)
+{
+    memset(dst, 0, size);
+    if (src) strncpy(dst, src, size - 1);
+}
+
+/* A text field's number, or `absent` when the field is empty. Out-of-range
+ * input is clamped instead of being silently replaced by a default. */
+static long field_num(lv_obj_t *ta, long lo, long hi, long absent)
+{
+    const char *t = lv_textarea_get_text(ta);
+    if (!t || t[0] == '\0') return absent;
+    long v = strtol(t, NULL, 10);
+    if (v < lo) v = lo;
+    if (v > hi) v = hi;
+    return v;
+}
+
 /* Index of `v` in a small options table, or `dflt` if it is not listed. */
 static int opt_idx(const uint32_t *tab, int n, uint32_t v, int dflt)
 {
@@ -791,24 +812,19 @@ static void dev_cancel_cb(lv_event_t *e) { (void)e; dev_dialog_close(); }
 static void dev_save_cb(lv_event_t *e)
 {
     (void)e;
+    /* Editing: start from the STORED entry so a field this dialog does not show
+     * (and any field appended later) survives. Only a NEW device starts empty.
+     * Cleared number fields are saved as 0 = "use the default"; modbus_tcp owns
+     * those defaults (load_cfg), out-of-range input is clamped. */
     mb_dev_cfg_t c;
-    memset(&c, 0, sizeof(c));
-    strncpy(c.name, lv_textarea_get_text(s_mb_name), sizeof(c.name) - 1);
-    strncpy(c.ip, lv_textarea_get_text(s_mb_ip), sizeof(c.ip) - 1);
-    int port  = atoi(lv_textarea_get_text(s_mb_port));
-    int slave = atoi(lv_textarea_get_text(s_mb_unit));
-    int poll  = atoi(lv_textarea_get_text(s_mb_poll));
-    int tmo   = atoi(lv_textarea_get_text(s_mb_tmo));
-    c.port    = (port > 0 && port <= 65535) ? (uint16_t)port : 502;
-    c.slave   = (slave >= 0 && slave <= 247) ? (uint8_t)slave : 1;
-    if (poll <= 0) poll = MB_DEFAULT_POLL_MS;
-    if (poll < MB_MIN_POLL_MS) poll = MB_MIN_POLL_MS;
-    if (poll > MB_MAX_POLL_MS) poll = MB_MAX_POLL_MS;
-    c.poll_ms = (uint16_t)poll;
-    if (tmo <= 0) tmo = MB_DEFAULT_TIMEOUT_MS;
-    if (tmo < MB_MIN_TIMEOUT_MS) tmo = MB_MIN_TIMEOUT_MS;
-    if (tmo > MB_MAX_TIMEOUT_MS) tmo = MB_MAX_TIMEOUT_MS;
-    c.timeout_ms = (uint16_t)tmo;
+    if (s_mb_edit_idx >= 0 && s_mb_edit_idx < s_mb_devn) c = s_mb_devs[s_mb_edit_idx];
+    else                                                 memset(&c, 0, sizeof(c));
+    field_set(c.name, sizeof(c.name), lv_textarea_get_text(s_mb_name));
+    field_set(c.ip,   sizeof(c.ip),   lv_textarea_get_text(s_mb_ip));
+    c.port       = (uint16_t)field_num(s_mb_port, 1, 65535, 0);
+    c.slave      = (uint8_t) field_num(s_mb_unit, 1, 247, 1);
+    c.poll_ms    = (uint16_t)field_num(s_mb_poll, MB_MIN_POLL_MS, MB_MAX_POLL_MS, 0);
+    c.timeout_ms = (uint16_t)field_num(s_mb_tmo, MB_MIN_TIMEOUT_MS, MB_MAX_TIMEOUT_MS, 0);
     c.mfr     = (uint8_t)lv_dropdown_get_selected(s_mb_mfr_dd);
     c.role    = (uint8_t)lv_dropdown_get_selected(s_mb_role_dd);
     c.enabled = lv_obj_has_state(s_mb_en, LV_STATE_CHECKED) ? 1 : 0;
@@ -1403,16 +1419,20 @@ static void mqtt_refresh(void)
 static void mqtt_save_cb(lv_event_t *e)
 {
     (void)e;
+    /* Start from the STORED config, not from zero: this tab owns only the
+     * widgets below, so every other field -- and every field appended later --
+     * must survive a save untouched (same reasoning as rtu_save_cb).
+     * An empty field is saved as 0/"" = "not configured"; the defaults live in
+     * mqtt_fwd (normalize_cfg), so the UI does not freeze its own literals
+     * into NVS. */
     mqtt_cfg_t c;
-    memset(&c, 0, sizeof(c));
+    mqtt_fwd_get_cfg(&c);
     c.enabled = lv_obj_has_state(s_mqtt_en, LV_STATE_CHECKED) ? 1 : 0;
-    strncpy(c.host, lv_textarea_get_text(s_mqtt_host), sizeof(c.host) - 1);
-    int port = atoi(lv_textarea_get_text(s_mqtt_port));
-    c.port = (port > 0 && port <= 65535) ? (uint16_t)port : 1883;
-    strncpy(c.user, lv_textarea_get_text(s_mqtt_user), sizeof(c.user) - 1);
-    strncpy(c.pass, lv_textarea_get_text(s_mqtt_pass), sizeof(c.pass) - 1);
-    strncpy(c.base, lv_textarea_get_text(s_mqtt_base), sizeof(c.base) - 1);
-    if (c.base[0] == '\0') strncpy(c.base, "deye-display", sizeof(c.base) - 1);
+    field_set(c.host, sizeof(c.host), lv_textarea_get_text(s_mqtt_host));
+    field_set(c.user, sizeof(c.user), lv_textarea_get_text(s_mqtt_user));
+    field_set(c.pass, sizeof(c.pass), lv_textarea_get_text(s_mqtt_pass));
+    field_set(c.base, sizeof(c.base), lv_textarea_get_text(s_mqtt_base));
+    c.port      = (uint16_t)field_num(s_mqtt_port, 1, 65535, 0);
     c.retain    = lv_obj_has_state(s_mqtt_retain, LV_STATE_CHECKED) ? 1 : 0;
     c.discovery = lv_obj_has_state(s_mqtt_disc,   LV_STATE_CHECKED) ? 1 : 0;
     c.lastwill  = lv_obj_has_state(s_mqtt_lwt,    LV_STATE_CHECKED) ? 1 : 0;
@@ -1508,12 +1528,13 @@ static void ntp_refresh(void)
 static void ntp_save_cb(lv_event_t *e)
 {
     (void)e;
+    /* Stored config as the base, empty server left empty -- ntp_client owns the
+     * default (see mqtt_save_cb). */
     ntp_cfg_t c;
-    memset(&c, 0, sizeof(c));
+    ntp_get_cfg(&c);
     c.enabled = lv_obj_has_state(s_ntp_en, LV_STATE_CHECKED) ? 1 : 0;
     c.tz_idx  = (uint8_t)lv_dropdown_get_selected(s_ntp_tz);
-    strncpy(c.server, lv_textarea_get_text(s_ntp_server), sizeof(c.server) - 1);
-    if (c.server[0] == '\0') strncpy(c.server, "pool.ntp.org", sizeof(c.server) - 1);
+    field_set(c.server, sizeof(c.server), lv_textarea_get_text(s_ntp_server));
     ntp_set_cfg(&c);
     ntp_refresh();
 }
@@ -1645,20 +1666,20 @@ static void vpn_refresh(void)
 static void vpn_save_cb(lv_event_t *e)
 {
     (void)e;
+    /* Stored config as the base, empty fields left empty -- wg_client owns the
+     * defaults (see mqtt_save_cb). An empty keepalive means "off" (0), which is
+     * a real setting, not a missing one. */
     wg_cfg_t c;
-    memset(&c, 0, sizeof(c));
+    wg_get_cfg(&c);
     c.enabled = lv_obj_has_state(s_vpn_en, LV_STATE_CHECKED) ? 1 : 0;
-    strncpy(c.private_key,   lv_textarea_get_text(s_vpn_privkey),  sizeof(c.private_key)   - 1);
-    strncpy(c.public_key,    lv_textarea_get_text(s_vpn_pubkey),   sizeof(c.public_key)    - 1);
-    strncpy(c.preshared_key, lv_textarea_get_text(s_vpn_psk),      sizeof(c.preshared_key) - 1);
-    strncpy(c.endpoint,      lv_textarea_get_text(s_vpn_endpoint), sizeof(c.endpoint)      - 1);
-    strncpy(c.address,       lv_textarea_get_text(s_vpn_addr),     sizeof(c.address)       - 1);
-    strncpy(c.netmask,       lv_textarea_get_text(s_vpn_mask),     sizeof(c.netmask)       - 1);
-    if (c.netmask[0] == '\0') strncpy(c.netmask, "255.255.255.0", sizeof(c.netmask) - 1);
-    int port = atoi(lv_textarea_get_text(s_vpn_port));
-    c.port = (port > 0 && port <= 65535) ? (uint16_t)port : 51820;
-    int ka = atoi(lv_textarea_get_text(s_vpn_keep));
-    c.keepalive = (ka >= 0 && ka <= 65535) ? (uint16_t)ka : 25;
+    field_set(c.private_key,   sizeof(c.private_key),   lv_textarea_get_text(s_vpn_privkey));
+    field_set(c.public_key,    sizeof(c.public_key),    lv_textarea_get_text(s_vpn_pubkey));
+    field_set(c.preshared_key, sizeof(c.preshared_key), lv_textarea_get_text(s_vpn_psk));
+    field_set(c.endpoint,      sizeof(c.endpoint),      lv_textarea_get_text(s_vpn_endpoint));
+    field_set(c.address,       sizeof(c.address),       lv_textarea_get_text(s_vpn_addr));
+    field_set(c.netmask,       sizeof(c.netmask),       lv_textarea_get_text(s_vpn_mask));
+    c.port      = (uint16_t)field_num(s_vpn_port, 1, 65535, 0);
+    c.keepalive = (uint16_t)field_num(s_vpn_keep, 0, 65535, 0);
     wg_set_cfg(&c);
     vpn_refresh();
 }

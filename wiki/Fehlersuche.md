@@ -25,7 +25,7 @@ curl -s http://<ip>/ota
 ## Bildschirm
 
 **Bild bleibt schwarz, das Gerät läuft aber.**
-Wahrscheinlich der Standby: nach einer eingestellten Zeit ohne Berührung geht die Beleuchtung aus. Einmal antippen. Sonst prüfen, ob die Helligkeit auf 0 % steht.
+Wahrscheinlich der Standby: nach einer eingestellten Zeit ohne Berührung geht die Beleuchtung aus. Einmal antippen — dieser erste Tipp weckt nur auf und löst nichts aus, also ruhig irgendwo auf den Bildschirm. Sonst prüfen, ob die Helligkeit ganz unten steht (unter 5 % geht sie nicht mehr). Am Serial-Log ist der Standby mitzulesen: `ui_flow: standby: display off after 120 s` beim Einschlafen, `... woken by touch` beim Aufwecken.
 
 **Bild verzerrt, gestreift oder verschoben.**
 Die Zeitwerte für die Bildschirmansteuerung passen nicht zum Panel. Sie stehen in `main/board_jc4880p443c.h` und sind für dieses Modul erprobt — bei einer anderen Panel-Revision können sie abweichen. Selbst herumprobieren ist hier mühsam; besser die Werte aus einer bekannten funktionierenden Quelle übernehmen.

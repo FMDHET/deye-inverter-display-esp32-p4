@@ -50,17 +50,27 @@ static volatile bool  s_synced;
 static bool           s_running;
 static portMUX_TYPE   s_mux = portMUX_INITIALIZER_UNLOCKED;
 
+/* Fill in what the user left unset. RAM copy only -- an empty server stays ""
+ * in NVS, so a changed default still reaches a device that never chose one
+ * (see the same pattern in mqtt_fwd.c and wg_client.c). */
+static void normalize_cfg(ntp_cfg_t *c)
+{
+    if (c->tz_idx >= NTP_TZ_COUNT) c->tz_idx = NTP_TZ_DEFAULT;
+    if (c->server[0] == '\0')      strncpy(c->server, DEF_SERVER, sizeof(c->server) - 1);
+}
+
 static void load_cfg(void)
 {
     ntp_cfg_t c;
     memset(&c, 0, sizeof(c));
     if (nvs_store_get_ntp(&c, sizeof(c)) != ESP_OK) {
+        /* First boot. tz_idx MUST be defaulted here, not in normalize_cfg:
+         * index 0 (Los Angeles) is a legitimate choice, so there is no "unset"
+         * value to detect later -- a zeroed config would silently mean UTC-8. */
         c.enabled = 1;
         c.tz_idx  = NTP_TZ_DEFAULT;
-        strncpy(c.server, DEF_SERVER, sizeof(c.server) - 1);
     }
-    if (c.tz_idx >= NTP_TZ_COUNT)  c.tz_idx = NTP_TZ_DEFAULT;
-    if (c.server[0] == '\0')       strncpy(c.server, DEF_SERVER, sizeof(c.server) - 1);
+    normalize_cfg(&c);
     portENTER_CRITICAL(&s_mux);
     s_cfg = c;
     s_loaded = true;
@@ -120,9 +130,11 @@ void ntp_get_cfg(ntp_cfg_t *out)
 esp_err_t ntp_set_cfg(const ntp_cfg_t *cfg)
 {
     if (!cfg) return ESP_ERR_INVALID_ARG;
-    esp_err_t e = nvs_store_set_ntp(cfg, sizeof(*cfg));
+    esp_err_t e = nvs_store_set_ntp(cfg, sizeof(*cfg));   /* raw: "" stays unset */
     if (e == ESP_OK) {
-        portENTER_CRITICAL(&s_mux); s_cfg = *cfg; s_loaded = true; portEXIT_CRITICAL(&s_mux);
+        ntp_cfg_t c = *cfg;
+        normalize_cfg(&c);
+        portENTER_CRITICAL(&s_mux); s_cfg = c; s_loaded = true; portEXIT_CRITICAL(&s_mux);
         apply();
     }
     return e;

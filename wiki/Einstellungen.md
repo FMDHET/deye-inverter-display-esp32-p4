@@ -14,7 +14,7 @@ Verbindungsstatus, Netzsuche und die Liste der gespeicherten Netze. Ausführlich
 | --- | --- |
 | **Helligkeit** | 0 bis 100 %. Die Hintergrundbeleuchtung wird nicht wirklich gedimmt, sondern sehr schnell ein- und ausgeschaltet (Pulsweitenmodulation). Fürs Auge sieht das aus wie dimmen. |
 | **Kontrast** | 0 bis 100 %. Legt einen halbtransparenten grauen Schleier über das Bild — ein Softwaretrick, weil das Panel selbst keinen Kontrastregler hat. 100 % heißt: kein Schleier. |
-| **Standby** | Beleuchtung nach einer Weile ohne Berührung ausschalten: Aus / 30 s / 1 / 2 / 5 / 10 min. Eine Berührung weckt wieder auf. Das Programm läuft dabei normal weiter, nur das Licht ist aus. |
+| **Standby** | Beleuchtung nach einer Weile ohne Berührung ausschalten: Aus / 30 s / 1 / 2 / 5 / 10 min. Eine Berührung weckt wieder auf — und *nur* das: der Aufweck-Tipp wird nicht an den Knopf oder Schieber darunter weitergegeben, sonst würde Aufwecken am linken Rand den Netz-Sollwert verschieben. Ein Tipp im Web-Spiegel wirkt dagegen sofort auf das Bedienelement, weil man dort sieht, wohin man zielt. Das Programm läuft dabei normal weiter, nur das Licht ist aus. |
 | **Ausrichtung** | Normal oder um 180° gedreht — für Geräte, die kopfüber montiert sind. |
 
 ## Mod TCP — Geräte im Netzwerk

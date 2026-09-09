@@ -9,7 +9,7 @@ Diese Seite hält fest, **was behoben wurde** (mit Nachweis), **was offen ist** 
 * **OTA über WLAN ist repariert.** Ursache war der WLAN-Treiber esp_hosted, der seine SDIO-Empfangspuffer aus dem knappen internen DMA-Speicher holte und bei Knappheit abstürzte statt einen Fehler zu melden. Mit `CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y` kommen die Puffer aus dem PSRAM. Messreihe: 10 Firmware- und 3 Dateisystem-Updates hintereinander, null Abbrüche (vorher etwa jeder vierte).
 * **Sieben weitere Fehler im OTA-Pfad behoben**, darunter zwei, die das Gerät lahmlegen konnten: ein Upload, der mitten drin stehen bleibt, fror das Gerät dauerhaft ein; eine falsche Datei im Firmware-Feld löschte den einzigen Rückfall-Abschnitt.
 * **Die Web-Oberfläche `/deye` ist jetzt auf dem iPhone benutzbar**: Tabellenzeilen werden zu Karten, die eingegebenen Werte werden vor dem Senden geprüft, das Polling stapelt sich nicht mehr.
-* **Offen und wichtig:** vier Punkte im Modbus-Regelpfad (siehe unten), die Sicherheit des Notfall-WLANs, und zwei kleine Fehler in der Display-Oberfläche, die das Gerät unbedienbar machen können (Touch-Ausfall beim Start, Helligkeit 0 %).
+* **Offen und wichtig:** vier Punkte im Modbus-Regelpfad (siehe unten) und die Sicherheit des Notfall-WLANs. Die Display-Oberfläche ist inzwischen abgearbeitet (Nachträge 1–3), darunter die zwei Fehler, die das Gerät unbedienbar machen konnten: Touch-Ausfall beim Start und Helligkeit 0 %.
 
 ## Behoben
 
@@ -68,9 +68,9 @@ Weitere Funde mittlerer Schwere: Netz-Sollwert ohne Grenzen im Modul (`modbus_rt
 
 * ~~Touch-Ausfall beim Start = Endlosschleife~~ — **behoben (Nachtrag).**
 * ~~Helligkeit 0 % wird gespeichert~~ — **behoben (Nachtrag).**
-* Der Aufweck-Tipp wird an das Widget darunter durchgereicht — links liegt der Netz-Sollwert-Slider über die volle Höhe.
-* Vier Speicher-Callbacks (Geräte, MQTT, NTP, VPN) bauen die Struktur aus Nullen neu und schreiben Default-Literale als Nutzerwahl in NVS — das Muster, das schon `gw_max_clients` blockiert hatte.
-* VPN-Tastatur schwebt über andere Tabs; jeder RTU-Dropdown-Tick schreibt synchron in NVS und blendet die Deye-Anzeige aus; Scan-Liste kann bei „scanne…" hängen; Deye-Leistungsslider 0–22000 gegen Backend 1000–20000; kein `max_length` auf Textfeldern (40-Zeichen-MQTT-Passwort wird stumm auf 39 gekürzt).
+* ~~Der Aufweck-Tipp wird an das Widget darunter durchgereicht~~ — **behoben (Nachtrag 3).**
+* ~~Vier Speicher-Callbacks schreiben Default-Literale als Nutzerwahl in NVS~~ — **behoben (Nachtrag 3).**
+* ~~VPN-Tastatur schwebt über andere Tabs~~, ~~jeder RTU-Dropdown-Tick schreibt synchron in NVS und blendet die Deye-Anzeige aus~~, ~~Scan-Liste kann bei „scanne…" hängen~~, ~~Deye-Leistungsslider 0–22000 gegen Backend 1000–20000~~, ~~kein `max_length` auf Textfeldern~~ — **alle behoben (Nachträge 2 und 3).**
 
 ### OTA und Web, klein
 
@@ -115,6 +115,38 @@ Verifiziert am Gerät: Boot sauber, Zähler-Emulation läuft, OTA über WLAN (di
 | `/deye` | Jeder Fehler der Live-Werte hieß „Firmware ohne /api/deye/live?" | Netzwerkfehler, 404 und HTTP-Fehler unterschieden; Kacheln werden gedimmt statt alte Zahlen als aktuell stehen zu lassen |
 
 Bewusst **nicht** in diesem Nachtrag: die Klemmung des Ladestroms (`amps = power_w / 50` bis 400 A in Register 128) braucht die Grenze des Akkus/BMS als Konfiguration; die Konfig-Blob-Versionierung ändert das NVS-Layout; der Aufweck-Tipp und die Speicher-Callbacks (Defaults als Nutzerwahl) folgen im nächsten Schritt.
+
+## Nachtrag 3 (9. September): Aufweck-Tipp, Speicher-Callbacks, RTU-Dropdowns
+
+Damit ist der LVGL-Abschnitt abgearbeitet. Build 231 (v1.0.142), alles am Gerät nachgestellt.
+
+| Bereich | Was | Wie |
+| --- | --- | --- |
+| LVGL | **Der Tipp, der das dunkle Panel aufweckt, landete zusätzlich im Widget darunter** — links liegt der Netz-Sollwert-Slider über die volle Höhe, Aufwecken konnte also den Sollwert verschieben | Solange das Panel schläft, sitzt ein durchsichtiges, klickbares Objekt auf der **System-Ebene** (wird vor `lv_layer_top()` und dem Bildschirm durchsucht, deckt also auch den Kontrast-Schleier ab) und frisst diesen ersten Druck; beim Loslassen verschwindet es wieder. Der Web-Spiegel ist ausgenommen: sein Nutzer sieht, wohin er zielt, also weckt `ui_flow_wake_display()` aus der Zeiger-Einspeisung das Panel und nimmt den Blocker weg, *bevor* der Tipp verteilt wird. Dazu ein Sicherheitsnetz zweimal je Sekunde: ein Blocker über hellem Panel würde das Gerät unbedienbar machen und wird deshalb sofort abgeräumt |
+| LVGL | Vier Speicher-Callbacks (Geräte, MQTT, Zeit, VPN) bauten die Konfiguration **aus Nullen** neu und schrieben ihre eigenen Default-Literale als Nutzerwahl in NVS — dasselbe Muster, das `gw_max_clients` blockiert hatte | Alle vier starten jetzt bei der **gespeicherten** Konfiguration (wie `rtu_save_cb`) und überschreiben nur, was der Tab wirklich besitzt; der Gerätedialog beim Bearbeiten beim gespeicherten Eintrag. Leere Felder werden als 0 / `""` = „nicht gesetzt" gespeichert, die Defaults liegen im jeweiligen Backend (`normalize_cfg` in `mqtt_fwd.c`, `ntp_client.c`, `wg_client.c`) und werden nur auf die RAM-Kopie angewandt — so wirkt ein geänderter Default auch auf Geräte, die den Wert nie selbst gewählt haben. Zahlen werden geklemmt statt still durch einen Default ersetzt; `field_set()` nullt den Rest des Feldes, damit im NVS-Blob kein Rest eines längeren alten Passworts stehen bleibt |
+| Modbus RTU | Jedes Widget im Tab „Mod RTU" speichert bei jeder Änderung die ganze Struktur — ein Dropdown öffnen und denselben Wert wieder wählen kostete einen NVS-Schreibvorgang, den Reset der Master-Statistik und eine leere Deye-Anzeige | `modbus_rtu_set_cfg()` vergleicht mit der laufenden Konfiguration und tut bei Gleichheit **nichts**. Und nur eine geänderte **Bus**-Zeile macht den gelesenen Deye-Wert ungültig; die Bridge-Felder (Port, Busmaske) lassen ihn stehen |
+| OTA | **Ein Dateisystem-Update im Schlaf ließ das Panel für immer hell.** `ota_thaw_ui()` schaltet die Beleuchtung wieder ein, die Standby-Logik hielt sich aber weiter für „schlafend" — und ihr Einschlaf-Zweig feuert nicht, wenn sie das schon glaubt. Das Licht blieb also an, bis jemand das Gerät zweimal antippte (nach dem neuen Blocker wäre der erste Tipp zusätzlich verschluckt worden) | `ota_thaw_ui()` meldet den Wechsel jetzt an `ui_flow_wake_display("OTA finished")` (die LVGL-Sperre hält es dabei noch). Der Zustand stimmt damit wieder, und weil niemand das Gerät berührt hat, geht es beim nächsten Timer-Tick von selbst zurück in den Standby. Beim Firmware-Update fällt es nicht auf, weil das direkt neu startet |
+| LVGL | Standby war nicht beobachtbar (Panel dunkel, Log still) | Drei Logzeilen auf den Übergängen: `standby: display off after N s`, `... woken by touch (tap swallowed)`, `... display on (<Quelle>, tap kept)` |
+
+**Zwei Fehler, die erst am Gerät auffielen** — beide waren beim Lesen des Codes nicht zu sehen:
+
+* **Zeitzone auf UTC-8.** Die Defaults ins Backend zu ziehen hat `c.tz_idx = NTP_TZ_DEFAULT` aus dem „nichts gespeichert"-Zweig entfernt. `tz_idx` hat aber keinen freien Wert für „nicht gesetzt": Index 0 ist Los Angeles, eine legitime Wahl. Ein Gerät ohne gespeicherte Zeitkonfiguration (genau dieses) sprang damit auf UTC-8, sichtbar als 21:33 des Vortags. Der Erst-Boot-Default gehört in den `!= ESP_OK`-Zweig, nicht in `normalize_cfg` — steht jetzt als Kommentar daneben.
+* **Standby weckte sich selbst nach 520 ms.** Der Blocker-Callback hing an `LV_EVENT_ALL`, und das Einblenden des Blockers erzeugt Style-, Layout- und Zeichen-Events — die als „Nutzeraktivität" gewertet wurden. Er hängt jetzt nur an `PRESSED`/`PRESSING`/`RELEASED`/`PRESS_LOST`. Ohne die Logzeilen aus derselben Runde wäre das unentdeckt geblieben: das Panel wäre einfach nie dunkel geworden.
+
+**Nachweis am Gerät** (Steuerung über die Zeiger-Einspeisung des Web-Spiegels, Kontrolle über den MJPEG-Strom):
+
+* Tab „Mod RTU" öffnen: Deye-Wert läuft durch (Polls zählen weiter), kein Aussetzer — vorher blankte ihn schon der Tab-Aufbau.
+* Bridge-Häkchen „Bus B" setzen und zurücknehmen: echter NVS-Schreibvorgang, Deye-Wert bleibt trotzdem stehen (`bus_changed == false`).
+* Baud Bus A auf denselben Wert (9600) neu wählen: keine Wirkung, Master-Statistik läuft ununterbrochen weiter.
+* MQTT-Tab „Speichern" ohne Änderung: Broker, Benutzer, Passwort, Basis-Topic und die drei Schalter unverändert, Verbindung hält, `veröffentlicht` zählt weiter (39 → 49).
+* Zeit-Tab „Speichern": UTC+1 Berlin und `pool.ntp.org` bleiben, Uhr stimmt sekundengenau mit dem Entwicklungsrechner.
+* VPN-Tab „Speichern" (VPN aus, aber vollständig konfiguriert), Tab neu aufgebaut: Bild **byteidentisch** — Schlüssel, Endpoint, Port unangetastet.
+* Gerätedialog „West" öffnen, „Speichern", neu öffnen: alle acht Felder gleich, `/api/devices` unverändert.
+* 160 s ohne Eingabe: `standby: display off after 120 s` und danach Ruhe. Tipp im Web-Spiegel im Schlaf: `display on (web pointer, tap kept)` — und die Einstellungen gehen auf, der Tipp wird also *nicht* verschluckt.
+* Firmware-OTA über WLAN im Schlaf: 2,1 MB in 19 s, HTTP 200, Neustart in `ota_1`, `fs_build` passend, Bewährung nach 62 s bestätigt, kein SDIO-Abbruch (`dma_largest` durchgehend 61440).
+* Dateisystem-OTA im Schlaf: `display on (OTA finished, tap kept)` → `UI thawed` → im selben Tick wieder `display off after 120 s`. Genau so soll es sein: Zustand stimmt, und ohne Berührung wird es wieder dunkel.
+
+Nicht nachgestellt: das Verschlucken des Tipps **mit dem Finger** auf dem Glas. Der Web-Spiegel ist genau dafür ausgenommen, es braucht also eine Hand am Gerät: schlafen lassen, links unten auf den Netz-Sollwert-Slider tippen — das Panel muss hell werden und der Sollwert stehen bleiben.
 
 ## Gut gemacht — nicht anfassen
 

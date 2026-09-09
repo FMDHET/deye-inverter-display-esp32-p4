@@ -60,17 +60,24 @@ static const struct { const char *key, *name, *unit, *dc; } SENS[] = {
 };
 #define N_SENS (sizeof(SENS) / sizeof(SENS[0]))
 
+/* Fill in what the user left unset. Applied to the RAM copy only -- NVS keeps
+ * an empty field as 0/"" ("not configured"), so a device that never chose a
+ * value still picks up a changed default later instead of having the UI's
+ * literal frozen into its config. */
+static void normalize_cfg(mqtt_cfg_t *c)
+{
+    if (c->port == 0)       c->port = 1883;
+    if (c->base[0] == '\0') snprintf(c->base, sizeof(c->base), "deye-display");
+}
+
 static void load_cfg(void)
 {
     mqtt_cfg_t c;
     memset(&c, 0, sizeof(c));
     if (nvs_store_get_mqtt(&c, sizeof(c)) != ESP_OK) {
-        snprintf(c.base, sizeof(c.base), "deye-display");
-        c.port = 1883;
         c.retain = 1; c.discovery = 1; c.lastwill = 1;
     }
-    if (c.port == 0)     c.port = 1883;
-    if (c.base[0] == '\0') snprintf(c.base, sizeof(c.base), "deye-display");
+    normalize_cfg(&c);
     portENTER_CRITICAL(&s_mux);
     s_cfg = c;
     s_loaded = true;
@@ -304,9 +311,11 @@ void mqtt_fwd_get_cfg(mqtt_cfg_t *out)
 esp_err_t mqtt_fwd_set_cfg(const mqtt_cfg_t *cfg)
 {
     if (!cfg) return ESP_ERR_INVALID_ARG;
-    esp_err_t e = nvs_store_set_mqtt(cfg, sizeof(*cfg));
+    esp_err_t e = nvs_store_set_mqtt(cfg, sizeof(*cfg));   /* raw: "" stays unset */
     if (e == ESP_OK) {
-        portENTER_CRITICAL(&s_mux); s_cfg = *cfg; s_loaded = true; portEXIT_CRITICAL(&s_mux);
+        mqtt_cfg_t c = *cfg;
+        normalize_cfg(&c);
+        portENTER_CRITICAL(&s_mux); s_cfg = c; s_loaded = true; portEXIT_CRITICAL(&s_mux);
         s_restart = true;                 /* applied by the mqtt task, see mqtt_apply() */
     }
     return e;

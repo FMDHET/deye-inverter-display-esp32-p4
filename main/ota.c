@@ -5,6 +5,7 @@
 #include "web_mirror.h"
 #include "wifi_mgr.h"
 #include "display.h"
+#include "ui_flow.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -56,6 +57,10 @@ static void ota_freeze_ui(void)
 static void ota_thaw_ui(void)
 {
     display_backlight(true);            /* restore to the saved brightness */
+    /* Keep the standby logic in step: an OTA that ran while the panel slept
+     * would otherwise leave it lit but still "asleep", and the next tap would
+     * be eaten by the wake shield. The LVGL lock is still held here. */
+    ui_flow_wake_display("OTA finished");
     if (s_frozen) {
         app_lvgl_unlock();
         s_frozen = false;

@@ -36,18 +36,25 @@ static bool               s_inited;    /* esp_wireguard_init done      */
 static volatile bool      s_restart;   /* set by wg_set_cfg            */
 static volatile bool      s_up;        /* peer handshake established    */
 
+/* Fill in what the user left unset. RAM copy only -- an empty field stays 0/""
+ * in NVS ("not configured"), so a changed default still reaches a device that
+ * never chose a value. keepalive 0 is a legitimate choice ("off") and is
+ * therefore NOT defaulted here, only when nothing at all is stored yet. */
+static void normalize_cfg(wg_cfg_t *c)
+{
+    if (c->port == 0)         c->port = DEF_PORT;
+    if (c->netmask[0] == '\0') strncpy(c->netmask, "255.255.255.0", sizeof(c->netmask) - 1);
+}
+
 static void load_cfg(void)
 {
     wg_cfg_t c;
     memset(&c, 0, sizeof(c));
     if (nvs_store_get_wg(&c, sizeof(c)) != ESP_OK) {
         c.enabled   = 0;
-        c.port      = DEF_PORT;
         c.keepalive = DEF_KEEPALIVE;
-        strncpy(c.netmask, "255.255.255.0", sizeof(c.netmask) - 1);
     }
-    if (c.port == 0)        c.port = DEF_PORT;
-    if (c.netmask[0] == '\0') strncpy(c.netmask, "255.255.255.0", sizeof(c.netmask) - 1);
+    normalize_cfg(&c);
     portENTER_CRITICAL(&s_mux);
     s_cfg = c;
     s_loaded = true;
@@ -167,9 +174,11 @@ void wg_get_cfg(wg_cfg_t *out)
 esp_err_t wg_set_cfg(const wg_cfg_t *cfg)
 {
     if (!cfg) return ESP_ERR_INVALID_ARG;
-    esp_err_t e = nvs_store_set_wg(cfg, sizeof(*cfg));
+    esp_err_t e = nvs_store_set_wg(cfg, sizeof(*cfg));   /* raw: "" stays unset */
     if (e == ESP_OK) {
-        portENTER_CRITICAL(&s_mux); s_cfg = *cfg; s_loaded = true; portEXIT_CRITICAL(&s_mux);
+        wg_cfg_t c = *cfg;
+        normalize_cfg(&c);
+        portENTER_CRITICAL(&s_mux); s_cfg = c; s_loaded = true; portEXIT_CRITICAL(&s_mux);
         s_restart = true;     /* applied by the wg task */
     }
     return e;

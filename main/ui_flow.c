@@ -10,11 +10,14 @@
 #include "ntp_client.h"
 #include "fonts.h"
 #include "lvgl.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
 #include <math.h>
 #include <stdio.h>
 #include <time.h>
+
+static const char *TAG = "ui_flow";
 
 /* ---------- Palette (dark theme) ---------- */
 #define COL_BG          lv_color_hex(0x000000)
@@ -689,21 +692,103 @@ static void wifi_badge_cb(lv_event_t *e)
     lv_obj_center(bl);
 }
 
-/* ---- Display standby: blank the backlight after N s of no touch ---- */
-static uint32_t s_sleep_ms;
-static bool     s_asleep;
+/* ---- Display standby: blank the backlight after N s of no touch ----
+ *
+ * The tap that wakes a dark panel must ONLY switch the light back on. Without
+ * a blocker it went through to whatever sits under the finger, and on the flow
+ * screen the grid-setpoint slider covers the whole left edge -- so waking the
+ * display could drag the setpoint. While the panel sleeps a transparent,
+ * clickable object therefore sits on the SYSTEM layer (searched before
+ * lv_layer_top() and the screen, so it also covers the contrast wash) and eats
+ * that first press; it disappears when the finger is lifted.
+ *
+ * The web mirror is deliberately exempt: its user sees what they are aiming at,
+ * so ui_flow_wake_display() (called from the mirror's pointer injection) wakes
+ * the panel and drops the shield before the tap is dispatched. */
+static uint32_t  s_sleep_ms;
+static bool      s_asleep;
+static lv_obj_t *s_shield;         /* touch blocker, NULL until first sleep */
+static bool      s_shield_held;    /* a finger is currently down on it      */
+
+static void shield_show(bool on);
+
+/* Subscribed to the pointer events ONLY -- never LV_EVENT_ALL: showing the
+ * shield fires style/layout/draw events too, and marking those as user activity
+ * woke the panel half a second after it went dark. */
+static void shield_cb(lv_event_t *e)
+{
+    switch (lv_event_get_code(e)) {
+    case LV_EVENT_PRESSED:
+        s_shield_held = true;
+        display_backlight(true);                       /* the wake tap */
+        s_asleep = false;
+        ESP_LOGI(TAG, "standby: woken by touch (tap swallowed)");
+        break;
+    case LV_EVENT_RELEASED:
+    case LV_EVENT_PRESS_LOST:
+        s_shield_held = false;
+        if (!s_asleep) shield_show(false);             /* next tap is a real one */
+        break;
+    default:                                           /* LV_EVENT_PRESSING */
+        break;
+    }
+    /* A finger on the shield is real activity: without this the sleep timer
+     * would blank the panel again while it is still on the glass. */
+    lv_display_trigger_activity(NULL);
+}
+
+static void shield_show(bool on)
+{
+    if (!s_shield) {
+        if (!on) return;
+        s_shield = lv_obj_create(lv_layer_sys());
+        lv_obj_remove_style_all(s_shield);
+        lv_obj_set_size(s_shield, LV_PCT(100), LV_PCT(100));
+        lv_obj_add_flag(s_shield, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(s_shield, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(s_shield, shield_cb, LV_EVENT_PRESSED,    NULL);
+        lv_obj_add_event_cb(s_shield, shield_cb, LV_EVENT_PRESSING,   NULL);
+        lv_obj_add_event_cb(s_shield, shield_cb, LV_EVENT_RELEASED,   NULL);
+        lv_obj_add_event_cb(s_shield, shield_cb, LV_EVENT_PRESS_LOST, NULL);
+    }
+    if (on) lv_obj_remove_flag(s_shield, LV_OBJ_FLAG_HIDDEN);
+    else    lv_obj_add_flag(s_shield, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* Wake without swallowing anything. LVGL context only: the web mirror's indev
+ * read callback runs on the LVGL task, ota_thaw_ui() still holds the lock. */
+void ui_flow_wake_display(const char *why)
+{
+    if (!s_asleep && !s_shield_held) return;
+    ESP_LOGI(TAG, "standby: display on (%s, tap kept)", why ? why : "external");
+    display_backlight(true);
+    s_asleep      = false;
+    s_shield_held = false;
+    shield_show(false);
+}
 
 static void sleep_timer_cb(lv_timer_t *t)
 {
     (void)t;
+    /* Safety net, twice a second: the shield must never outlive the dark
+     * screen. A blocker stuck over a lit panel would make the device
+     * untouchable -- exactly the failure mode this feature must not add. */
+    if (!s_asleep && !s_shield_held) shield_show(false);
     if (s_sleep_ms == 0) return;                       /* disabled */
     uint32_t idle = lv_display_get_inactive_time(NULL);
     if (!s_asleep && idle >= s_sleep_ms) {
+        shield_show(true);                             /* block before it is dark */
+        s_shield_held = false;
         display_backlight(false);                      /* sleep */
         s_asleep = true;
+        ESP_LOGI(TAG, "standby: display off after %lu s", (unsigned long)(s_sleep_ms / 1000));
     } else if (s_asleep && idle < s_sleep_ms) {
-        display_backlight(true);                       /* touch woke it */
+        /* Activity from a source that does not go through the shield (web
+         * mirror pointer, lv_display_trigger_activity elsewhere). */
+        display_backlight(true);
         s_asleep = false;
+        if (!s_shield_held) shield_show(false);
+        ESP_LOGI(TAG, "standby: display on (activity, tap kept)");
     }
 }
 
@@ -713,6 +798,7 @@ void ui_flow_set_sleep_timeout(uint32_t seconds)
     if (s_sleep_ms == 0 && s_asleep) {                 /* disabled -> wake */
         display_backlight(true);
         s_asleep = false;
+        if (!s_shield_held) shield_show(false);
     }
 }
 

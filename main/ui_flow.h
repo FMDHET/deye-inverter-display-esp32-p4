@@ -24,8 +24,15 @@ void ui_flow_set_fs_build(int fs_build);
 void ui_flow_set_contrast(uint8_t pct);
 
 /* Display standby: blank the backlight after `seconds` of no touch (0 = off).
- * Touch wakes it. */
+ * Touch wakes it -- and that wake tap is swallowed, so it cannot also drag the
+ * widget underneath. */
 void ui_flow_set_sleep_timeout(uint32_t seconds);
+
+/* Wake the panel WITHOUT swallowing the current input: for pointer sources
+ * whose user can see what they are aiming at (the web mirror), and for whoever
+ * switched the backlight back on behind the standby logic's back (OTA).
+ * `why` shows up in the log line. Call from LVGL context. */
+void ui_flow_wake_display(const char *why);
 
 void ui_flow_set_pv(float kw);             /* >= 0 */
 void ui_flow_set_house(float kw);          /* >= 0 */

@@ -1120,14 +1120,30 @@ esp_err_t modbus_rtu_set_cfg(const mb_rtu_cfg_t *cfg)
     if (!cfg) return ESP_ERR_INVALID_ARG;
     mb_rtu_cfg_t c = *cfg;
     clamp_cfg(&c);
+
+    mb_rtu_cfg_t cur;
+    portENTER_CRITICAL(&s_mux);
+    cur = s_cfg;
+    portEXIT_CRITICAL(&s_mux);
+
+    /* Every widget in the "Mod RTU" tab saves the whole struct on each change,
+     * so re-opening a dropdown and picking the same entry used to cost an NVS
+     * write and a blanked Deye tile. Nothing changed -> do nothing. (Differing
+     * struct padding can only make this MISS a no-op, never invent one.) */
+    if (memcmp(&cur, &c, sizeof(c)) == 0) return ESP_OK;
+
+    /* Only a changed bus invalidates what the master has read; the bridge
+     * fields (port, client mask) must not blank the Deye reading. */
+    bool bus_changed = memcmp(cur.bus, c.bus, sizeof(cur.bus)) != 0;
+
     esp_err_t e = nvs_store_set_mb_rtu(&c, sizeof(c));
     if (e == ESP_OK) {
         portENTER_CRITICAL(&s_mux);
         s_cfg = c;
-        s_live.online = false; s_live.blocks = 0;
+        if (bus_changed) { s_live.online = false; s_live.blocks = 0; }
         portEXIT_CRITICAL(&s_mux);
         /* clear stale Deye value; an enabled master re-populates within 2 s */
-        modbus_tcp_set_rtu_deye(0, 0, false);
+        if (bus_changed) modbus_tcp_set_rtu_deye(0, 0, false);
     }
     return e;
 }

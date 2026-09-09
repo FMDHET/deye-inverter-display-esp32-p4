@@ -55,14 +55,16 @@ Diese vier Punkte betreffen, was der Wechselrichter zu sehen bekommt, und wurden
 
 Entschieden wurde: (1) weitergehen statt Runde abbrechen, dazu eine Altersgrenze je Gerät; (2) Regelung sperren, Anzeige behalten; (3) beim Start auf Normal zurücksetzen, mit Maximaldauer und geprüften Schreibbefehlen; (4) 0 W nur 60 s als Überbrückung, danach stumm.
 
-Weitere Funde mittlerer Schwere: Netz-Sollwert ohne Grenzen im Modul (`modbus_rtu_set_grid_setpoint`, auch beim Laden aus NVS); `deye_req_run` kann nach einem Timeout das Ergebnis der *vorigen* Anfrage an den nächsten Aufrufer liefern (die Schwester-Funktion `modbus_rtu_txn` macht es richtig); keine Absicherung gegen verspätete RS485-Antworten, FC16-Echo wird nicht mit der Anfrage verglichen; Modbus-TCP-Transaktions-ID ist konstant `1`; SLS-Exportschutz rechnet mit veralteten Daten und schreibt bei jeder ±200-W-Änderung in EEPROM-Register; Phasenmanipulation bleibt über Neustarts aktiv, ohne Ablauf und ohne Hinweis auf dem Hauptbildschirm; `poll_ms` bis 60 s erlaubt, obwohl der Zähler nach 12 s als veraltet gilt; Selbsttest sendet auf Bus 1 unabhängig von dessen Rolle; die Bridge erlaubt jedem im LAN Schreibzugriff auf alle Deye-Register.
+Weitere Funde mittlerer Schwere — behoben: ~~Netz-Sollwert ohne Grenzen im Modul~~, ~~`deye_req_run` liefert nach einem Timeout das Ergebnis der vorigen Anfrage~~, ~~keine Absicherung gegen verspätete RS485-Antworten, FC16-Echo ungeprüft~~ (alle Nachtrag 2), ~~SLS-Exportschutz rechnet mit veralteten Daten~~ (Nachtrag 4).
+
+**Noch offen:** Modbus-TCP-Transaktions-ID ist konstant `1`; der SLS-Schutz schreibt bei jeder ±200-W-Änderung in EEPROM-Register; Phasenmanipulation bleibt über Neustarts aktiv, ohne Ablauf und ohne Hinweis auf dem Hauptbildschirm; `poll_ms` bis 60 s erlaubt, obwohl der Zähler nach 12 s als veraltet gilt; Selbsttest sendet auf Bus 1 unabhängig von dessen Rolle; die Bridge erlaubt jedem im LAN Schreibzugriff auf alle Deye-Register.
 
 ### Kern und Sicherheit
 
 * ~~Notfall-WLAN wird nie wieder abgebaut~~ — **behoben (Nachtrag, siehe unten).** Offen bleibt: das AP-Passwort ist weiterhin die veröffentlichte Konstante (`nvs_store_set_ap_psk` hat keinen Aufrufer), und `/ota` sowie die Deye-Steuerung haben kein Passwort.
 * ~~Netzwerkwahl springt zum falschen Netz~~ — **behoben (Nachtrag).**
 * ~~WireGuard wird genau einmal versucht~~ — **behoben (Nachtrag).**
-* `mqtt_apply()` läuft auf dem LVGL-Task und zerstört den Client, während der MQTT-Task ihn benutzen kann; MQTT-Kommandos: unbekannter Modus wird als Normal *angewendet*, `atoi("abc")` = 0 W wird auf 1000 W geklemmt und angewendet, kein Schalter „Steuerung per MQTT erlauben".
+* ~~`mqtt_apply()` läuft auf dem LVGL-Task~~, ~~unbekannter MQTT-Modus wird angewendet~~, ~~`atoi("abc")` = 0 W~~ — **behoben (Nachtrag 2).** Offen bleibt: es gibt keinen Schalter „Steuerung per MQTT erlauben" — wer den Broker erreicht, kann den Akku umschalten.
 * Konfigurations-Blobs `mqtt`/`ntp`/`wg` ohne Versionsfeld: ein Feld anhängen, OTA, Rollback → die ältere Firmware verwirft die Einstellungen stillschweigend.
 * Reproduzierbarkeit: `platform` folgt dem Git-HEAD, `dependencies.lock` ist gitignored, `sdkconfig.guition-p4` ist eingecheckt und schlägt `sdkconfig.defaults` — Änderungen dort wirken auf bestehenden Checkouts nicht. `CONFIG_COMPILER_OPTIMIZATION_DEBUG` (`-Og`) im Produktivbetrieb.
 * Zwei Überläufe in `captive.c` (`h_scan`, `h_connect`) sind heute unerreichbar, weil `captive_portal.html` gar nicht mehr eingebettet wird — tote Seite plus tote Handler, 4 kB statischer RAM.
@@ -77,12 +79,10 @@ Weitere Funde mittlerer Schwere: Netz-Sollwert ohne Grenzen im Modul (`modbus_rt
 
 ### OTA und Web, klein
 
-* `/api/devices` escaped Gerätenamen nicht (JSON bricht bei `"`); `jesc` aus `meter_web.c` sollte geteilt werden.
-* `scripts/build_number.py` zählt bei IDE-Targets (`idedata`, IntelliSense) und bei fehlgeschlagenen Builds hoch — deshalb ist `version.json` ständig geändert.
-* Kein Coredump-Abschnitt (6,9 MB Flash frei), `TASK_WDT` konnte bisher nie als Neustartgrund erscheinen.
-* `/ota/rollback` prüft den Zustand des anderen Slots nicht (`ABORTED`/`INVALID` → Neustart ohne Wirkung).
-* DNS-Hijack im Captive Portal hängt die Antwort hinter einen mitkopierten EDNS-OPT-Record; Clients mit EDNS0 (Windows, Chrome) sehen eine kaputte Antwort.
-* Register-Tab: `probeRead` ohne Wiedereintrittsschutz; `dirty`-Flag im Zähler-Tab wird nur durch Senden gelöscht; Spaltengriffe ohne `pointercancel`; Theme-Markierung ignoriert `?theme=`.
+* ~~`/api/devices` escaped Gerätenamen nicht~~, ~~`build_number.py` zählt bei IDE-Targets hoch~~, ~~`/ota/rollback` prüft den Slot-Zustand nicht~~, ~~`probeRead` ohne Wiedereintrittsschutz~~, ~~`dirty`-Flag nur durch Senden gelöscht~~ — **alle behoben (Nachtrag 2).**
+* **Offen:** kein Coredump-Abschnitt (rund 6,5 MB Flash frei), `TASK_WDT` kann deshalb nie als auswertbarer Absturz erscheinen.
+* **Offen:** DNS-Hijack im Captive Portal hängt die Antwort hinter einen mitkopierten EDNS-OPT-Record; Clients mit EDNS0 (Windows, Chrome) sehen eine kaputte Antwort.
+* **Offen, kosmetisch:** Spaltengriffe im Register-Tab ohne `pointercancel`; die Theme-Markierung zeigt nicht, wenn `?theme=` in der URL überstimmt.
 
 ## Nachtrag (gleicher Tag): fünf weitere Punkte behoben
 

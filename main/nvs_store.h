@@ -34,6 +34,13 @@ esp_err_t nvs_store_clear_wifi_list(void);
 esp_err_t nvs_store_get_ap_psk(char *psk, size_t psk_sz);
 esp_err_t nvs_store_set_ap_psk(const char *psk);
 
+/* Password for the WRITING web endpoints (OTA, Deye register writes, the
+ * mirror's pointer injection, config export). Empty = no password, which is the
+ * behaviour every device had before this existed. Set on the display, see
+ * webauth.h for why. */
+esp_err_t nvs_store_get_web_pw(char *pw, size_t pw_sz);
+esp_err_t nvs_store_set_web_pw(const char *pw);
+
 /* ------------- Display settings (percent 0..100) -------------
  * Brightness drives the LEDC backlight PWM; contrast a software overlay.
  * Defaults: brightness 80, contrast 100 (= full, no overlay).            */

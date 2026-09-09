@@ -10,3 +10,9 @@ ota_1,    app,  ota_1,   0x420000,  0x400000
 # Versioned read-only asset filesystem (build.txt + future UI assets).
 # Image built by scripts/fs_image.py, flashed via `-t flashfs`.
 storage,  data, spiffs,  0x820000,  0x100000
+# Coredump: APPENDED at the end on purpose. Everything before it keeps its
+# offset, so an existing device does not lose its NVS (WiFi, MQTT, VPN keys) --
+# but the new table only reaches the chip when bootloader+table are flashed over
+# USB. A device updated purely over OTA keeps the old table and has no coredump
+# partition; the firmware then just reports none (see /ota).
+coredump, data, coredump, 0x920000,  0x40000

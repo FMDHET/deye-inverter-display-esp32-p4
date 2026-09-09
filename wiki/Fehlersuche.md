@@ -7,11 +7,20 @@ Bevor man rät, holt man sich Informationen. Es gibt sechs Quellen:
 | Quelle | Was man sieht |
 | --- | --- |
 | **Serieller Monitor** | `pio device monitor -e guition-p4` — alle Meldungen der Firmware mit Zeitstempel. Bei Abstürzen wird sogar die Fehlerstelle im Code aufgelöst. |
+| **`GET /log`** | dasselbe Log, aber **ohne Kabel**: die letzten 48 kB Meldungen aus einem Ringpuffer im PSRAM. `?tail=2000` für nur das Ende, `?clear=1` zum Leeren danach. Überlebt keinen Neustart — dafür ist der Coredump da. |
+| **`GET /coredump`** | der letzte Absturz als Abbild für `espcoredump.py`. `GET /ota` nennt vorher schon Task, Programmzähler und Grund im Klartext. |
 | **`GET /ota`** | Version, Build-Nummer, welcher Speicherabschnitt läuft, Laufzeit, **Grund des letzten Neustarts**, freier Speicher |
 | **`GET /api/live`** | alle Messwerte, MQTT- und Uhr-Zustand |
 | **`GET /api/devices`** | pro Gerät: antwortet es, und mit welchen Werten |
 | **`GET /api/deye/live`** | was der Wechselrichter über sich selbst meldet, und welche Registerblöcke gerade antworten (`blocks`) |
 | **Kopfzeilen der Menüs** | jeder Reiter zeigt oben laufende Zähler — oft steht die Antwort schon dort |
+
+Die zwei neuen Quellen sind der Grund, warum man an ein Gerät an der Wand überhaupt herankommt:
+
+```bash
+curl -s http://<ip>/log?tail=3000          # was ist gerade passiert
+curl -s http://<ip>/ota | jq .coredump     # was war beim letzten Absturz
+```
 
 Ein Tipp zur Laufzeit: tippe auf die Uhr. Steht dort nur eine kurze Zeit, hat das Gerät sich neu gestartet. Dann sagt das Feld `reset` in `GET /ota`, **warum** — an einem Gerät an der Wand gibt es keine serielle Konsole, und ohne diese Auskunft bleibt nur Raten:
 
@@ -177,6 +186,27 @@ Die Konsequenz steckt heute an drei Stellen im Code:
 
 > [!WARNING]
 > Wenn du an `modbus_rtu.c` oder am Netzpfad in `modbus_tcp.c` arbeitest: **diese Kopplung muss bleiben.** Sie sieht wie eine unnötige Vorsichtsmaßnahme aus, ist aber der Unterschied zwischen einer nützlichen und einer gefährlichen Funktion.
+
+## Nach einem Absturz
+
+`GET /ota` sagt jetzt mehr als „PANIC":
+
+```json
+"coredump": { "present": 1, "size": 8192, "task": "modbus_tcp",
+              "pc": "0x4008a1c2", "reason": "Store access fault" }
+```
+
+Das reicht oft schon. Für den vollen Stapelspeicher das Abbild holen und mit der
+Firmware auflösen, die damals lief (die Build-Nummer steht im Abbild):
+
+```bash
+curl -s http://<ip>/coredump -o coredump.bin
+python $IDF_PATH/components/espcoredump/espcoredump.py info_corefile     -t raw -c coredump.bin .pio/build/guition-p4/firmware.elf
+curl -s "http://<ip>/coredump?erase=1"     # Platz für den naechsten
+```
+
+> [!NOTE]
+> Die Coredump-Partition ist **nach** allen anderen an die Tabelle angehängt, damit kein bestehendes Gerät sein NVS verliert. Eine neue Partitionstabelle kommt aber nur per USB aufs Gerät — ein Display, das ausschließlich über WLAN aktualisiert wurde, hat die Partition nicht und meldet `"coredump":{"present":0}`, auch nach einem Absturz. Einmal `pio run -t upload` über Kabel behebt das dauerhaft.
 
 ## Bauen und Flashen
 

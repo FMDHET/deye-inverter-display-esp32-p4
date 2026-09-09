@@ -84,6 +84,40 @@ Max. Export: 21,7 kW  (35 A × 3 × 230 V × 90%)
 
 Diese Grenze bremst die Zwangsentladung, damit dein Hausanschluss nicht überlastet wird. Erklärung: [Der SLS-Schutz](Deye-Steuerung#der-sls-schutz).
 
+**Web-Zugriff** — ein Passwort für alles, was über das Netz etwas **ändert**:
+
+| geschützt | offen |
+| --- | --- |
+| Firmware- und Dateisystem-Update, Neustart, Rückfall (`/ota…`) | alle Anzeigeseiten und Messwerte (`/deye`, `/api/live`, `/api/meter`, `/api/deye/live`) |
+| Register schreiben (`/deye/write`) | Register lesen (`/deye/read`) |
+| Sollwert und Phasenmanipulation (`/api/meter/manip`) | `GET /ota` (Version, Speicher, Neustartgrund) |
+| Fernbedienung über den Web-Spiegel (`/touch`, `/key`, `/paste`) | das Spiegelbild selbst |
+| Log (`/log`) und Sicherung (`/config`) | |
+
+Leeres Feld = kein Schutz, genau wie vor dieser Funktion. Gesetzt wird das Passwort **nur hier am Gerät** — vor dem Display zu stehen ist der einzige Nachweis, den das Netzwerk nicht fälschen kann. Der Haken auf der Tastatur speichert.
+
+Im Browser fragt danach ein normales Anmeldefenster (der Benutzername ist beliebig, es zählt nur das Passwort), auf der Kommandozeile:
+
+```bash
+curl -u :meinPasswort -X POST --data-binary @firmware.bin http://<ip>/ota
+```
+
+> [!WARNING]
+> Das ist HTTP-Basic ohne Verschlüsselung: es hält einen Irrtum oder einen neugierigen Mitbewohner ab, nicht jemanden, der den Netzverkehr mitliest. Von außen erreichbar sollte das Gerät nur über den [VPN-Tunnel](Zeit-und-VPN) sein. Zwei Wege bleiben ohnehin ungeschützt, weil ihr Protokoll kein Passwort kennt: die **Modbus-Brücke auf Port 502** und **MQTT-Kommandos** — wer den Broker erreicht, kann den Akku umschalten.
+
+**Einstellungen sichern** — `GET /config` liefert alles, was du je eingestellt hast, als eine JSON-Datei: WLAN-Netze samt Passwörtern, MQTT-Zugang, Geräteliste, Zähler-Einstellungen und den **privaten WireGuard-Schlüssel**. Genau der ist der Grund für diese Funktion: er steht nirgendwo sonst, und ein gelöschtes NVS bedeutet, den Tunnel auf beiden Seiten neu einzurichten.
+
+```bash
+curl -u :meinPasswort http://<ip>/config -o deye-display-config.json     # sichern
+curl -u :meinPasswort -X POST --data-binary @deye-display-config.json      http://<ip>/config                                                  # zurueckspielen
+curl -u :meinPasswort -X POST http://<ip>/ota/reboot                     # wirksam werden
+```
+
+Die Datei enthält Passwörter im Klartext — entsprechend aufbewahren. Zurückgespielt wird nur, was auch hineingehört: eine Datei ohne `"device": "deye-display"` wird abgelehnt, und ein Datenblock mit unerwarteter Länge (etwa aus einer neueren Firmware) wird übersprungen statt halb angewendet. Die Antwort sagt, wie viele Felder übernommen und wie viele übersprungen wurden.
+
+> [!CAUTION]
+> Eine Sicherung eines **anderen** Displays einzuspielen überschreibt auch die WLAN-Liste — danach hängt das Gerät möglicherweise in einem Netz, in dem du es nicht erreichst. Das Notfall-WLAN und der Bildschirm bleiben der Rückweg.
+
 ---
 
 ## Die Bildschirmtastatur

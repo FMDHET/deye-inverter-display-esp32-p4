@@ -1,4 +1,5 @@
 #include "meter_web.h"
+#include "webauth.h"
 #include "modbus_tcp.h"
 #include "modbus_rtu.h"
 
@@ -156,6 +157,10 @@ static esp_err_t values_handler(httpd_req_t *req)
  * can send a single knob. `sp` additionally moves the grid setpoint. */
 static esp_err_t manip_handler(httpd_req_t *req)
 {
+    /* This is a WRITING endpoint: it changes what the inverter is told and
+     * moves the grid setpoint. */
+    if (!web_auth_ok(req)) return ESP_OK;
+
     char q[160];
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");

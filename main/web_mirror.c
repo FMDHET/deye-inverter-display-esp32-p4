@@ -1,6 +1,7 @@
 #include "web_mirror.h"
 #include "lvgl_port.h"
 #include "ui_flow.h"
+#include "webauth.h"
 #include "ui_settings.h"
 #include "board_jc4880p443c.h"
 #include "modbus_tcp.h"
@@ -158,6 +159,8 @@ static esp_err_t page_handler(httpd_req_t *req)
 
 static esp_err_t touch_handler(httpd_req_t *req)
 {
+    if (!web_auth_ok(req)) return ESP_OK;     /* 401 already sent */
+
     char q[64], v[12];
     int  x = 0, y = 0, down = 0;
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
@@ -185,6 +188,8 @@ static esp_err_t touch_handler(httpd_req_t *req)
 /* Physical keyboard from the browser -> focused LVGL text field. */
 static esp_err_t key_handler(httpd_req_t *req)
 {
+    if (!web_auth_ok(req)) return ESP_OK;     /* 401 already sent */
+
     char q[24], v[12];
     long c = 0;
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK &&
@@ -203,6 +208,8 @@ static esp_err_t key_handler(httpd_req_t *req)
  * focused text field. Lets you paste long WireGuard keys / IPs from the PC. */
 static esp_err_t paste_handler(httpd_req_t *req)
 {
+    if (!web_auth_ok(req)) return ESP_OK;     /* 401 already sent */
+
     char buf[1025];
     int  stored = 0;
     int  left   = req->content_len;

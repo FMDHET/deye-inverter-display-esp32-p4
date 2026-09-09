@@ -192,3 +192,18 @@ CONFIG_ESP_NETIF_BRIDGE_EN=y
 # still refuses a BUILD_DIR containing spaces -- keep building with
 #   PLATFORMIO_BUILD_DIR=~/pio-build/deye-display pio run -e guition-p4 ...
 CONFIG_COMPILER_HIDE_PATHS_MACROS=n
+
+# Coredump in den Flash (Partition "coredump", 256 kB am Ende der Tabelle).
+# Vorher stand hier ENABLE_TO_NONE: ein Absturz hinterliess nur das Wort
+# "PANIC" in /ota. Jetzt liegt der Ort des Absturzes samt Backtrace im Flash und
+# ist ueber GET /coredump abholbar (espcoredump.py info_corefile). ELF-Format,
+# weil nur damit esp_core_dump_get_summary()/get_panic_reason() funktionieren --
+# /ota nennt danach Task, PC und Grund im Klartext.
+# Eigener Stack, damit der Dump nicht auf dem kaputten Stack der abgestuerzten
+# Task laeuft; DRAM bleibt aussen vor (32 MB PSRAM passen nirgends hin).
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+CONFIG_ESP_COREDUMP_CAPTURE_DRAM=n
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=32
+CONFIG_ESP_COREDUMP_STACK_SIZE=1280

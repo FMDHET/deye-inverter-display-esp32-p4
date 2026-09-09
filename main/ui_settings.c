@@ -10,6 +10,7 @@
 #include "mqtt_fwd.h"
 #include "ntp_client.h"
 #include "wg_client.h"
+#include "webauth.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -119,6 +120,8 @@ static lv_obj_t       *s_vpn_status, *s_vpn_kbd, *s_vpn_en;
 /* System tab */
 static lv_obj_t       *s_sls_dd;
 static lv_obj_t       *s_sls_status_lbl;
+/* System tab: password for the writing web endpoints (see webauth.h). */
+static lv_obj_t       *s_web_pw, *s_web_kbd, *s_web_status;
 static lv_obj_t       *s_vpn_privkey, *s_vpn_pubkey, *s_vpn_psk, *s_vpn_endpoint;
 static lv_obj_t       *s_vpn_port, *s_vpn_addr, *s_vpn_mask, *s_vpn_keep;
 
@@ -127,6 +130,7 @@ static lv_obj_t       *s_active_ta;
 
 /* ------------------- forward decls ----------------------------------- */
 static void tab_select(tab_id_t id);
+static void web_pw_save_cb(lv_event_t *e);
 static void wifi_refresh(void);
 static void wifi_saved_refresh(void);
 static void open_pwd_dialog(const char *ssid);
@@ -1797,6 +1801,7 @@ static void header_save_cb(lv_event_t *e)
     case TAB_MQTT:    mqtt_save_cb(NULL);  break;
     case TAB_ZEIT:    ntp_save_cb(NULL);   break;
     case TAB_VPN:     vpn_save_cb(NULL);   break;
+    case TAB_SYSTEM:  web_pw_save_cb(NULL); break;
     default: break;
     }
 }
@@ -1804,7 +1809,7 @@ static void header_save_cb(lv_event_t *e)
 static bool tab_has_save(tab_id_t id)
 {
     return id == TAB_DISPLAY || id == TAB_MBRTU || id == TAB_MQTT ||
-           id == TAB_ZEIT    || id == TAB_VPN;
+           id == TAB_ZEIT    || id == TAB_VPN  || id == TAB_SYSTEM;
 }
 
 static void tab_select(tab_id_t id)
@@ -1838,6 +1843,7 @@ static void tab_select(tab_id_t id)
     if (s_vpn_kbd)  lv_obj_add_flag(s_vpn_kbd,  LV_OBJ_FLAG_HIDDEN);
     if (s_mqtt_kbd) lv_obj_add_flag(s_mqtt_kbd, LV_OBJ_FLAG_HIDDEN);
     if (s_ntp_kbd)  lv_obj_add_flag(s_ntp_kbd,  LV_OBJ_FLAG_HIDDEN);
+    if (s_web_kbd)  lv_obj_add_flag(s_web_kbd,  LV_OBJ_FLAG_HIDDEN);
     s_active_ta = NULL;
     s_active_tab = id;
 }
@@ -2006,6 +2012,40 @@ static void sls_change_cb(lv_event_t *e)
     ESP_LOGI("ui_sys", "SLS saved: %u A", (unsigned)a);
 }
 
+static void web_pw_status(void)
+{
+    if (!s_web_status) return;
+    bool on = web_auth_enabled();
+    lv_label_set_text(s_web_status, on
+        ? LV_SYMBOL_OK "  Passwort gesetzt \xe2\x80\x94 Schreibzugriffe verlangen es"
+        : "kein Passwort \xe2\x80\x94 jeder im Netz darf schreiben");
+    lv_obj_set_style_text_color(s_web_status, on ? COL_OK : COL_WARN, 0);
+}
+
+static void web_pw_save_cb(lv_event_t *e)
+{
+    (void)e;
+    if (!s_web_pw) return;
+    web_auth_set(lv_textarea_get_text(s_web_pw));
+    web_pw_status();
+}
+
+static void web_pw_focus_cb(lv_event_t *e)
+{
+    s_active_ta = lv_event_get_target(e);
+    lv_keyboard_set_mode(s_web_kbd, LV_KEYBOARD_MODE_TEXT_LOWER);
+    lv_keyboard_set_textarea(s_web_kbd, s_active_ta);
+    lv_obj_remove_flag(s_web_kbd, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void web_kbd_ready_cb(lv_event_t *e)
+{
+    (void)e;
+    lv_obj_add_flag(s_web_kbd, LV_OBJ_FLAG_HIDDEN);
+    s_active_ta = NULL;
+    web_pw_save_cb(NULL);            /* the tick on the keyboard saves */
+}
+
 static void system_tab_build(lv_obj_t *parent)
 {
     lv_obj_set_style_bg_opa(parent, LV_OPA_TRANSP, 0);
@@ -2045,6 +2085,51 @@ static void system_tab_build(lv_obj_t *parent)
     lv_obj_set_style_text_font(s_sls_status_lbl, F_SM, 0);
     lv_obj_set_style_text_color(s_sls_status_lbl, COL_OK, 0);
     sls_update_status(cur_a);
+
+    /* ---- Web-Zugriff ----
+     * The password is deliberately only settable HERE: standing in front of the
+     * device is the one credential the network cannot fake. */
+    lv_obj_t *wh = lv_label_create(parent);
+    lv_label_set_text(wh, "Web-Zugriff");
+    lv_obj_set_style_text_font(wh, F_MD, 0);
+    lv_obj_set_style_text_color(wh, COL_TEXT, 0);
+
+    lv_obj_t *ws = lv_label_create(parent);
+    lv_label_set_text(ws,
+        "Sch\xc3\xbctzt alles, was etwas \xc3\xa4ndert: Firmware-Update, Register\n"
+        "schreiben, Fernbedienung \xc3\xbc""ber den Web-Spiegel, Log und Sicherung.\n"
+        "Leer = kein Schutz. Ablesen bleibt immer frei.");
+    lv_obj_set_style_text_font(ws, F_SM, 0);
+    lv_obj_set_style_text_color(ws, COL_SUB, 0);
+    lv_obj_set_width(ws, 560);
+    lv_label_set_long_mode(ws, LV_LABEL_LONG_WRAP);
+
+    char pw[WEB_AUTH_PW_MAX] = "";
+    web_auth_get(pw, sizeof(pw));
+    s_web_pw = lv_textarea_create(parent);
+    lv_textarea_set_one_line(s_web_pw, true);
+    lv_textarea_set_password_mode(s_web_pw, true);
+    lv_textarea_set_max_length(s_web_pw, WEB_AUTH_PW_MAX - 1);
+    lv_textarea_set_placeholder_text(s_web_pw, "Passwort (leer = aus)");
+    if (pw[0]) lv_textarea_set_text(s_web_pw, pw);
+    lv_obj_set_width(s_web_pw, 320);
+    lv_obj_set_style_bg_color(s_web_pw, COL_PANEL, 0);
+    lv_obj_set_style_text_color(s_web_pw, COL_TEXT, 0);
+    lv_obj_add_event_cb(s_web_pw, web_pw_focus_cb, LV_EVENT_CLICKED, NULL);
+
+    s_web_status = lv_label_create(parent);
+    lv_obj_set_style_text_font(s_web_status, F_SM, 0);
+
+    /* On the screen, not the page: the page is only 500 px high and the
+     * keyboard needs the bottom half. tab_select() hides it on leaving. */
+    s_web_kbd = lv_keyboard_create(s_screen);
+    lv_obj_set_size(s_web_kbd, 800, 240);
+    lv_obj_align(s_web_kbd, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_add_flag(s_web_kbd, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(s_web_kbd, web_kbd_ready_cb, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_web_kbd, web_kbd_ready_cb, LV_EVENT_CANCEL, NULL);
+
+    web_pw_status();
 }
 
 /* ------------------- public ------------------------------------------ */

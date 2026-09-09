@@ -6,7 +6,9 @@
 #include "wifi_mgr.h"
 #include "display.h"
 #include "ui_flow.h"
+#include "webauth.h"
 
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,6 +19,7 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
+#include "esp_core_dump.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -154,6 +157,109 @@ static const char *ota_state_name(const esp_partition_t *p)
     }
 }
 
+/* Saturating append -- same helper as meter_web.c/deye_web.c jcat(): a bare
+ * `o += snprintf()` lets o run past the buffer and turns the next `cap - o`
+ * into a huge size_t (that bug was already fixed once, in /api/devices). */
+static int jcat_ota(char *buf, size_t cap, int o, const char *fmt, ...)
+{
+    if (o < 0 || (size_t)o >= cap) return (int)cap - 1;
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf + o, cap - (size_t)o, fmt, ap);
+    va_end(ap);
+    if (n < 0) return o;
+    o += n;
+    return ((size_t)o >= cap) ? (int)cap - 1 : o;
+}
+
+/* ---------------------------- coredump ---------------------------------
+ * A crash used to leave exactly one word behind: `reset: PANIC`. With the
+ * coredump partition the panic handler writes the crashed task, its program
+ * counter and a backtrace to flash, so the interesting part survives the
+ * reboot -- which the live log ring (applog.c) by definition cannot.
+ *
+ * A device that was only ever updated over OTA has no coredump partition (the
+ * partition table is not part of an OTA image), so every path here must cope
+ * with "no such partition" and simply report nothing. */
+
+static const esp_partition_t *coredump_part(void)
+{
+    return esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                                    ESP_PARTITION_SUBTYPE_DATA_COREDUMP, NULL);
+}
+
+/* Appends "coredump":{...} to a JSON buffer. Always valid JSON, also when the
+ * partition is missing or empty. */
+static int coredump_json(char *buf, size_t cap, int o)
+{
+    size_t addr = 0, size = 0;
+    if (!coredump_part() || esp_core_dump_image_get(&addr, &size) != ESP_OK || size == 0)
+        return jcat_ota(buf, cap, o, "\"coredump\":{\"present\":0}");
+
+    esp_core_dump_summary_t sum;
+    if (esp_core_dump_get_summary(&sum) != ESP_OK)
+        return jcat_ota(buf, cap, o, "\"coredump\":{\"present\":1,\"size\":%u}",
+                        (unsigned)size);
+
+    char reason[128] = "";
+    if (esp_core_dump_get_panic_reason(reason, sizeof(reason)) != ESP_OK) reason[0] = '\0';
+    for (char *c = reason; *c; c++)                 /* keep the JSON intact */
+        if (*c == '"' || *c == '\\' || *c == '\n') *c = ' ';
+
+    return jcat_ota(buf, cap, o,
+                    "\"coredump\":{\"present\":1,\"size\":%u,\"task\":\"%.15s\","
+                    "\"pc\":\"0x%08x\",\"reason\":\"%s\"}",
+                    (unsigned)size, sum.exc_task, (unsigned)sum.exc_pc, reason);
+}
+
+/* GET /coredump      -> the raw image, for `espcoredump.py info_corefile`
+ * GET /coredump?erase=1 -> throw it away (so the next crash is the fresh one) */
+static esp_err_t coredump_handler(httpd_req_t *req)
+{
+    if (!web_auth_ok(req)) return ESP_OK;     /* memory contents -- gated */
+
+    char q[24], v[8];
+    bool erase = false;
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK &&
+        httpd_query_key_value(q, "erase", v, sizeof(v)) == ESP_OK)
+        erase = (v[0] == '1');
+
+    const esp_partition_t *part = coredump_part();
+    if (!part) {
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, "no coredump partition -- flash bootloader and "
+                                       "partition table over USB once\n");
+    }
+    if (erase) {
+        esp_err_t e = esp_core_dump_image_erase();
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, e == ESP_OK ? "coredump erased\n" : "erase failed\n");
+    }
+
+    size_t addr = 0, size = 0;
+    if (esp_core_dump_image_get(&addr, &size) != ESP_OK || size == 0) {
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, "no coredump stored\n");
+    }
+
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"coredump.bin\"");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+    /* Read straight out of the partition in chunks -- the image can be a few
+     * hundred kB and must not be buffered whole. */
+    uint8_t chunk[512];
+    size_t off = 0;
+    while (off < size) {
+        size_t n = size - off > sizeof(chunk) ? sizeof(chunk) : size - off;
+        if (esp_partition_read(part, off, chunk, n) != ESP_OK) break;
+        if (httpd_resp_send_chunk(req, (const char *)chunk, n) != ESP_OK) return ESP_FAIL;
+        off += n;
+    }
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
 static esp_err_t ota_info_handler(httpd_req_t *req)
 {
     const esp_partition_t *run = esp_ota_get_running_partition();
@@ -171,14 +277,14 @@ static esp_err_t ota_info_handler(httpd_req_t *req)
      * grows its receive buffer from DMA-capable internal RAM while the flash
      * write is running, and asserts if that allocation fails. The overall heap
      * says nothing about it -- it is PSRAM and always looks roomy. */
-    char json[760];
-    snprintf(json, sizeof(json),
+    char json[1024];
+    int o = snprintf(json, sizeof(json),
              "{\"version\":\"%s\",\"build\":%d,\"fs_build\":%d,\"running\":\"%s\","
              "\"running_state\":\"%s\","
              "\"target_slot\":\"%s\",\"other_state\":\"%s\",\"other_version\":\"%s\","
              "\"idf\":\"%s\",\"mac\":\"%s\",\"uptime\":%lld,"
              "\"reset\":\"%s\",\"heap\":%u,\"heap_min\":%u,"
-             "\"dma\":%u,\"dma_max\":%u,\"dma_min\":%u}",
+             "\"dma\":%u,\"dma_max\":%u,\"dma_min\":%u,\"auth\":%d,",
              DEYE_BUILD_VERSION_FULL, DEYE_BUILD_NUMBER, assets_fs_build_number(),
              run ? run->label : "?", ota_state_name(run),
              next ? next->label : "?", ota_state_name(next),
@@ -190,7 +296,12 @@ static esp_err_t ota_info_handler(httpd_req_t *req)
              (unsigned)esp_get_minimum_free_heap_size(),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA),
-             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA));
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA),
+             web_auth_enabled() ? 1 : 0);
+    if (o < 0) o = 0;
+    if ((size_t)o >= sizeof(json)) o = (int)sizeof(json) - 1;
+    o = coredump_json(json, sizeof(json), o);
+    o = jcat_ota(json, sizeof(json), o, "}");
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");   /* the recovery page polls this */
@@ -201,6 +312,8 @@ static esp_err_t ota_info_handler(httpd_req_t *req)
 /* POST /ota -> raw firmware image in the body; flash inactive slot + reboot. */
 static esp_err_t ota_post_handler(httpd_req_t *req)
 {
+    if (!web_auth_ok(req)) return ESP_OK;     /* 401 already sent */
+
     const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
     if (!part) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
@@ -368,6 +481,8 @@ static esp_err_t fs_fail(httpd_req_t *req, uint8_t *buf, const char *msg)
  * the firmware over WiFi. */
 static esp_err_t ota_fs_handler(httpd_req_t *req)
 {
+    if (!web_auth_ok(req)) return ESP_OK;     /* 401 already sent */
+
     const esp_partition_t *fs = esp_partition_find_first(
         ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "storage");
     if (!fs) {
@@ -438,6 +553,8 @@ static esp_err_t ota_fs_handler(httpd_req_t *req)
 /* POST /ota/reboot -> just restart. */
 static esp_err_t ota_reboot_handler(httpd_req_t *req)
 {
+    if (!web_auth_ok(req)) return ESP_OK;     /* 401 already sent */
+
     httpd_resp_set_hdr(req, "Connection", "close");
     httpd_resp_sendstr(req, "rebooting\n");
     ESP_LOGW(TAG, "reboot requested via /ota/reboot");
@@ -450,6 +567,8 @@ static esp_err_t ota_reboot_handler(httpd_req_t *req)
  * The rescue path when an OTA boots but misbehaves. */
 static esp_err_t ota_rollback_handler(httpd_req_t *req)
 {
+    if (!web_auth_ok(req)) return ESP_OK;     /* 401 already sent */
+
     const esp_partition_t *other = esp_ota_get_next_update_partition(NULL);
     if (!other) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no other slot");
@@ -591,7 +710,9 @@ void ota_register_routes(httpd_handle_t server)
     httpd_uri_t reboot   = { .uri = "/ota/reboot",   .method = HTTP_POST, .handler = ota_reboot_handler };
     httpd_uri_t rollback = { .uri = "/ota/rollback", .method = HTTP_POST, .handler = ota_rollback_handler };
     httpd_uri_t recovery = { .uri = "/recovery",     .method = HTTP_GET,  .handler = recovery_page_handler };
+    httpd_uri_t coredump = { .uri = "/coredump",     .method = HTTP_GET,  .handler = coredump_handler };
     httpd_register_uri_handler(server, &info);
+    httpd_register_uri_handler(server, &coredump);
     httpd_register_uri_handler(server, &post);
     httpd_register_uri_handler(server, &fs);
     httpd_register_uri_handler(server, &reboot);

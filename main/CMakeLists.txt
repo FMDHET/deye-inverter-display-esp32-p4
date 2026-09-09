@@ -22,8 +22,11 @@ idf_component_register(
         "ntp_client.c"
         "wg_client.c"
         "fonts.c"
+        "applog.c"
+        "webauth.c"
+        "config_web.c"
     INCLUDE_DIRS "."
     EMBED_TXTFILES "web_mirror.html" "recovery.html" "deye.html"
     EMBED_FILES "montserrat_medium.ttf"
-    PRIV_REQUIRES nvs_flash esp_wifi esp_event esp_netif spiffs esp_http_server lwip esp_driver_jpeg app_update esp_driver_ledc esp_driver_uart mqtt esp_wireguard
+    PRIV_REQUIRES nvs_flash espcoredump mbedtls json esp_wifi esp_event esp_netif spiffs esp_http_server lwip esp_driver_jpeg app_update esp_driver_ledc esp_driver_uart mqtt esp_wireguard
 )

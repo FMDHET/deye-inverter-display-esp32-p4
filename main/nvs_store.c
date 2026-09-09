@@ -133,6 +133,18 @@ esp_err_t nvs_store_get_ap_psk(char *psk, size_t psk_sz)
     return ESP_OK;
 }
 
+esp_err_t nvs_store_get_web_pw(char *pw, size_t pw_sz)
+{
+    if (!pw || pw_sz == 0) return ESP_ERR_INVALID_ARG;
+    if (get_str(NS_WIFI, "web_pw", pw, pw_sz) != ESP_OK) pw[0] = '\0';
+    return ESP_OK;                       /* "nothing stored" = no password */
+}
+
+esp_err_t nvs_store_set_web_pw(const char *pw)
+{
+    return set_str(NS_WIFI, "web_pw", pw ? pw : "");
+}
+
 esp_err_t nvs_store_set_ap_psk(const char *psk)
 {
     if (!psk || strlen(psk) < 8) return ESP_ERR_INVALID_ARG;

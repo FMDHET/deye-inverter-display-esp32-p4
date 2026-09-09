@@ -1,6 +1,7 @@
 #include "deye_web.h"
 #include "modbus_rtu.h"
 #include "deye_ctrl.h"
+#include "webauth.h"
 
 #include <stdarg.h>
 
@@ -63,6 +64,10 @@ static esp_err_t read_handler(httpd_req_t *req)
 /* GET /deye/write?addr=&val= -> {"ok":bool,"rc":N} (FC06 single register) */
 static esp_err_t write_handler(httpd_req_t *req)
 {
+    /* Writing arbitrary registers into the inverter -- the most dangerous
+     * endpoint on the device. */
+    if (!web_auth_ok(req)) return ESP_OK;
+
     int addr = qparam_int(req, "addr", -1);
     int val  = qparam_int(req, "val",  -1);
 

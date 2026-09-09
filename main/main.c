@@ -18,6 +18,7 @@
 #include "mqtt_fwd.h"
 #include "ntp_client.h"
 #include "wg_client.h"
+#include "applog.h"
 
 #include "esp_err.h"
 #include "esp_log.h"
@@ -32,6 +33,10 @@ static const char *TAG = "deye-display";
 
 void app_main(void)
 {
+    /* First thing after the banner: catch the log in RAM so GET /log can show a
+     * boot. Anything before this line only ever reaches the UART. */
+    applog_init();
+
     ESP_LOGI(TAG, "Deye-Display booting on ESP32-P4");
     ESP_LOGI(TAG, "Firmware build %s  (#%d, %s)",
              DEYE_BUILD_VERSION_FULL, DEYE_BUILD_NUMBER, DEYE_BUILD_TIMESTAMP);

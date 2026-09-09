@@ -4,6 +4,8 @@
 #include "ota.h"
 #include "deye_web.h"
 #include "meter_web.h"
+#include "applog.h"
+#include "config_web.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -370,7 +372,7 @@ esp_err_t captive_start(void)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size       = 6144;
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 28;   /* mirror + ota + deye + meter + captive routes */
+    cfg.max_uri_handlers = 32;   /* mirror + ota + deye + meter + log/coredump/config + captive */
     cfg.recv_wait_timeout = 12;  /* grace for a large OTA upload under load */
     cfg.send_wait_timeout = 12;
     /* 4, not 7. These are not free slots, they are 4 of the 16 lwIP sockets the
@@ -392,6 +394,8 @@ esp_err_t captive_start(void)
     ota_register_routes(s_httpd);
     deye_web_register(s_httpd);
     meter_web_register(s_httpd);
+    applog_register(s_httpd);        /* GET /log */
+    config_web_register(s_httpd);    /* GET/POST /config */
 
     const httpd_uri_t scan = { .uri = "/scan",    .method = HTTP_GET,  .handler = h_scan };
     const httpd_uri_t conn = { .uri = "/connect", .method = HTTP_POST, .handler = h_connect };

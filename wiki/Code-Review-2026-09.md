@@ -10,7 +10,8 @@ Diese Seite hält fest, **was behoben wurde** (mit Nachweis), **was offen ist** 
 * **Sieben weitere Fehler im OTA-Pfad behoben**, darunter zwei, die das Gerät lahmlegen konnten: ein Upload, der mitten drin stehen bleibt, fror das Gerät dauerhaft ein; eine falsche Datei im Firmware-Feld löschte den einzigen Rückfall-Abschnitt.
 * **Die Web-Oberfläche `/deye` ist jetzt auf dem iPhone benutzbar**: Tabellenzeilen werden zu Karten, die eingegebenen Werte werden vor dem Senden geprüft, das Polling stapelt sich nicht mehr.
 * **Der Modbus-Regelpfad ist entschieden und umgesetzt** (Nachtrag 4): ein ausgefallenes Gerät blockiert seine IP-Mitbewohner nicht mehr, der CT-Eingang des Deye ist kein Regelwert mehr (Regel- und Anzeigewert sind jetzt getrennte Variablen), ein Zwangsmodus wird beim Start abgeräumt und läuft nach 2 h ab, und das 0-W-Halten ist eine Brücke mit Ablauf statt eines Dauerzustands.
-* **Offen und wichtig:** die Sicherheit des Notfall-WLANs (AP-Passwort ist die veröffentlichte Konstante, `/ota` und die Deye-Steuerung ohne Passwort) und die Versionierung der Konfig-Blobs. Die Display-Oberfläche ist abgearbeitet (Nachträge 1–3), darunter die zwei Fehler, die das Gerät unbedienbar machen konnten: Touch-Ausfall beim Start und Helligkeit 0 %.
+* **Diagnose und Zugriffsschutz nachgezogen** (Nachtrag 5): Coredump und `GET /log` machen einen Absturz und den laufenden Betrieb ohne Kabel auswertbar, ein am Display gesetztes Passwort schützt alle schreibenden Web-Pfade, und `GET /config` sichert die Einstellungen samt WireGuard-Schlüssel.
+* **Offen und wichtig:** MQTT-Kommandos und die Modbus-Brücke kennen kein Passwort, das AP-Passwort ist weiterhin die veröffentlichte Konstante, und die Konfig-Blobs `mqtt`/`ntp`/`wg` haben kein Versionsfeld. Die Display-Oberfläche ist abgearbeitet (Nachträge 1–3), darunter die zwei Fehler, die das Gerät unbedienbar machen konnten: Touch-Ausfall beim Start und Helligkeit 0 %.
 
 ## Behoben
 
@@ -61,7 +62,7 @@ Weitere Funde mittlerer Schwere — behoben: ~~Netz-Sollwert ohne Grenzen im Mod
 
 ### Kern und Sicherheit
 
-* ~~Notfall-WLAN wird nie wieder abgebaut~~ — **behoben (Nachtrag, siehe unten).** Offen bleibt: das AP-Passwort ist weiterhin die veröffentlichte Konstante (`nvs_store_set_ap_psk` hat keinen Aufrufer), und `/ota` sowie die Deye-Steuerung haben kein Passwort.
+* ~~Notfall-WLAN wird nie wieder abgebaut~~ — **behoben (Nachtrag).** ~~`/ota` und die Deye-Steuerung haben kein Passwort~~ — **behoben (Nachtrag 5).** Offen bleibt: das AP-Passwort ist weiterhin die veröffentlichte Konstante — setzen lässt es sich inzwischen nur über die Sicherungsdatei (`/config`), nicht am Display.
 * ~~Netzwerkwahl springt zum falschen Netz~~ — **behoben (Nachtrag).**
 * ~~WireGuard wird genau einmal versucht~~ — **behoben (Nachtrag).**
 * ~~`mqtt_apply()` läuft auf dem LVGL-Task~~, ~~unbekannter MQTT-Modus wird angewendet~~, ~~`atoi("abc")` = 0 W~~ — **behoben (Nachtrag 2).** Offen bleibt: es gibt keinen Schalter „Steuerung per MQTT erlauben" — wer den Broker erreicht, kann den Akku umschalten.
@@ -80,7 +81,7 @@ Weitere Funde mittlerer Schwere — behoben: ~~Netz-Sollwert ohne Grenzen im Mod
 ### OTA und Web, klein
 
 * ~~`/api/devices` escaped Gerätenamen nicht~~, ~~`build_number.py` zählt bei IDE-Targets hoch~~, ~~`/ota/rollback` prüft den Slot-Zustand nicht~~, ~~`probeRead` ohne Wiedereintrittsschutz~~, ~~`dirty`-Flag nur durch Senden gelöscht~~ — **alle behoben (Nachtrag 2).**
-* **Offen:** kein Coredump-Abschnitt (rund 6,5 MB Flash frei), `TASK_WDT` kann deshalb nie als auswertbarer Absturz erscheinen.
+* ~~kein Coredump-Abschnitt~~ — **behoben (Nachtrag 5).**
 * **Offen:** DNS-Hijack im Captive Portal hängt die Antwort hinter einen mitkopierten EDNS-OPT-Record; Clients mit EDNS0 (Windows, Chrome) sehen eine kaputte Antwort.
 * **Offen, kosmetisch:** Spaltengriffe im Register-Tab ohne `pointercancel`; die Theme-Markierung zeigt nicht, wenn `?theme=` in der URL überstimmt.
 
@@ -196,6 +197,25 @@ Danach 142 = 2, 143 = 20000, 127 = 10, 128 = 40, 166–177 = 13/0 — der Zwang 
 Damit ist die Entscheidung bestätigt, und zwar deutlicher als erwartet: **die Null ist kein Ruhezustand.** In der Minute Brücke driftete der Akku um 1,3 kW, ohne dass ihm irgendwer etwas gesagt hätte — der 5-kW-Fall aus dem Fund ist real. Und die Stummschaltung ist kein harter Fehler: ein Alarm-Zustand, der von selbst verschwindet, sobald der Zähler zurück ist.
 
 **Nicht nachgestellt: die Reihenfolge bei gemeinsamer IP.** Bei diesem Aufbau scheitert West (Unit 2) *nach* Ost (Unit 1), das entscheidende „ein Ausfall vor einem funktionierenden Gerät" kommt also nicht vor. Nachstellen ließe es sich nur mit einem erfundenen Gerät in der Geräteliste des Betreibers — davon wurde abgesehen.
+
+## Nachtrag 5 (9. September): Diagnose und Zugriffsschutz
+
+Nicht mehr aus der Fund-Liste, sondern aus dem, was beim Arbeiten am Gerät gefehlt hat. Build 249.
+
+| Bereich | Was | Wie |
+| --- | --- | --- |
+| Diagnose | **Nach einem Absturz war das Gerät stumm.** An der Wand gibt es keine serielle Konsole, und `reset: PANIC` war die ganze Auskunft | Coredump-Partition (256 kB, **hinten** an die Tabelle angehängt, damit kein bestehendes Gerät sein NVS verliert). `/ota` nennt Task, Programmzähler und — bei `abort()`/Zusicherungen — den Grund; `GET /coredump` liefert das Abbild für `espcoredump.py`, `?erase=1` räumt es weg. Ein nur über WLAN aktualisiertes Gerät hat die Partition nicht (Partitionstabellen kommen nicht per OTA) und meldet dann sauber `present: 0` |
+| Diagnose | **Kein Weg an das laufende Log**, außer per USB-Kabel | Ringpuffer (48 kB PSRAM) hinter `esp_log_set_vprintf`, ausgeliefert über `GET /log` (`?tail=`, `?clear=`). PSRAM, weil interner RAM der DMA-fähige knappe ist; der Hook läuft nur im Task-Kontext, also nie mit abgeschaltetem Cache. Überlebt keinen Neustart — dafür ist der Coredump da |
+| Sicherheit | **Jeder im LAN durfte alles ändern**: Firmware aufspielen, jedes Deye-Register schreiben, das Display über den Web-Spiegel fernbedienen | HTTP-Basic vor allen schreibenden Pfaden (`/ota…`, `/deye/write`, `/api/meter/manip`, `/touch`, `/key`, `/paste`) und vor Log und Sicherung. Lesen bleibt offen. Passwort **nur am Display** setzbar (System-Tab) — vor dem Gerät zu stehen ist der einzige Nachweis, den das Netz nicht fälschen kann. Leer = aus, also ändert das Update von sich aus nichts |
+| Verlustrisiko | **Die Einstellungen existierten nur im NVS** — samt WLAN-Passwörtern und dem privaten WireGuard-Schlüssel, der nirgends sonst steht | `GET /config` sichert alles in eine JSON-Datei, `POST /config` spielt sie zurück. Die Datenblöcke gehen als base64 der Rohbytes hinaus: rundet exakt und braucht kein zweites Schema neben den Structs. Fremde Dateien und Blöcke falscher Länge werden abgelehnt statt halb angewendet |
+
+**Nachweis am Gerät.** Der Coredump wurde mit einem absichtlichen Absturz durchgespielt (temporärer Auslöser, danach entfernt): `Guru Meditation Error … Store access fault` → `Core dump has been saved to flash` → Neustart → `Found core dump 42916 bytes in flash @ 0x920000` → `/ota` meldet `task: "httpd"` → Download 42916 Byte → GDB löst `main/ota.c:232` samt Registern auf (`a5 = 0x2a`, der geschriebene Wert). Das Abbild übersteht ein Neuflashen der Firmware, `?erase=1` räumt es weg.
+
+`/log` zeigte auf Anhieb etwas Unerwartetes, das vorher niemand gesehen hätte: MQTT versucht die erste Verbindung rund 3,7 s nach dem Start, also **bevor** die Station eine IP hat (`Host is unreachable`), und kommt erst beim Wiederholen durch. Kosmetisch, aber ein gutes Beispiel dafür, wofür der Puffer da ist.
+
+Zugriffsschutz: mit gesetztem Passwort antworten alle schreibenden Pfade mit 401 und mit `-u` mit 200, während `/ota`, `/api/live`, `/api/meter`, `/api/deye/live`, `/deye`, `/deye/read` und das Spiegelbild unverändert offen bleiben. Sicherung: Export 2030 Byte, Rückspielen derselben Datei „15 übernommen, 0 übersprungen" und danach ein byteidentischer Export; fremde Datei und kaputtes JSON jeweils 400.
+
+**Bewusst nicht mitgemacht:** ein Schalter „Steuerung per MQTT erlauben" (wer den Broker erreicht, kann weiterhin den Akku umschalten) und die Modbus-Brücke auf Port 502, deren Protokoll kein Passwort kennt. Beides bleibt offen.
 
 ## Gut gemacht — nicht anfassen
 

@@ -189,21 +189,34 @@ Die Konsequenz steckt heute an drei Stellen im Code:
 
 ## Nach einem Absturz
 
-`GET /ota` sagt jetzt mehr als „PANIC":
+`GET /ota` sagt jetzt mehr als „PANIC" — so sah es bei einem absichtlich
+herbeigeführten Absturz im Webserver aus:
 
 ```json
-"coredump": { "present": 1, "size": 8192, "task": "modbus_tcp",
-              "pc": "0x4008a1c2", "reason": "Store access fault" }
+"reset": "PANIC",
+"coredump": { "present": 1, "size": 42916, "task": "httpd",
+              "pc": "0x4000e092", "reason": "" }
 ```
 
-Das reicht oft schon. Für den vollen Stapelspeicher das Abbild holen und mit der
+Der Task-Name allein beantwortet oft schon die Frage „wer war es". `reason`
+bleibt bei einer echten Ausnahme (Speicherzugriffsfehler und Ähnliches) leer —
+gefüllt wird es bei `abort()` und fehlgeschlagenen Zusicherungen, also genau bei
+Fällen wie `assert failed: sdio_rx_get_buffer`, der [OTA-Absturz](OTA-und-Recovery)
+aus dem September. Für den vollen Stapelspeicher das Abbild holen und mit der
 Firmware auflösen, die damals lief (die Build-Nummer steht im Abbild):
 
 ```bash
 curl -s http://<ip>/coredump -o coredump.bin
 python $IDF_PATH/components/espcoredump/espcoredump.py info_corefile     -t raw -c coredump.bin .pio/build/guition-p4/firmware.elf
-curl -s "http://<ip>/coredump?erase=1"     # Platz für den naechsten
+curl -s "http://<ip>/coredump?erase=1"     # Platz für den nächsten
 ```
+
+Am Gerät durchgespielt: Absturz → `Save core dump to flash` (der Dump läuft auf
+seinem eigenen Stack, 996 von 1880 Byte benutzt) → Neustart → `Found core dump
+42916 bytes in flash` → Download → GDB löst `main/ota.c:232` samt Registern auf.
+Das Abbild übersteht auch ein Neuflashen der Firmware; nur `?erase=1` räumt es
+weg. Ohne die passende `firmware.elf` ist es nicht auflösbar — wer eine
+Absturzmeldung ernst nimmt, sichert das ELF zum Build.
 
 > [!NOTE]
 > Die Coredump-Partition ist **nach** allen anderen an die Tabelle angehängt, damit kein bestehendes Gerät sein NVS verliert. Eine neue Partitionstabelle kommt aber nur per USB aufs Gerät — ein Display, das ausschließlich über WLAN aktualisiert wurde, hat die Partition nicht und meldet `"coredump":{"present":0}`, auch nach einem Absturz. Einmal `pio run -t upload` über Kabel behebt das dauerhaft.

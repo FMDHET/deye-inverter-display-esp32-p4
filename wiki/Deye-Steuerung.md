@@ -91,6 +91,8 @@ Ein erzwungener Modus lebt **im Wechselrichter**, nicht im Display. Das Display 
 
 **Ein Neustart hebt den Zwang auf.** Früher lebte der Modus nur im Arbeitsspeicher: nach einem Update stand auf dem Bildschirm „Normal", während der Deye unbeeindruckt weiter mit 5 kW aus dem Netz lud. Der Modus wird deshalb im NVS mitgeschrieben — aber beim Start nicht *wiederhergestellt*, sondern **abgeräumt**: findet die Firmware beim Hochlaufen einen gespeicherten Zwangsmodus, schreibt sie ungefähr zehn Sekunden später aktiv „Normal" in den Wechselrichter und protokolliert das (`stored mode '…' survived the restart … undoing it`). Die zehn Sekunden sind Absicht — so lange braucht die Zweidrahtleitung, bis sie sauber läuft.
 
+Der gespeicherte Modus wird dabei erst **gelöscht, wenn der Wechselrichter „Normal" bestätigt hat.** Vorher zu löschen würde genau das Wissen wegwerfen, auf das es ankommt — dass der Deye noch im Zwang steht —, sobald der Schreibvorgang scheitert. Bleibt er stehen, wird es alle zehn Sekunden erneut versucht, höchstens sechs Mal; danach bleibt der Eintrag liegen und der nächste Start ist die nächste Gelegenheit, statt endlos auf einen toten Bus zu schreiben.
+
 Damit ist die Regel einfach: **nach einem Stromausfall, einem Absturz oder einem Update ist der Akku wieder im Normalbetrieb.** Ein Zwang, den niemand mehr beaufsichtigt, ist genau das, was man nach einem unerwarteten Neustart nicht will.
 
 **Ein Zwang läuft nach zwei Stunden ab.** Danach fällt die Firmware selbst auf Normal zurück (`DEYE_FORCE_MAX_S`). Auf `/deye` steht unter `ctrl.left` die restliche Zeit in Sekunden.

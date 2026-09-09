@@ -32,9 +32,11 @@ static TaskHandle_t         s_task;
 static volatile uint32_t    s_mode_ms;
 /* Verification result of the last apply (see write_verify). */
 static volatile uint8_t     s_checked, s_failed;
-/* Set once at start when a forced mode survived a restart in the INVERTER and
- * has to be undone. */
+/* Set at start when a forced mode survived a restart in the INVERTER and has to
+ * be undone; s_undo_mode only names it in the log. */
 static volatile bool        s_undo_pending;
+static volatile uint8_t     s_undo_mode, s_undo_tries;
+#define DEYE_UNDO_TRIES     6            /* ~1 min of 10-s ticks */
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -138,15 +140,27 @@ static void deye_ctrl_write_regs(deye_mode_t mode, int power_w)
              (unsigned)(s_checked - s_failed), (unsigned)s_checked);
 }
 
-/* Put the inverter back to Normal and record that as the standing state. */
-static void fall_back_to_normal(const char *why)
+/* Put the inverter back to Normal and record that as the standing state.
+ * Returns true when the decisive registers came back confirmed. */
+static bool fall_back_to_normal(const char *why)
 {
     ESP_LOGW(TAG, "%s -> writing Normal to the inverter", why);
-    s_mode         = DEYE_MODE_NORMAL;
-    s_power_w      = s_user_power_w;
-    s_mode_ms      = now_ms();
-    nvs_store_set_deye_mode((uint8_t)DEYE_MODE_NORMAL);
+    s_mode    = DEYE_MODE_NORMAL;
+    s_power_w = s_user_power_w;
+    s_mode_ms = now_ms();
     deye_ctrl_write_regs(DEYE_MODE_NORMAL, s_power_w);
+
+    /* Forget the stored mode only once the inverter has CONFIRMED Normal.
+     * Clearing it first would lose the one piece of knowledge that matters --
+     * that the inverter is still forced -- the moment the write fails (bus not
+     * up yet, Deye unreachable). Kept, the next start tries again. */
+    if (s_failed == 0) {
+        nvs_store_set_deye_mode((uint8_t)DEYE_MODE_NORMAL);
+        return true;
+    }
+    ESP_LOGE(TAG, "Normal not confirmed (%u of %u registers) -- keeping the stored "
+                  "mode so it is retried", (unsigned)s_failed, (unsigned)s_checked);
+    return false;
 }
 
 static void deye_ctrl_task(void *arg)
@@ -158,16 +172,27 @@ static void deye_ctrl_task(void *arg)
         uint32_t requested = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10000));
 
         if (s_undo_pending) {
-            s_undo_pending = false;
             /* A forced mode lives in the INVERTER, not in us: it survived our
              * restart while our own state came back as "Normal". Undo it rather
              * than resume it -- a restart (OTA, crash, power cut) must not leave
              * the battery charging from the grid behind a display that says
-             * Normal. The stored mode was read in deye_ctrl_start(). */
-            char msg[80];
-            snprintf(msg, sizeof(msg), "restart with '%s' still set in the inverter",
-                     deye_ctrl_mode_name(s_mode));
-            fall_back_to_normal(msg);
+             * Normal. The stored mode was read in deye_ctrl_start().
+             * Retried on the 10-s tick while the write does not confirm (the
+             * RS485 master may still be coming up), but not forever: after
+             * DEYE_UNDO_TRIES the stored mode stays and the next start is the
+             * next chance, instead of writing to a dead bus every 10 s. */
+            char msg[96];
+            snprintf(msg, sizeof(msg), "restart with '%s' still set in the inverter (try %u/%u)",
+                     deye_ctrl_mode_name((deye_mode_t)s_undo_mode),
+                     (unsigned)(s_undo_tries + 1), (unsigned)DEYE_UNDO_TRIES);
+            s_undo_tries++;
+            if (fall_back_to_normal(msg) || s_undo_tries >= DEYE_UNDO_TRIES) {
+                if (s_failed != 0)
+                    ESP_LOGE(TAG, "giving up on undoing '%s' for now -- the inverter "
+                                  "may still be in it, check the RS485 master bus",
+                             deye_ctrl_mode_name((deye_mode_t)s_undo_mode));
+                s_undo_pending = false;
+            }
             continue;
         }
 
@@ -198,7 +223,8 @@ void deye_ctrl_start(void)
     uint16_t stored_pw = nvs_store_get_deye_power();
     if (stored != DEYE_MODE_NORMAL && stored < DEYE_MODE_COUNT) {
         s_undo_pending = true;
-        s_mode         = (deye_mode_t)stored;   /* so the log names it */
+        s_undo_mode    = stored;
+        s_mode         = (deye_mode_t)stored;   /* the inverter really is in it */
         if (stored_pw >= DEYE_POWER_MIN && stored_pw <= DEYE_POWER_MAX) {
             s_power_w = s_user_power_w = stored_pw;
         }

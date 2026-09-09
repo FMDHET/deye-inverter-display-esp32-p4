@@ -215,6 +215,8 @@ Nicht mehr aus der Fund-Liste, sondern aus dem, was beim Arbeiten am Gerät gefe
 
 Zugriffsschutz: mit gesetztem Passwort antworten alle schreibenden Pfade mit 401 und mit `-u` mit 200, während `/ota`, `/api/live`, `/api/meter`, `/api/deye/live`, `/deye`, `/deye/read` und das Spiegelbild unverändert offen bleiben. Sicherung: Export 2030 Byte, Rückspielen derselben Datei „15 übernommen, 0 übersprungen" und danach ein byteidentischer Export; fremde Datei und kaputtes JSON jeweils 400.
 
+**Neu aufgefallen dabei (offen):** fehlt ein Solar-Wechselrichter, zeigt der Hauptbildschirm nicht „--", sondern eine selbstbewusste **0,0 kW**. Grund ist der beabsichtigte Rückfall auf die eigenen Solar-Eingänge des Deye (`a.pv = a.deye_mppt`) — und dieser Deye hat keine Strings, meldet also 0. Der Hausverbrauch, der sich daraus errechnet, wird damit zu niedrig und rutscht auf 0,00 kW. Vorher war das nur in den Sekunden nach dem Start zu sehen; seit ein schweigendes Gerät aus dem Modell fällt (Nachtrag 4), auch wenn tagsüber ein Wechselrichter aus dem Netz verschwindet. Beides ist einzeln richtig, zusammen irreführend: **der Hauptbildschirm braucht einen Hinweis, wenn nicht alle Geräte antworten** — die Zahl `3/4 verbunden` gibt es nur im Menü „Mod TCP" und in `/api/live`. Das deckt sich mit dem noch offenen Punkt, dass auch eine aktive Phasenmanipulation auf dem Hauptbildschirm nicht zu sehen ist.
+
 **Bewusst nicht mitgemacht:** ein Schalter „Steuerung per MQTT erlauben" (wer den Broker erreicht, kann weiterhin den Akku umschalten) und die Modbus-Brücke auf Port 502, deren Protokoll kein Passwort kennt. Beides bleibt offen.
 
 ## Gut gemacht — nicht anfassen

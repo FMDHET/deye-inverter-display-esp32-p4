@@ -146,7 +146,7 @@ Damit ist der LVGL-Abschnitt abgearbeitet. Build 231 (v1.0.142), alles am Gerät
 * Firmware-OTA über WLAN im Schlaf: 2,1 MB in 19 s, HTTP 200, Neustart in `ota_1`, `fs_build` passend, Bewährung nach 62 s bestätigt, kein SDIO-Abbruch (`dma_largest` durchgehend 61440).
 * Dateisystem-OTA im Schlaf: `display on (OTA finished, tap kept)` → `UI thawed` → im selben Tick wieder `display off after 120 s`. Genau so soll es sein: Zustand stimmt, und ohne Berührung wird es wieder dunkel.
 
-Nicht nachgestellt: das Verschlucken des Tipps **mit dem Finger** auf dem Glas. Der Web-Spiegel ist genau dafür ausgenommen, es braucht also eine Hand am Gerät: schlafen lassen, links unten auf den Netz-Sollwert-Slider tippen — das Panel muss hell werden und der Sollwert stehen bleiben.
+Mit dem Finger auf dem Glas vom Betreiber bestätigt (9. September): schlafendes Panel angetippt — es wird hell, der Netz-Sollwert bleibt stehen, und der Slider ist danach normal bedienbar. Das war der einzige Weg, diesen Pfad zu prüfen: der Web-Spiegel ist genau dafür ausgenommen.
 
 ## Gut gemacht — nicht anfassen
 

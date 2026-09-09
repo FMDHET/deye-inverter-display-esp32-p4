@@ -196,7 +196,16 @@ Danach 142 = 2, 143 = 20000, 127 = 10, 128 = 40, 166–177 = 13/0 — der Zwang 
 
 Damit ist die Entscheidung bestätigt, und zwar deutlicher als erwartet: **die Null ist kein Ruhezustand.** In der Minute Brücke driftete der Akku um 1,3 kW, ohne dass ihm irgendwer etwas gesagt hätte — der 5-kW-Fall aus dem Fund ist real. Und die Stummschaltung ist kein harter Fehler: ein Alarm-Zustand, der von selbst verschwindet, sobald der Zähler zurück ist.
 
-**Nicht nachgestellt: die Reihenfolge bei gemeinsamer IP.** Bei diesem Aufbau scheitert West (Unit 2) *nach* Ost (Unit 1), das entscheidende „ein Ausfall vor einem funktionierenden Gerät" kommt also nicht vor. Nachstellen ließe es sich nur mit einem erfundenen Gerät in der Geräteliste des Betreibers — davon wurde abgesehen.
+**Die gemeinsame IP hat sich dann von selbst gezeigt.** Nachstellen wollte ich es nicht (das ginge nur mit einem erfundenen Gerät in der Geräteliste), aber das Log des laufenden Geräts liefert es nach 3,4 Stunden Betrieb frei Haus: **48 Lesefehler** auf 192.168.177.30, wo Ost (Unit 1) und West (Unit 2) über *eine* Verbindung hängen. Der aufschlussreiche Ausschnitt:
+
+```text
+W (10497389) modbus: read failed 192.168.177.30 id1 (Fronius/Wechselrichter) -- reconnecting
+W (10499439) modbus: read failed 192.168.177.30 id2 (Fronius/Wechselrichter) -- reconnecting
+```
+
+Zwei Sekunden Abstand: nach dem Fehler an Unit 1 wurde die Verbindung neu aufgebaut und **Unit 2 noch in derselben Runde gefragt**. Mit dem alten `break` wäre die Runde an dieser Stelle zu Ende gewesen und hätte 3 s geschlafen — und weil Ost den kleineren Index hat und damit zuerst dran ist, wäre West in jeder Runde mit einem Ost-Fehler gar nicht abgefragt worden. Gerade eben liefern beide: Ost 981 W, West 3777 W.
+
+Ehrlich dazugesagt: bei diesem Aufbau sind die Fehler *vereinzelt* (einer alle vier Minuten bei einer Abfrage alle zwei Sekunden), der alte Code hätte West also jeweils nur für ein paar Sekunden verloren — die Altersgrenze von 15 s hätte das überlebt. Der schlimme Fall bleibt der aus dem Fund: ein Gerät, das **dauerhaft** weg ist, etwa der Symo nach Sonnenuntergang. Dass der Mechanismus greift, ist damit aber am echten Gerät belegt.
 
 ## Nachtrag 5 (9. September): Diagnose und Zugriffsschutz
 

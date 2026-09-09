@@ -105,10 +105,32 @@ Der 16-MB-Flash-Speicher ist in Abschnitte („Partitionen") aufgeteilt:
 | `ota_0` | 4 MB | Programmversion A |
 | `ota_1` | 4 MB | Programmversion B |
 | `storage` | 1 MB | das kleine Dateisystem mit der Build-Nummer |
+| `coredump` | 256 KB | der letzte Absturz (Task, Programmzähler, Stapelspeicher) |
 
 **Warum zwei Programm-Abschnitte?** Damit sich das Gerät selbst über WLAN aktualisieren kann. Es schreibt die neue Version immer in den *gerade nicht benutzten* Abschnitt. Erst wenn die vollständig und heil angekommen ist, wird umgeschaltet. Geht beim Übertragen etwas schief, läuft die alte Version einfach weiter. Mehr dazu: [OTA und Recovery](OTA-und-Recovery).
 
 Der Einstellungs-Abschnitt `nvs` liegt bewusst an der Standardstelle. Dadurch überleben gespeicherte WLAN-Passwörter und Konfiguration ein Update.
+
+Aus demselben Grund ist `coredump` **hinten** angehängt worden und nicht irgendwo eingefügt: alle anderen Abschnitte behalten ihre Adresse, ein bestehendes Gerät verliert also nichts. Eine geänderte Partitionstabelle kommt allerdings **nur über USB** aufs Gerät — sie ist nicht Teil eines Firmware-Updates über WLAN. Ein Display, das ausschließlich per WLAN aktualisiert wurde, hat den Abschnitt deshalb nicht und meldet in `/ota` sauber `"coredump":{"present":0}`. Einmal `pio run -e guition-p4 -t upload` über Kabel behebt das dauerhaft.
+
+## Tests
+
+```bash
+make -C test
+```
+
+Zwei Suiten, die ohne Hardware laufen und in ein paar Sekunden durch sind: der
+Rechenkern des Regelpfads (`compute_served`, CRC, SDM630-Antwort, Konfig-Grenzen)
+und das Passwort-Tor der Web-Schnittstellen. Zusammen rund 100 Prüfungen. Kein
+Framework und kein Download — ein Compiler und ein Makefile, damit die Tests
+laufen, bevor irgendetwas geholt werden muss.
+
+Was dort **nicht** getestet wird, ist alles, was einen Bus, einen Bildschirm
+oder ein Netz braucht; das sind Gerätetests und stehen als Messreihen im
+[Code-Review](Code-Review-2026-09). Details, Aufbau und die Regel für die
+Attrappen: [`test/README.md`](https://github.com/FMDHET/deye-inverter-display-esp32-p4/blob/main/test/README.md).
+
+In [GitHub Actions](https://github.com/FMDHET/deye-inverter-display-esp32-p4/actions) laufen beide Suiten bei jedem Push, dazu ein Firmware-Bau. Der Bau-Job darf fehlschlagen, ohne die CI rot zu machen — `platform` zeigt auf den Git-HEAD von pioarduino, er kann also rot werden, ohne dass sich hier eine Zeile geändert hat. Wer die Plattform festnagelt (`#<tag>` an die URL), darf das Flag entfernen.
 
 ## Ein paar Einstellungen, die Erklärung brauchen
 

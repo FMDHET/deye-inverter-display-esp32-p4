@@ -219,6 +219,23 @@ Zugriffsschutz: mit gesetztem Passwort antworten alle schreibenden Pfade mit 401
 
 **Bewusst nicht mitgemacht:** ein Schalter „Steuerung per MQTT erlauben" (wer den Broker erreicht, kann weiterhin den Akku umschalten) und die Modbus-Brücke auf Port 502, deren Protokoll kein Passwort kennt. Beides bleibt offen.
 
+## Nachtrag 6 (9. September): die ersten Tests
+
+Bis hierhin gab es **keinen einzigen Test** — bei rund 13 400 Zeilen, in denen die Frische-Schranke und `compute_served()` sitzen. Jetzt laufen zwei Suiten ohne Hardware, rund 100 Prüfungen in ein paar Sekunden:
+
+| Suite | Deckt ab |
+| --- | --- |
+| `test_modbus_rtu` | `compute_served()` — was der Wechselrichter zu sehen bekommt: **stumm bei veraltetem Wert** (die 15-kW-Eigenschaft, als Test festgenagelt), Sollwert-Verschiebung, echte Phasenwerte gegen Summe÷3, alle drei Manipulationsarten, NaN- und Grenzwertabwehr, unbekannte Modi. Dazu `crc16` (gegen eine unabhängige Python-Implementierung), `sdm630_response` (Rahmenform, Float-Kodierung, eigene CRC, Ablehnung unsinniger Anzahlen), `clamp_cfg` (Defaults, Rollen-Rückfall auf Master) und die neue No-Op-Erkennung samt „Bridge-Änderung darf den Deye-Wert nicht löschen" |
+| `test_webauth` | Das Passwort-Tor: kein Passwort lässt alles durch, fehlender Kopf ergibt 401 **mit** `WWW-Authenticate`, richtiges Passwort mit beliebigem Benutzernamen, falsches und *präfixgleiches* Passwort abgelehnt, kaputte Köpfe, Doppelpunkt im Passwort, Setzen und Löschen, Maximallänge — und dass ein fehlgeschlagener Flash-Schreibvorgang das Tor **nicht** scharf stellt |
+
+**Wie, und warum so.** Die interessanten Funktionen sind `static` — richtig so, niemand von außen darf sie aufrufen. Eine Suite bindet deshalb die Quelldatei ein (`#include "modbus_rtu.c"`). Der schönere Weg wäre, die reine Rechenlogik herauszuziehen — und ein Umbau am laufenden Regelpfad eines Wechselrichters, der an der Hausinstallation hängt. Erst Tests, dann umbauen. Die IDF-Attrappen liegen in `test/fakes/` und folgen einer Regel: *eine Attrappe darf einfach sein, aber nicht unehrlich* — wo die echte Funktion scheitern kann, muss die Attrappe es auch können (`fake_nvs_fail`, `fake_grid_fresh`, eine Zeit, die stillsteht).
+
+**Gegenprobe.** Ein Test, der nicht fehlschlagen kann, ist wertlos. Also sechs Mutationen in den Produktivcode eingebaut und geprüft, dass genau die erwarteten Tests rot werden: Frische-Schranke entfernt → 4 Fehler; NaN-Filter entfernt → 2; No-Op-Schutz entfernt → 1; Längenvergleich im Passwort aufgeweicht → 4; `WWW-Authenticate` weggelassen → 1; Passwort trotz Flash-Fehler übernommen → 2. Danach jeweils zurückgesetzt, Kontrolllauf grün.
+
+**CI** (`.github/workflows/ci.yml`): Host-Tests bei jedem Push — kein Toolchain-Download, Sekunden bis zur Rückmeldung — plus ein getrennter Firmware-Bau. Der Bau-Job ist `continue-on-error`, und das ist keine Faulheit: `platform` zeigt auf den Git-HEAD von pioarduino, der Job kann also rot werden, weil jemand anders etwas gepusht hat. Eine CI, die grundlos Alarm schlägt, erzieht dazu, sie zu ignorieren. Wer die Plattform festnagelt (`#<tag>` an die URL — der noch offene Reproduzierbarkeitspunkt), darf das Flag entfernen.
+
+Nicht getestet ist alles, was Bus, Bildschirm oder Netz braucht — das sind Gerätetests, und die stehen als Messreihen in den Nachträgen 3 bis 5.
+
 ## Gut gemacht — nicht anfassen
 
 * Frische-Schranke des Netzwerts (`modbus_tcp_grid_w_fresh`): nur ein echter erfolgreicher Read setzt den Zeitstempel, `reconfigure_apply()` invalidiert bewusst, überlaufsichere Zeitarithmetik. Sicherheitsschienen der Manipulation: Hauptschalter aus, nur bei frischem Zähler, NaN abgewiesen, ±100 kW geklemmt, seiteneffektfreies `compute_served()`.

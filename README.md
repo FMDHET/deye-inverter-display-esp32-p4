@@ -180,6 +180,16 @@ Beide Busse sind unabhängig als Master oder Slave konfigurierbar (Rolle, Slave-
 
 Voraussetzung: [PlatformIO](https://platformio.org/) mit der `pioarduino`-Plattform für ESP32 (wird aus `platformio.ini` geladen). Framework ist reines ESP-IDF, keine Arduino-Schicht.
 
+### Tests
+
+```bash
+make -C test        # Host-Tests, keine Hardware noetig, ein paar Sekunden
+```
+
+Zwei Suiten (~100 Prüfungen): der Rechenkern des Regelpfads und das Passwort-Tor
+der Web-Schnittstellen. Aufbau und Regeln in [`test/README.md`](test/README.md);
+in CI laufen sie bei jedem Push.
+
 ### Über USB (Erstinstallation)
 
 ```bash
@@ -282,8 +292,13 @@ main/
   web_mirror.c            MJPEG-Spiegel plus Eingabe-Injektion
   ota.c  deye_web.c       OTA/Recovery, Register-Werkzeug
   ntp_client.c  wg_client.c   SNTP, WireGuard
+  applog.c                Log-Ringpuffer im PSRAM hinter GET /log
+  webauth.c               Passwort-Tor vor allen schreibenden Web-Pfaden
+  config_web.c            Einstellungen sichern und zurückspielen (GET/POST /config)
   nvs_store.c             gesamte Persistenz
 components/esp_wireguard  eingebundene WireGuard-Implementierung (BSD-3, trombik)
+test/                     Host-Tests (make -C test) plus IDF-Attrappen in test/fakes
+.github/workflows/        CI: Host-Tests bei jedem Push, dazu ein Firmware-Bau
 scripts/                  Build-Zähler und SPIFFS-Image-Erzeugung
 register tables/          Register-Karten: Deye SG04LP3, Eltako DSZ15/16, SunSpec, Fronius
 deye-register-map.csv     kommentierte Deye-Registerliste

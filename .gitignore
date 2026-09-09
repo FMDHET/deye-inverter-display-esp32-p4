@@ -22,3 +22,6 @@ Debug/
 # Vendor documents (Fronius register maps). Not ours to redistribute; download
 # them from Fronius if you need them.
 register tables/*.xlsx
+
+# Host-Tests (test/Makefile)
+test/build/

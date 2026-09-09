@@ -168,10 +168,34 @@ Die beiden sich widersprechenden Kommentare bei `modbus_rtu.c` (einer sagte „s
 
 **Nachweis am Gerät:** Build 240 geflasht, sauberer Start; Zähler-Emulation antwortet weiter (1848 Anfragen in 3 min, Alter 46 ms), Deye-Werte laufen durch, MQTT und Uhr in Ordnung. `/api/meter` liefert die neuen Felder (`quiet: 0`, `hold: 60`, `stale: 0`), `/api/deye/live` den `ctrl`-Block (`mode Normal`, `failed 0`) — das JSON bleibt mit 671 von 1600 Byte im Rahmen. Drei Minuten Log ohne einen einzigen Lesefehler am Netzzähler, also keine Gefahr, dass die 60-s-Brücke im Normalbetrieb überhaupt anspricht. Kein gespeicherter Zwangsmodus vorhanden, das Abräumen beim Start war deshalb nicht zu sehen.
 
-**Zwei Dinge stehen noch aus, weil sie einen Eingriff am laufenden Wechselrichter brauchen:**
+### Die zwei Tests am laufenden Wechselrichter
 
-* **Was der Deye bei Zählerausfall wirklich tut.** Die Stummschaltung ist nur zu prüfen, indem man den Netzzähler länger als 60 s ausfallen lässt. Das ist ein echter Eingriff (der Deye meldet dann einen Zählerfehler und wechselt auf seinen Wandler) und wartet auf ausdrückliches „ja".
-* **Die Reihenfolge bei gemeinsamer IP.** Bei diesem Aufbau scheitert West (Unit 2) *nach* Ost (Unit 1), das entscheidende „ein Ausfall vor einem funktionierenden Gerät" kommt also nicht vor. Nachstellen ließe es sich nur mit einem erfundenen Gerät in der Liste des Betreibers — dafür wurde nichts an seiner Konfiguration verbogen.
+Beide vom Betreiber freigegeben und am 9. September gefahren.
+
+**Zwangsmodus über einen Neustart.** „Entladen" mit 1100 W übernommen — Log: `reg142 = 3 verified`, `reg143 = 1100 verified`, `[2/2 verified]`; unabhängig nachgelesen: 142 = 3, 143 = 1100; `/api/deye/live` → `mode Forced-Discharge`, `left 7194` s. Dann Neustart:
+
+```text
+W (3699)  deye_ctrl: stored mode 'Forced-Discharge' (1100 W) survived the restart in the inverter -- undoing it shortly
+W (13709) deye_ctrl: restart with 'Forced-Discharge' still set in the inverter (try 1/6) -> writing Normal to the inverter
+I (13909) deye_ctrl: reg142 = 2 verified
+I (14109) deye_ctrl: reg143 = 20000 verified
+```
+
+Danach 142 = 2, 143 = 20000, 127 = 10, 128 = 40, 166–177 = 13/0 — der Zwang ist weg. Ein **zweiter** Neustart erzeugte keine einzige `deye_ctrl`-Zeile mehr: der gespeicherte Modus war nach der Bestätigung gelöscht, es wird also nicht bei jedem Start nachgeschrieben. Einziger Nebeneffekt, wie vorher angekündigt: das „Normal"-Schreiben setzt Register 126 auf 5000, hier stand 4900 — danach zurückgeschrieben, der Wechselrichter ist genau wie vorgefunden.
+
+**Zählerausfall.** Der Eltako-Netzzähler wurde in der Geräteliste deaktiviert. Der Ablauf, gemessen:
+
+| Zeit | Zustand | Was der Deye macht |
+| --- | --- | --- |
+| T+0 | `fresh 0` sofort (das Speichern der Geräteliste erklärt den Netzwert absichtlich für ungültig) — dazu die neue Logzeile `no device has role 'Netz-Zaehler'` | Akku +56 W |
+| T+0…57 | **Brücke**: `quiet 0`, es wird weiter geantwortet (≈ 8 Anfragen/s, Alter < 100 ms), gemeldet werden 0 W | Akku wandert **blind** auf −1284 W, während sein eigener Wandler bis +394 W anzeigt |
+| T+60 | `meter emulation going SILENT` — genau nach der eingestellten Minute | — |
+| T+63…78 | **stumm**: Anfragen unbeantwortet, `age` läuft auf 4,8 → 11,9 → 18,9 s | Betriebszustand (Reg 500) wechselt von 2 (Normal) auf **3 (Alarm)**, Fehlercodes 555–558 bleiben 0. Akku beruhigt sich auf −241 / +148 / +113 W — er regelt wieder gegen eine **echte Messung** |
+| Wiedereinschalten | `grid reading fresh again` ~1 s später, `req` läuft weiter | Reg 500 von selbst zurück auf 2 (Normal), nichts zu quittieren |
+
+Damit ist die Entscheidung bestätigt, und zwar deutlicher als erwartet: **die Null ist kein Ruhezustand.** In der Minute Brücke driftete der Akku um 1,3 kW, ohne dass ihm irgendwer etwas gesagt hätte — der 5-kW-Fall aus dem Fund ist real. Und die Stummschaltung ist kein harter Fehler: ein Alarm-Zustand, der von selbst verschwindet, sobald der Zähler zurück ist.
+
+**Nicht nachgestellt: die Reihenfolge bei gemeinsamer IP.** Bei diesem Aufbau scheitert West (Unit 2) *nach* Ost (Unit 1), das entscheidende „ein Ausfall vor einem funktionierenden Gerät" kommt also nicht vor. Nachstellen ließe es sich nur mit einem erfundenen Gerät in der Geräteliste des Betreibers — davon wurde abgesehen.
 
 ## Gut gemacht — nicht anfassen
 

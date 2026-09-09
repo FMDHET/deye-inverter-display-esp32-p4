@@ -91,9 +91,22 @@ Unser gefälschter Zähler antwortet nicht. Prüfen: ist der Bus eingeschaltet, 
 Dann das Display einmal **komplett stromlos** machen (Stecker ziehen, nicht nur neu starten). Das ist einmal genau so passiert: nach einer minutenlangen Boot-Schleife (fehlgeschlagenes Firmware-Experiment) blieb der Empfänger des Slave-Transceivers dauerhaft auf 0 hängen — die Leitung zeigte keine einzige Flanke mehr, auch nicht, als die Firmware ihre Pins komplett freigab. Rund 40 Warmstarts (Reset-Taste, Neustart nach Update) änderten daran nichts; Strom weg, Strom dran, und der Deye fragte sofort wieder. Der Master-Bus auf dem zweiten Transceiver lief die ganze Zeit — dass sich Register lesen lassen, sagt also nichts über den Zähler-Bus aus.
 
 **Der Deye regelt nicht auf den eingestellten Sollwert.**
-Sehr wahrscheinlich meldet die Emulation gerade 0 Watt, weil **kein frischer Netzmesswert** vorliegt. Mögliche Ursachen: kein Gerät mit der Rolle `Netz-Zaehler` eingerichtet, dieses Gerät antwortet nicht, oder die Geräteliste wurde eben gespeichert (dann gilt der Wert bis zum ersten Lesen absichtlich als ungültig).
+Sehr wahrscheinlich meldet die Emulation gerade 0 Watt, weil **kein frischer Netzmesswert** vorliegt. Mögliche Ursachen: kein Gerät mit der Rolle `Netz-Zaehler` eingerichtet, dieses Gerät antwortet nicht, oder die Geräteliste wurde eben gespeichert (dann gilt der Wert bis zum ersten Lesen absichtlich als ungültig). Fehlt die Rolle ganz, steht es beim Start im Log: `no device has role 'Netz-Zaehler' -- no grid value for the meter emulation`.
 
 Das ist **kein Fehler, sondern die eingebaute Sicherung.** Warum, steht gleich unten.
+
+**Der Deye meldet Alarm, und unser Zähler antwortet nicht mehr.**
+Wenn der Netzmesswert länger als die eingestellte Überbrückung (Voreinstellung 60 s) fehlt, **verstummt die Emulation absichtlich**. Der Deye geht dann in Betriebszustand 3 (Alarm, Register 500) und regelt mit seinem eigenen Stromwandler weiter — eine echte Messung ist besser als unser „0 Watt", denn dabei driftet er blind (gemessen: 1,3 kW Akkuleistung in einer Minute, ohne dass ihm jemand etwas gesagt hätte).
+
+Auf `/deye` steht im Zähler-Tab, in welchem Zustand die Emulation ist: *frisch*, *Überbrückung* oder *stumm*. Im Log:
+
+```text
+W mb_rtu: grid reading STALE -> meter reports 0 W (bridge; Deye holds)
+W mb_rtu: grid reading stale for >60 s -- meter emulation going SILENT so the Deye falls back to its own CT
+W mb_rtu: grid reading fresh again -> meter reports real grid power
+```
+
+Zu tun ist dabei nichts am Wechselrichter: **der Alarm verschwindet von selbst**, sobald der Netzzähler zurück ist (gemessen: Register 500 sprang ohne Quittieren auf 2 zurück). Zu suchen ist die Ursache beim Netzzähler — Netzwerk, Gerät, Geräteliste. Wer das alte Verhalten will (unbegrenzt 0 Watt, Deye ohne Alarm), stellt die Überbrückung unter Mod RTU auf *unbegrenzt*.
 
 ## Modbus-Brücke (Port 502)
 
@@ -116,9 +129,13 @@ Normal sind ein paar Dutzend Millisekunden. Einige hundert sind es, wenn die Anf
 
 **Der Modus wird gesetzt, der Wechselrichter reagiert nicht.**
 
-1. Läuft überhaupt ein Bus als **Master**? Ohne Master gibt es keinen Schreibweg.
-2. Mit dem [Register-Werkzeug](Web-Mirror#register-werkzeug-deye) nachsehen, ob in den Registern das steht, was dort stehen soll (`142/6` und `166/12`).
-3. Modell und Gerätesoftware prüfen. Die Adressen sind an einem SG04LP3 ermittelt und nicht offiziell dokumentiert.
+1. **Ins Log schauen** — die entscheidenden Register werden nach dem Schreiben zurückgelesen, die Antwort steht also da: `reg143 = 5000 verified` oder `reg143 = 5000: inverter reports 20000 -- NOT applied`. Kurzform in `/api/deye/live` unter `ctrl`: `checked` geprüfte Register, `failed` davon abweichend.
+2. Läuft überhaupt ein Bus als **Master**? Ohne Master gibt es keinen Schreibweg.
+3. Mit dem [Register-Werkzeug](Web-Mirror#register-werkzeug-deye) nachsehen, ob in den Registern das steht, was dort stehen soll (`142/6` und `166/12`).
+4. Modell und Gerätesoftware prüfen. Die Adressen sind an einem SG04LP3 ermittelt und nicht offiziell dokumentiert.
+
+**Nach einem Neustart steht der Akku wieder auf Normal.**
+Das ist Absicht. Ein Zwangsmodus lebt im Wechselrichter und überlebt unseren Neustart — das Display käme aber als „Normal" zurück, und dann lädt der Deye unbeaufsichtigt weiter. Die Firmware räumt deshalb auf: findet sie beim Start einen gespeicherten Zwang, schreibt sie ihn ungefähr zehn Sekunden später aktiv auf Normal zurück (`stored mode '…' survived the restart … undoing it`). Ebenso läuft ein Zwang nach zwei Stunden von selbst ab — Restzeit in `/api/deye/live` unter `ctrl.left`. Details: [Deye-Steuerung](Deye-Steuerung#ein-zwang-ist-nur-geborgt).
 
 **Die Zwangsladung lädt mit der falschen Leistung.**
 Der Wechselrichter reagiert nicht auf die Wattzahl in Register 126, sondern auf den Ladestrom in Ampere in Register 128. Umgerechnet wird mit `Ampere = Watt ÷ 50`, weil der Batteriestrang etwa 50 Volt hat. Bei einer anderen Batteriespannung stimmt dieser Faktor nicht — dann lädt es entsprechend zu schwach oder zu stark.

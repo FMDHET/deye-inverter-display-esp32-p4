@@ -83,6 +83,27 @@ Die Länge der Brücke steht unter **Einstellungen → Mod RTU → „Bei Zähle
 
 Wenn du an diesem Teil der Software arbeitest: **Möglichkeit 1 darf nie zurückkommen.** Sie ist der Unterschied zwischen einer nützlichen und einer gefährlichen Funktion.
 
+## Phasenmanipulation — und warum sie von selbst aufhört
+
+Im Zähler-Tab von `/deye` lässt sich jede Phase einzeln verbiegen, bevor sie an
+den Deye geht: Versatz in Watt, fester Wert, oder Skalierung in Prozent. Das ist
+das einzige Werkzeug hier, das dem Wechselrichter **absichtlich falsche Zahlen**
+schickt — zum Ausprobieren, wie er auf eine Schieflast reagiert, oder um eine
+Phase gezielt zu belasten.
+
+Genau deshalb hat es zwei Bremsen:
+
+* **Nach zwei Stunden schaltet es sich ab** (`MB_MANIP_MAX_S`, dieselbe Dauer wie
+  beim erzwungenen Akku-Modus). Im Log steht dann `phase manipulation ran for
+  120 min -- switched OFF`.
+* **Ein Neustart schaltet es ab.** Die Manipulation lebt nur im Display; sie nach
+  einem Stromausfall oder Update unbeaufsichtigt weiterlaufen zu lassen hieße,
+  den Wechselrichter still weiter anzulügen. Die eingestellten Werte bleiben
+  erhalten, nur der Hauptschalter fällt — Wiedereinschalten ist ein Tipp.
+
+Solange sie aktiv ist, steht es auf dem **Hauptbildschirm**, mit Restzeit. Vorher
+war das nirgends zu sehen.
+
 ## Der Master-Bus
 
 Der Master fragt den Deye regelmäßig ab. Zwischen diesen Abfragen stellt er den Bus für Einzelaufträge bereit — etwa wenn das [Register-Werkzeug](Web-Mirror#register-werkzeug-deye) im Browser etwas lesen will oder wenn ein [Akku-Befehl](Deye-Steuerung) geschrieben wird.

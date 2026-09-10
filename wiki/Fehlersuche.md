@@ -14,6 +14,7 @@ Bevor man rät, holt man sich Informationen. Es gibt sechs Quellen:
 | **`GET /api/devices`** | pro Gerät: antwortet es, und mit welchen Werten |
 | **`GET /api/deye/live`** | was der Wechselrichter über sich selbst meldet, und welche Registerblöcke gerade antworten (`blocks`) |
 | **Kopfzeilen der Menüs** | jeder Reiter zeigt oben laufende Zähler — oft steht die Antwort schon dort |
+| **Die Zeile unten am Hauptbildschirm** | erscheint nur, wenn etwas nicht stimmt — und sagt dann, was |
 
 Die zwei neuen Quellen sind der Grund, warum man an ein Gerät an der Wand überhaupt herankommt:
 
@@ -21,6 +22,17 @@ Die zwei neuen Quellen sind der Grund, warum man an ein Gerät an der Wand über
 curl -s http://<ip>/log?tail=3000          # was ist gerade passiert
 curl -s http://<ip>/ota | jq .coredump     # was war beim letzten Absturz
 ```
+
+### Die Hinweiszeile auf dem Hauptbildschirm
+
+Sie ist versteckt, solange alles stimmt. Was sie zeigen kann, von dringend nach harmlos:
+
+| Zeile | Was los ist |
+| --- | --- |
+| „Deye fragt den Zähler seit *n* min nicht mehr — Gerät stromlos machen" | Der Slave-Bus ist taub. Genau der Fall vom 8. September: der Empfänger hing auf 0, und **nur ein Kaltstart** half — Warmstarts nicht. |
+| „Kein Netzmesswert seit *n* s — der Deye regelt mit seinem eigenen Wandler" | Die Überbrückung ist abgelaufen, die Emulation schweigt absichtlich. Ursache beim Netzzähler suchen, nicht am Display. |
+| „Phasenmanipulation aktiv (noch *n* min)" | Kein Fehler, sondern eine Erinnerung: der Deye bekommt gerade verbogene Werte. |
+| „*n* von *m* Geräten antworten nicht — Werte unvollständig" | Ein Gerät schweigt. Die angezeigten Summen fehlt sein Beitrag; wo gar nichts bekannt ist, steht „--" statt einer Zahl. |
 
 Ein Tipp zur Laufzeit: tippe auf die Uhr. Steht dort nur eine kurze Zeit, hat das Gerät sich neu gestartet. Dann sagt das Feld `reset` in `GET /ota`, **warum** — an einem Gerät an der Wand gibt es keine serielle Konsole, und ohne diese Auskunft bleibt nur Raten:
 

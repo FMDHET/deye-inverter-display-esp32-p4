@@ -543,6 +543,14 @@ static esp_err_t ota_fs_handler(httpd_req_t *req)
     ota_thaw_ui();                       /* FS OTA does not reboot -> resume UI */
 
     int fs_build = assets_fs_build_number();
+    /* The badge in the corner was set once at boot from the OLD image, so
+     * after an FS update it kept claiming a mismatch that no longer existed
+     * -- the screen asserting something untrue, which is exactly what the
+     * notice line was built to stop. It is cheap to just tell it. */
+    if (app_lvgl_lock(200)) {
+        ui_flow_set_fs_build(fs_build);
+        app_lvgl_unlock();
+    }
     ESP_LOGW(TAG, "FS OTA done (%d bytes) -- fs_build now #%d", written, fs_build);
     char msg[64];
     snprintf(msg, sizeof(msg), "FS OK, build #%d mounted\n", fs_build);

@@ -57,7 +57,15 @@ Test sie bewegt.
    zu testende `.c`-Datei einbinden.
 2. In `test/Makefile` bei `SUITES` eintragen und eine Regel dafür anlegen
    (welche Attrappen sie braucht, entscheidet die Zeile).
-3. **Gegenprobe machen.** Ein Test, der nicht fehlschlagen kann, ist wertlos:
+3. **Gegenprobe machen.** Vorher committen und `make -C test clean` — beides
+   aus Erfahrung: ein `git checkout` in der Mutationsschleife hat einmal
+   uncommittete Arbeit mitgerissen, und Apples `/usr/bin/make` (GNU make 3.81)
+   vergleicht Zeitstempel **sekundengenau**, übersieht eine Änderung also, die
+   in derselben Sekunde wie der letzte Build passiert. Drei Mutationen haben
+   deshalb schon einmal fälschlich „bestanden". Auf Linux (make 4.x, Nanosekunden)
+   und in CI tritt das nicht auf.
+
+   Ein Test, der nicht fehlschlagen kann, ist wertlos:
    einen Fehler in den Produktivcode einbauen und prüfen, dass genau der
    erwartete Test rot wird. Für die beiden Suiten hier ist das gemacht worden —
    Frische-Schranke entfernt (4 Fehler), NaN-Filter entfernt (2), No-Op-Schutz

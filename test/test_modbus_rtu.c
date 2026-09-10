@@ -502,6 +502,46 @@ static void test_manipulation_expires_on_its_own(void)
     CHECK_I(modbus_rtu_manip_left_s(), 0);
 }
 
+static void test_manipulation_is_off_after_a_restart(void)
+{
+    /* Manipulation lives only in this device. Resuming it after an unattended
+     * restart would mean quietly feeding the inverter wrong numbers with
+     * nobody watching -- so the boot path switches it off, in RAM and in
+     * flash, and keeps the values for the next deliberate switch-on. */
+    reset_all();
+    fake_time_set_ms(1000);
+
+    mb_manip_cfg_t stored;
+    memset(&stored, 0, sizeof(stored));
+    stored.enabled       = 1;
+    stored.ph[1].mode    = MB_PH_ABS;
+    stored.ph[1].value   = 4200;
+    CHECK_I(nvs_store_set_mb_manip(&stored, sizeof(stored)), ESP_OK);
+
+    load_manip();
+
+    CHECK(!s_manip.enabled);                    /* off in RAM ... */
+    CHECK_F(s_manip.ph[1].value, 4200, 0.01);   /* ... values kept */
+    CHECK_I(s_manip.ph[1].mode, MB_PH_ABS);
+
+    mb_manip_cfg_t back;
+    memset(&back, 0, sizeof(back));
+    CHECK_I(nvs_store_get_mb_manip(&back, sizeof(back)), ESP_OK);
+    CHECK(!back.enabled);                       /* ... and off in flash */
+    CHECK_F(back.ph[1].value, 4200, 0.01);
+
+    /* An untouched config must not be rewritten on every boot. */
+    reset_all();
+    memset(&stored, 0, sizeof(stored));
+    stored.ph[0].mode = MB_PH_OFFSET;
+    stored.ph[0].value = 100;
+    nvs_store_set_mb_manip(&stored, sizeof(stored));
+    fake_nvs_fail = true;                       /* any write would fail now */
+    load_manip();
+    CHECK(!s_manip.enabled);
+    fake_nvs_fail = false;
+}
+
 int main(void)
 {
     RUN(test_stale_serves_zero);
@@ -522,5 +562,6 @@ int main(void)
     RUN(test_stale_bridges_with_zero_then_goes_silent);
     RUN(test_hold_forever_keeps_the_old_behaviour);
     RUN(test_manipulation_expires_on_its_own);
+    RUN(test_manipulation_is_off_after_a_restart);
     return t_report("modbus_rtu");
 }

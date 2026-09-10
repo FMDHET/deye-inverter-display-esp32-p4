@@ -14,10 +14,11 @@ BUILD    = build
 
 # One binary per suite. A suite #includes the .c file under test, so two suites
 # must never be linked together.
-SUITES = test_modbus_rtu test_webauth
+SUITES = test_modbus_rtu test_webauth test_deye_ctrl
 
 OBJ_COMMON = $(BUILD)/harness.o $(BUILD)/fakes/fakes.o
 OBJ_HTTP   = $(BUILD)/fakes/fakes_http.o
+OBJ_RTU    = $(BUILD)/fakes/fakes_rtu.o
 
 BINS = $(addprefix $(BUILD)/,$(SUITES))
 
@@ -36,6 +37,9 @@ $(BUILD)/test_modbus_rtu: $(BUILD)/test_modbus_rtu.o $(OBJ_COMMON)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BUILD)/test_webauth: $(BUILD)/test_webauth.o $(OBJ_COMMON) $(OBJ_HTTP)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
+$(BUILD)/test_deye_ctrl: $(BUILD)/test_deye_ctrl.o $(OBJ_COMMON) $(OBJ_RTU)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 run: $(BINS)

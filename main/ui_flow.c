@@ -74,6 +74,7 @@ typedef struct {
 
 static node_t s_pv, s_house, s_grid, s_byd, s_deye;
 static lv_obj_t *s_build_lbl;
+static lv_obj_t *s_notice_lbl;      /* the "something is not true here" line */
 static lv_obj_t *s_clock_lbl;     /* top-center HH:MM         */
 static lv_obj_t *s_date_lbl;      /* top-center weekday, date */
 static lv_obj_t *s_wifi_lbl;
@@ -690,6 +691,87 @@ static void wifi_badge_cb(lv_event_t *e)
     lv_label_set_text(bl, LV_SYMBOL_CLOSE "  Schließen");
     lv_obj_set_style_text_font(bl, F_MD, 0);
     lv_obj_center(bl);
+}
+
+/* ---------------- The line that says what the screen cannot -------------
+ *
+ * A dashboard that shows a number is claiming to know it. Three ways this
+ * screen used to claim too much:
+ *
+ *   - A device that stops answering drops out of the energy model (right --
+ *     otherwise its last value hangs around all night). PV then falls back to
+ *     the Deye's own strings, which on this installation are none, so a missing
+ *     inverter reads as a confident "0.0 kW" and the house value, being a sum,
+ *     comes out too low. Nothing on the screen said a word.
+ *   - Phase manipulation -- the one feature that deliberately hands the
+ *     inverter wrong numbers -- was invisible here and survived restarts.
+ *   - The RS485 slave bus can go deaf (2026-09-08: the receiver latched low
+ *     and only a power cycle fixed it). The firmware knew: `served.req` had
+ *     stopped rising. It just never said so.
+ *
+ * So: one line, bottom centre, hidden while everything is fine. It never
+ * changes a value -- it says how much the values are worth. */
+
+#define NOTICE_SLAVE_SILENT_MS  (5 * 60 * 1000u)   /* Deye polls ~1/s normally */
+
+static void notice_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (!s_notice_lbl) return;
+
+    char line[128] = "";
+    lv_color_t col = COL_ERR;
+
+    /* Worst first -- one line, so it has to be the one that matters most. */
+    mb_served_t sv;
+    modbus_rtu_get_served(&sv);
+
+    mb_manip_cfg_t mp;
+    modbus_rtu_get_manip(&mp);
+
+    mb_dev_cfg_t cfg[MB_MAX_DEVICES];
+    mb_dev_live_t live[MB_MAX_DEVICES];
+    int ncfg  = modbus_tcp_get_devices(cfg, MB_MAX_DEVICES);
+    int nlive = modbus_tcp_get_device_live(live, MB_MAX_DEVICES);
+    int n_en = 0, n_missing = 0;
+    for (int i = 0; i < ncfg && i < nlive; i++) {
+        if (!cfg[i].enabled || cfg[i].ip[0] == '\0') continue;
+        n_en++;
+        if (!live[i].connected) n_missing++;
+    }
+
+    if (sv.slave_running && sv.requests > 0 && sv.age_ms > NOTICE_SLAVE_SILENT_MS) {
+        /* The one that needs a hand at the device, so it says what to do. */
+        snprintf(line, sizeof(line),
+                 LV_SYMBOL_WARNING "  Deye fragt den Z\xc3\xa4hler seit %lu min nicht mehr "
+                 "\xe2\x80\x94 Ger\xc3\xa4t stromlos machen",
+                 (unsigned long)(sv.age_ms / 60000u));
+    } else if (sv.quiet) {
+        snprintf(line, sizeof(line),
+                 LV_SYMBOL_WARNING "  Kein Netzmesswert seit %lu s \xe2\x80\x94 "
+                 "der Deye regelt mit seinem eigenen Wandler",
+                 (unsigned long)sv.stale_s);
+    } else if (mp.enabled) {
+        col = COL_PV;                                  /* deliberate, not broken */
+        uint32_t left_min = (modbus_rtu_manip_left_s() + 59) / 60;
+        snprintf(line, sizeof(line),
+                 LV_SYMBOL_WARNING "  Phasenmanipulation aktiv \xe2\x80\x94 der Deye "
+                 "bekommt ver\xc3\xa4nderte Werte (noch %lu min)",
+                 (unsigned long)left_min);
+    } else if (n_missing > 0) {
+        col = COL_PV;
+        snprintf(line, sizeof(line),
+                 "%d von %d Ger\xc3\xa4ten antworten nicht \xe2\x80\x94 Werte unvollst\xc3\xa4ndig",
+                 n_missing, n_en);
+    }
+
+    if (line[0] == '\0') {
+        lv_obj_add_flag(s_notice_lbl, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_label_set_text(s_notice_lbl, line);
+    lv_obj_set_style_text_color(s_notice_lbl, col, 0);
+    lv_obj_remove_flag(s_notice_lbl, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* ---- Display standby: blank the backlight after N s of no touch ----
@@ -1313,6 +1395,20 @@ void ui_flow_create(void)
     /* Build-number badge (bottom-left). Shows the firmware build compiled in
      * from build_info.h; ui_flow_set_fs_build() later colours it by whether
      * the flashed filesystem image carries the same number. */
+    /* Bottom centre: wide enough for one long line, between the setpoint
+     * (bottom left) and the build badge (bottom right). Hidden until the
+     * notice timer finds something worth saying. */
+    s_notice_lbl = lv_label_create(scr);
+    lv_label_set_text(s_notice_lbl, "");
+    lv_obj_set_style_text_font(s_notice_lbl, F_SM, 0);
+    lv_obj_set_style_text_color(s_notice_lbl, COL_ERR, 0);
+    lv_obj_set_width(s_notice_lbl, 520);
+    lv_label_set_long_mode(s_notice_lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(s_notice_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(s_notice_lbl, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_obj_add_flag(s_notice_lbl, LV_OBJ_FLAG_HIDDEN);
+    lv_timer_create(notice_timer_cb, 2000, NULL);
+
     s_build_lbl = lv_label_create(scr);
     lv_label_set_text(s_build_lbl, DEYE_BUILD_VERSION);
     lv_obj_set_style_text_font(s_build_lbl, F_SM, 0);

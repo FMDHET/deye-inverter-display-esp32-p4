@@ -63,10 +63,26 @@ esp_err_t uart_set_mode(uart_port_t p, uart_mode_t mode) { (void)p; (void)mode; 
 esp_err_t uart_flush_input(uart_port_t p) { (void)p; return ESP_OK; }
 esp_err_t uart_wait_tx_done(uart_port_t p, TickType_t t) { (void)p; (void)t; return ESP_OK; }
 
+/* A queue a test can fill. Reads hand out at most what was pushed -- a short
+ * read is exactly what a half-arrived frame looks like on a real bus, and the
+ * code under test has to cope with it. */
+static uint8_t s_rx[512];
+static size_t  s_rx_len, s_rx_pos;
+
+void fake_uart_rx_push(const void *data, size_t n)
+{
+    if (s_rx_len + n > sizeof(s_rx)) return;
+    memcpy(s_rx + s_rx_len, data, n);
+    s_rx_len += n;
+}
+
 int uart_read_bytes(uart_port_t p, void *buf, uint32_t len, TickType_t ticks)
 {
-    (void)p; (void)buf; (void)len; (void)ticks;
-    return 0;                      /* nothing on the wire */
+    (void)p; (void)ticks;
+    size_t have = s_rx_len - s_rx_pos;
+    size_t n = have < len ? have : len;
+    if (n) { memcpy(buf, s_rx + s_rx_pos, n); s_rx_pos += n; }
+    return (int)n;
 }
 
 int uart_write_bytes(uart_port_t p, const void *src, size_t len)
@@ -85,6 +101,7 @@ void fake_uart_reset(void)
     memset(fake_uart_tx, 0, sizeof(fake_uart_tx));
     fake_uart_tx_len = 0;
     fake_uart_writes = 0;
+    s_rx_len = s_rx_pos = 0;
 }
 
 /* ------------------------- modbus_tcp (the grid) ------------------------

@@ -29,10 +29,11 @@ typedef struct {
     uart_sclk_t             source_clk;
 } uart_config_t;
 
-/* What the fake recorded -- for tests that care. */
+/* What the fake recorded, and what a test can put on the wire. */
 extern uint8_t  fake_uart_tx[512];
 extern size_t   fake_uart_tx_len;
 extern int      fake_uart_writes;
+void fake_uart_rx_push(const void *data, size_t n);   /* queue bytes to be read */
 
 esp_err_t uart_driver_install(uart_port_t p, int rx_buf, int tx_buf, int q,
                               void *queue, int flags);

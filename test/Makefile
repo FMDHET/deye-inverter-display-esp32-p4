@@ -12,25 +12,31 @@ INC      = -I. -Ifakes -I../main
 LDLIBS   = -lm
 BUILD    = build
 
-# One binary per suite. A suite includes the .c file under test, so two suites
+# One binary per suite. A suite #includes the .c file under test, so two suites
 # must never be linked together.
-SUITES   = test_modbus_rtu test_webauth
-COMMON   = harness.c fakes/fakes.c
-HTTP     = fakes/fakes_http.c
+SUITES = test_modbus_rtu test_webauth
+
+OBJ_COMMON = $(BUILD)/harness.o $(BUILD)/fakes/fakes.o
+OBJ_HTTP   = $(BUILD)/fakes/fakes_http.o
 
 BINS = $(addprefix $(BUILD)/,$(SUITES))
 
 .PHONY: all run clean
 all: run
 
-$(BUILD):
-	@mkdir -p $(BUILD)
+# -MMD -MP writes a .d file listing every header AND every .c pulled in with
+# #include. Without it make never sees that ../main/modbus_rtu.c changed --
+# the suite would happily re-run a stale binary and report all green over a
+# broken firmware. That happened once during development; hence this comment.
+$(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(WARN) $(INC) -MMD -MP -c -o $@ $<
 
-$(BUILD)/test_modbus_rtu: test_modbus_rtu.c $(COMMON) | $(BUILD)
-	$(CC) $(CFLAGS) $(WARN) $(INC) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_modbus_rtu: $(BUILD)/test_modbus_rtu.o $(OBJ_COMMON)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
-$(BUILD)/test_webauth: test_webauth.c $(COMMON) $(HTTP) | $(BUILD)
-	$(CC) $(CFLAGS) $(WARN) $(INC) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_webauth: $(BUILD)/test_webauth.o $(OBJ_COMMON) $(OBJ_HTTP)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 run: $(BINS)
 	@echo "Host-Tests:"
@@ -40,3 +46,5 @@ run: $(BINS)
 
 clean:
 	rm -rf $(BUILD)
+
+-include $(shell find $(BUILD) -name '*.d' 2>/dev/null)

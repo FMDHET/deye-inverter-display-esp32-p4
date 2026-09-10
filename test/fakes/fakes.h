@@ -20,6 +20,7 @@ extern uint8_t fake_uart_tx[512];
 extern size_t  fake_uart_tx_len;
 extern int     fake_uart_writes;
 void fake_uart_reset(void);
+void fake_uart_rx_push(const void *data, size_t n);
 
 /* --- NVS: set fake_nvs_fail to make every write fail --- */
 extern bool fake_nvs_fail;

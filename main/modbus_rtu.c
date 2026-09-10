@@ -60,6 +60,7 @@ static volatile int          s_grid_sp;      /* grid setpoint (W) for zero-expor
 static mb_manip_cfg_t        s_manip;         /* master switch defaults to OFF */
 static uint32_t              s_requests;      /* SDM630 requests answered       */
 static uint32_t              s_request_ms;    /* ms of the last answered request */
+static uint32_t              s_manip_ms;      /* when manipulation was switched on */
 static bool                  s_slave_quiet;   /* bridge over -> not answering   */
 static uint32_t              s_stale_ms;      /* how long the value is stale    */
 static volatile bool         s_selftest_req  = false;
@@ -184,14 +185,24 @@ static void load_manip(void)
     /* Absent blob -> all zeroes = master switch off, every phase pass-through. */
     nvs_store_get_mb_manip(&m, sizeof(m));
     clamp_manip(&m);
-    portENTER_CRITICAL(&s_mux);
-    s_manip = m;
-    portEXIT_CRITICAL(&s_mux);
-    if (m.enabled)
-        ESP_LOGW(TAG, "phase manipulation ACTIVE after boot: L1=%s/%.0f L2=%s/%.0f L3=%s/%.0f",
+    /* Switched OFF on every start. Manipulation exists to try something out
+     * while somebody watches; it lives only in this device, so resuming it
+     * after an unattended restart (power cut, OTA, crash) would mean quietly
+     * feeding the inverter wrong numbers with nobody around. The values are
+     * kept, only the master switch drops -- turning it back on is one tap. */
+    if (m.enabled) {
+        ESP_LOGW(TAG, "phase manipulation was ON before the restart "
+                      "(L1=%s/%.0f L2=%s/%.0f L3=%s/%.0f) -- switching it OFF",
                  modbus_rtu_phase_mode_name(m.ph[0].mode), m.ph[0].value,
                  modbus_rtu_phase_mode_name(m.ph[1].mode), m.ph[1].value,
                  modbus_rtu_phase_mode_name(m.ph[2].mode), m.ph[2].value);
+        m.enabled = 0;
+        nvs_store_set_mb_manip(&m, sizeof(m));
+    }
+    portENTER_CRITICAL(&s_mux);
+    s_manip = m;
+    s_manip_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    portEXIT_CRITICAL(&s_mux);
 }
 
 static void uart_setup(int port, int tx, int rx, uint32_t baud)
@@ -375,6 +386,22 @@ static void do_slave(int idx, int port, const mb_rtu_bus_cfg_t *c)
     s_slave_quiet = false;
     s_stale_ms    = fresh ? 0 : (uint32_t)(nowm - s_stale_since);
     portEXIT_CRITICAL(&s_mux);
+
+    /* Manipulation expires on its own -- checked here, at the moment it would
+     * take effect. Cleared in RAM only: an NVS write on this task would delay
+     * an answer the Deye is waiting for, and the next start disables it in
+     * flash anyway (load_manip). */
+    bool manip_expired = false;
+    portENTER_CRITICAL(&s_mux);
+    if (s_manip.enabled &&
+        (uint32_t)(nowm - s_manip_ms) > (uint32_t)MB_MANIP_MAX_S * 1000u) {
+        s_manip.enabled = 0;
+        manip_expired = true;
+    }
+    portEXIT_CRITICAL(&s_mux);
+    if (manip_expired)
+        ESP_LOGW(TAG, "phase manipulation ran for %d min -- switched OFF",
+                 MB_MANIP_MAX_S / 60);
 
     float served_p[3], served_total;
     compute_served(fresh, grid_w, NULL, NULL, served_p, &served_total);
@@ -906,6 +933,19 @@ void modbus_rtu_get_manip(mb_manip_cfg_t *out)
     portEXIT_CRITICAL(&s_mux);
 }
 
+uint32_t modbus_rtu_manip_left_s(void)
+{
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    uint32_t left = 0;
+    portENTER_CRITICAL(&s_mux);
+    if (s_manip.enabled) {
+        uint32_t age = (now - s_manip_ms) / 1000u;
+        left = (age >= MB_MANIP_MAX_S) ? 0 : (uint32_t)MB_MANIP_MAX_S - age;
+    }
+    portEXIT_CRITICAL(&s_mux);
+    return left;
+}
+
 esp_err_t modbus_rtu_set_manip(const mb_manip_cfg_t *cfg)
 {
     if (!cfg) return ESP_ERR_INVALID_ARG;
@@ -913,7 +953,9 @@ esp_err_t modbus_rtu_set_manip(const mb_manip_cfg_t *cfg)
     clamp_manip(&m);
     esp_err_t e = nvs_store_set_mb_manip(&m, sizeof(m));
     portENTER_CRITICAL(&s_mux);
+    bool was_on = s_manip.enabled;
     s_manip = m;                 /* apply immediately, even if NVS refused */
+    if (m.enabled && !was_on) s_manip_ms = (uint32_t)(esp_timer_get_time() / 1000);
     portEXIT_CRITICAL(&s_mux);
     ESP_LOGW(TAG, "phase manipulation %s: L1=%s/%.0f L2=%s/%.0f L3=%s/%.0f",
              m.enabled ? "ON" : "off",

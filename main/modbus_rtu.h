@@ -155,6 +155,16 @@ typedef struct {
 
 void        modbus_rtu_get_served(mb_served_t *out);
 void        modbus_rtu_get_manip(mb_manip_cfg_t *out);
+
+/* A standing intervention must not outlive the person who started it: phase
+ * manipulation switches itself off after this long, and a restart switches it
+ * off outright (it lives only in us, so resuming it after an unattended reboot
+ * would mean quietly lying to the inverter again). Same reasoning as
+ * DEYE_FORCE_MAX_S in deye_ctrl.h, same duration. */
+#define MB_MANIP_MAX_S  (2 * 60 * 60)
+
+/* Seconds until that automatic switch-off; 0 when manipulation is off. */
+uint32_t    modbus_rtu_manip_left_s(void);
 esp_err_t   modbus_rtu_set_manip(const mb_manip_cfg_t *cfg);
 const char *modbus_rtu_phase_mode_name(uint8_t mode);
 

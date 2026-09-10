@@ -316,6 +316,192 @@ static void test_bridge_change_keeps_the_deye_reading(void)
     CHECK(!fake_rtu_deye_valid);                   /* dropped, as it must be */
 }
 
+/* ----------------- the whole slave path, request to answer -------------
+ * do_slave() is where the emulation actually talks to the inverter, and where
+ * the bridge-then-silence rule lives. With a queue on the fake UART the whole
+ * path is testable -- including the part that needed a real meter outage on a
+ * live inverter to observe (Nachtrag 4). */
+
+/* An SDM630 request as the Deye sends it: FC04, 2 registers from `addr`. */
+static void push_request(uint8_t slave, uint8_t fc, uint16_t addr, uint16_t cnt)
+{
+    uint8_t req[8] = { slave, fc, (uint8_t)(addr >> 8), (uint8_t)addr,
+                       (uint8_t)(cnt >> 8), (uint8_t)cnt, 0, 0 };
+    uint16_t c = crc16(req, 6);
+    req[6] = (uint8_t)(c & 0xFF);
+    req[7] = (uint8_t)(c >> 8);
+    fake_uart_rx_push(req, sizeof(req));
+}
+
+static mb_rtu_bus_cfg_t slave_bus(void)
+{
+    mb_rtu_bus_cfg_t c = { .enabled = 1, .role = MB_RTU_SLAVE, .slave_id = 1, .baud = 9600 };
+    return c;
+}
+
+/* Drives do_slave() from a known state: fresh reading first, so the internal
+ * fresh/stale edge detector is where the test wants it. */
+static void slave_warmup(void)
+{
+    mb_rtu_bus_cfg_t c = slave_bus();
+    fake_grid_fresh = true;
+    fake_grid_w = 0;
+    push_request(1, 4, 0x0C, 2);
+    do_slave(0, 0, &c);
+    fake_uart_reset();
+}
+
+static float answered_l1(void)
+{
+    /* out[3..6] = L1 power as an IEEE-754 float, high word first. */
+    uint32_t u = ((uint32_t)fake_uart_tx[3] << 24) | ((uint32_t)fake_uart_tx[4] << 16) |
+                 ((uint32_t)fake_uart_tx[5] << 8)  |  (uint32_t)fake_uart_tx[6];
+    float f;
+    memcpy(&f, &u, sizeof(f));
+    return f;
+}
+
+static void test_slave_answers_a_valid_request(void)
+{
+    reset_all();
+    fake_time_set_ms(1000);
+    slave_warmup();
+    mb_rtu_bus_cfg_t c = slave_bus();
+
+    fake_grid_fresh = true;
+    fake_grid_w     = 900;
+    push_request(1, 4, 0x0C, 2);
+    do_slave(0, 0, &c);
+
+    CHECK_I(fake_uart_writes, 1);
+    CHECK_I(fake_uart_tx[0], 1);           /* our slave id */
+    CHECK_I(fake_uart_tx[1], 4);
+    CHECK_F(answered_l1(), 300, 0.01);     /* 900 W split over three phases */
+}
+
+static void test_slave_ignores_what_is_not_for_it(void)
+{
+    mb_rtu_bus_cfg_t c = slave_bus();
+
+    reset_all(); fake_time_set_ms(1000); slave_warmup();
+    push_request(2, 4, 0x0C, 2);           /* someone else's slave id */
+    do_slave(0, 0, &c);
+    CHECK_I(fake_uart_writes, 0);
+
+    reset_all(); fake_time_set_ms(1000); slave_warmup();
+    push_request(1, 6, 0x0C, 2);           /* a write function code */
+    do_slave(0, 0, &c);
+    CHECK_I(fake_uart_writes, 0);
+
+    /* A corrupted frame: right length, wrong checksum. */
+    reset_all(); fake_time_set_ms(1000); slave_warmup();
+    uint8_t bad[8] = { 1, 4, 0, 0x0C, 0, 2, 0xAA, 0xBB };
+    fake_uart_rx_push(bad, sizeof(bad));
+    do_slave(0, 0, &c);
+    CHECK_I(fake_uart_writes, 0);
+}
+
+static void test_stale_bridges_with_zero_then_goes_silent(void)
+{
+    reset_all();
+    fake_time_set_ms(100000);
+    slave_warmup();                        /* starts fresh */
+    mb_rtu_bus_cfg_t c = slave_bus();
+
+    /* The reading goes stale. For the next minute the meter stays alive and
+     * answers a balanced zero -- the Deye holds instead of chasing. */
+    fake_grid_fresh = false;
+    push_request(1, 4, 0x0C, 2);
+    do_slave(0, 0, &c);
+    CHECK_I(fake_uart_writes, 1);
+    CHECK_F(answered_l1(), 0, 0.01);
+    CHECK(!s_slave_quiet);
+
+    fake_time_advance_ms(59 * 1000);       /* still inside the bridge */
+    fake_uart_reset();
+    push_request(1, 4, 0x0C, 2);
+    do_slave(0, 0, &c);
+    CHECK_I(fake_uart_writes, 1);
+    CHECK_F(answered_l1(), 0, 0.01);
+
+    /* Past the bridge: silence, so the inverter falls back to its own CT
+     * instead of holding a number nobody is updating. */
+    fake_time_advance_ms(3 * 1000);
+    fake_uart_reset();
+    push_request(1, 4, 0x0C, 2);
+    do_slave(0, 0, &c);
+    CHECK_I(fake_uart_writes, 0);
+    CHECK(s_slave_quiet);
+
+    /* And when the meter comes back, so does the emulation. */
+    fake_grid_fresh = true;
+    fake_grid_w     = 600;
+    fake_uart_reset();
+    push_request(1, 4, 0x0C, 2);
+    do_slave(0, 0, &c);
+    CHECK_I(fake_uart_writes, 1);
+    CHECK_F(answered_l1(), 200, 0.01);
+    CHECK(!s_slave_quiet);
+}
+
+static void test_hold_forever_keeps_the_old_behaviour(void)
+{
+    reset_all();
+    fake_time_set_ms(100000);
+    slave_warmup();
+    mb_rtu_bus_cfg_t c = slave_bus();
+    s_cfg.slave_hold_s = MB_SLAVE_HOLD_FOREVER;
+
+    fake_grid_fresh = false;
+    push_request(1, 4, 0x0C, 2);
+    do_slave(0, 0, &c);                    /* enters the stale state */
+
+    fake_time_advance_ms(60 * 60 * 1000);  /* an hour later */
+    fake_uart_reset();
+    push_request(1, 4, 0x0C, 2);
+    do_slave(0, 0, &c);
+    CHECK_I(fake_uart_writes, 1);          /* still answering */
+    CHECK_F(answered_l1(), 0, 0.01);
+    CHECK(!s_slave_quiet);
+    s_cfg.slave_hold_s = 0;
+}
+
+static void test_manipulation_expires_on_its_own(void)
+{
+    reset_all();
+    fake_time_set_ms(500000);
+    slave_warmup();
+    mb_rtu_bus_cfg_t c = slave_bus();
+
+    fake_grid_fresh = true;
+    fake_grid_w     = 900;
+    manip_set(0, MB_PH_ABS, 7000);
+    s_manip_ms = (uint32_t)(fake_now_us / 1000);
+
+    push_request(1, 4, 0x0C, 2);
+    do_slave(0, 0, &c);
+    CHECK_F(answered_l1(), 7000, 0.01);            /* manipulated, as asked */
+    CHECK(s_manip.enabled);
+    CHECK(modbus_rtu_manip_left_s() > 0);
+
+    /* Just before the limit it is still in force ... */
+    fake_time_advance_ms((MB_MANIP_MAX_S - 60) * 1000);
+    fake_uart_reset();
+    push_request(1, 4, 0x0C, 2);
+    do_slave(0, 0, &c);
+    CHECK_F(answered_l1(), 7000, 0.01);
+    CHECK(s_manip.enabled);
+
+    /* ... and past it, the inverter gets the honest number again. */
+    fake_time_advance_ms(2 * 60 * 1000);
+    fake_uart_reset();
+    push_request(1, 4, 0x0C, 2);
+    do_slave(0, 0, &c);
+    CHECK(!s_manip.enabled);
+    CHECK_F(answered_l1(), 300, 0.01);
+    CHECK_I(modbus_rtu_manip_left_s(), 0);
+}
+
 int main(void)
 {
     RUN(test_stale_serves_zero);
@@ -331,5 +517,10 @@ int main(void)
     RUN(test_clamp_cfg_fills_defaults);
     RUN(test_set_cfg_is_a_noop_when_nothing_changed);
     RUN(test_bridge_change_keeps_the_deye_reading);
+    RUN(test_slave_answers_a_valid_request);
+    RUN(test_slave_ignores_what_is_not_for_it);
+    RUN(test_stale_bridges_with_zero_then_goes_silent);
+    RUN(test_hold_forever_keeps_the_old_behaviour);
+    RUN(test_manipulation_expires_on_its_own);
     return t_report("modbus_rtu");
 }

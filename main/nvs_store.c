@@ -1,5 +1,6 @@
 #include "nvs_store.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include "esp_log.h"
 #include "nvs.h"
@@ -120,6 +121,59 @@ esp_err_t nvs_store_set_wifi_list(const void *buf, size_t len)
 esp_err_t nvs_store_clear_wifi_list(void)
 {
     return erase_key(NS_WIFI, K_STA_LIST);
+}
+
+/* Read a fixed-layout config blob, and cope with BOTH directions of a size
+ * mismatch.
+ *
+ * These structs only ever grow at the end. A SHORTER stored record is an older
+ * layout: nvs_get_blob fills what there is, the caller pre-zeroes, and the
+ * appended fields read 0 -> the owning module gives them its defaults.
+ *
+ * A LONGER record is the rollback case, and it used to lose everything:
+ * nvs_get_blob does not truncate, it returns ESP_ERR_NVS_INVALID_LENGTH when
+ * the buffer is too small, so the older firmware saw "no config" and silently
+ * fell back to defaults -- MQTT account, clock, VPN keys, gone from its point
+ * of view, and overwritten as soon as anything saved. Since fields are only
+ * appended, the first `len` bytes of a newer record ARE the older struct, so
+ * read the whole thing and keep the prefix.
+ *
+ * This is why there is no version field: it would have to be read by exactly
+ * the firmware that cannot read the record in the first place. The prefix rule
+ * needs no cooperation from the future -- only that fields keep being appended,
+ * which is already the rule for every one of these structs. */
+static esp_err_t get_blob_prefix(const char *ns, const char *key,
+                                 void *buf, size_t len)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(ns, NVS_READONLY, &h);
+    if (e != ESP_OK) return e;
+
+    size_t stored = 0;
+    e = nvs_get_blob(h, key, NULL, &stored);      /* how big is it really? */
+    if (e != ESP_OK) { nvs_close(h); return e; }
+
+    if (stored <= len) {
+        size_t l = len;
+        e = nvs_get_blob(h, key, buf, &l);
+        nvs_close(h);
+        return e;
+    }
+
+    /* Newer, longer record: read it whole, keep the part we understand. */
+    void *tmp = malloc(stored);
+    if (!tmp) { nvs_close(h); return ESP_ERR_NO_MEM; }
+    size_t l = stored;
+    e = nvs_get_blob(h, key, tmp, &l);
+    nvs_close(h);
+    if (e == ESP_OK) {
+        memcpy(buf, tmp, len);
+        ESP_LOGW(TAG, "%s/%s: %u bytes stored, this firmware knows %u -- "
+                      "keeping the part it understands (rollback?)",
+                 ns, key, (unsigned)stored, (unsigned)len);
+    }
+    free(tmp);
+    return e;
 }
 
 esp_err_t nvs_store_get_ap_psk(char *psk, size_t psk_sz)
@@ -263,19 +317,7 @@ esp_err_t nvs_store_set_mb_devices(const void *buf, size_t len)
 
 esp_err_t nvs_store_get_mb_rtu(void *buf, size_t len)
 {
-    nvs_handle_t h;
-    esp_err_t e = nvs_open(NS_MB, NVS_READONLY, &h);
-    if (e != ESP_OK) return e;
-    size_t l = len;
-    e = nvs_get_blob(h, "rtu2", buf, &l);
-    nvs_close(h);
-    /* A SHORTER record is an older layout: mb_rtu_cfg_t only ever grows at the
-     * end (the bus[] array keeps its stride), and the caller pre-zeroes, so the
-     * appended fields read 0 and clamp_cfg() gives them their defaults. Only a
-     * LONGER record -- a downgrade to firmware that predates those fields --
-     * is rejected, since we cannot know what it holds. */
-    if (e == ESP_OK && l > len) e = ESP_ERR_INVALID_SIZE;
-    return e;
+    return get_blob_prefix(NS_MB, "rtu2", buf, len);
 }
 
 esp_err_t nvs_store_set_mb_rtu(const void *buf, size_t len)
@@ -294,14 +336,7 @@ esp_err_t nvs_store_set_mb_rtu(const void *buf, size_t len)
  * older firmware simply ignores it (= manipulation off). */
 esp_err_t nvs_store_get_mb_manip(void *buf, size_t len)
 {
-    nvs_handle_t h;
-    esp_err_t e = nvs_open(NS_MB, NVS_READONLY, &h);
-    if (e != ESP_OK) return e;
-    size_t l = len;
-    e = nvs_get_blob(h, "manip1", buf, &l);
-    nvs_close(h);
-    if (e == ESP_OK && l > len) e = ESP_ERR_INVALID_SIZE;
-    return e;
+    return get_blob_prefix(NS_MB, "manip1", buf, len);
 }
 
 esp_err_t nvs_store_set_mb_manip(const void *buf, size_t len)
@@ -319,14 +354,7 @@ esp_err_t nvs_store_set_mb_manip(const void *buf, size_t len)
 
 esp_err_t nvs_store_get_mqtt(void *buf, size_t len)
 {
-    nvs_handle_t h;
-    esp_err_t e = nvs_open(NS_MQTT, NVS_READONLY, &h);
-    if (e != ESP_OK) return e;
-    size_t l = len;
-    e = nvs_get_blob(h, "cfg", buf, &l);   /* buffer is pre-zeroed by caller; a
-                                              shorter (older-layout) blob is kept */
-    nvs_close(h);
-    return e;
+    return get_blob_prefix(NS_MQTT, "cfg", buf, len);
 }
 
 esp_err_t nvs_store_set_mqtt(const void *buf, size_t len)
@@ -344,14 +372,7 @@ esp_err_t nvs_store_set_mqtt(const void *buf, size_t len)
 
 esp_err_t nvs_store_get_ntp(void *buf, size_t len)
 {
-    nvs_handle_t h;
-    esp_err_t e = nvs_open(NS_NTP, NVS_READONLY, &h);
-    if (e != ESP_OK) return e;
-    size_t l = len;
-    e = nvs_get_blob(h, "cfg", buf, &l);   /* buffer pre-zeroed by caller; a
-                                              shorter (older-layout) blob is kept */
-    nvs_close(h);
-    return e;
+    return get_blob_prefix(NS_NTP, "cfg", buf, len);
 }
 
 esp_err_t nvs_store_set_ntp(const void *buf, size_t len)
@@ -369,13 +390,7 @@ esp_err_t nvs_store_set_ntp(const void *buf, size_t len)
 
 esp_err_t nvs_store_get_wg(void *buf, size_t len)
 {
-    nvs_handle_t h;
-    esp_err_t e = nvs_open(NS_WG, NVS_READONLY, &h);
-    if (e != ESP_OK) return e;
-    size_t l = len;
-    e = nvs_get_blob(h, "cfg", buf, &l);   /* buffer pre-zeroed by caller */
-    nvs_close(h);
-    return e;
+    return get_blob_prefix(NS_WG, "cfg", buf, len);
 }
 
 esp_err_t nvs_store_set_wg(const void *buf, size_t len)

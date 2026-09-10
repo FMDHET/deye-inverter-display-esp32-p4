@@ -22,6 +22,19 @@ typedef struct {
     uint8_t  retain;       /* retain state publishes      */
     uint8_t  discovery;    /* publish HA MQTT-discovery    */
     uint8_t  lastwill;     /* register a Last-Will         */
+    /* Whether MQTT may STEER the battery, or only report.
+     *
+     * The field is negative on purpose: it is appended, so on every device that
+     * already exists it reads 0 -- and 0 has to mean "as before", otherwise an
+     * update would silently kill a working Home-Assistant automation and the
+     * owner would go looking in the wrong place. 1 = commands are ignored and
+     * the two control entities are not offered to HA at all, so nobody is left
+     * clicking a dead switch.
+     *
+     * Note what this does and does not do: whoever reaches the broker can still
+     * read everything. And a broker without a password is a hole this switch
+     * does not close -- it only stops MQTT from being a control path. */
+    uint8_t  deny_ctrl;
 } mqtt_cfg_t;
 
 typedef struct {

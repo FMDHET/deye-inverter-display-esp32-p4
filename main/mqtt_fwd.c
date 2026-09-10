@@ -102,34 +102,50 @@ static void publish_discovery(void)
     }
 
     /* Control entities: a select for the Deye mode + a number slider for power.
-     * Both report their current value from the shared state JSON. */
+     * Both report their current value from the shared state JSON.
+     *
+     * When control is switched off they are DELETED, not merely skipped: a
+     * discovery config is a retained message, so leaving it in place would keep
+     * two controls in Home Assistant that quietly do nothing -- worse than no
+     * controls at all. An empty retained payload on the config topic is how HA
+     * is told to forget an entity. The sensors above stay either way, so
+     * reporting keeps working. */
     {
-        char topic[120], payload[560];
-        snprintf(topic, sizeof(topic),
+        char sel_topic[120], num_topic[120], payload[560];
+        snprintf(sel_topic, sizeof(sel_topic),
                  "homeassistant/select/%s/deye_mode/config", s_devid);
-        snprintf(payload, sizeof(payload),
-            "{\"name\":\"Deye Modus\",\"cmd_t\":\"%s\",\"stat_t\":\"%s\","
-            "\"avty_t\":\"%s\",\"val_tpl\":\"{{ value_json.deye_mode }}\","
-            "\"options\":[\"Normal\",\"Laden\",\"Entladen\"],"
-            "\"uniq_id\":\"%s_deye_mode\",\"icon\":\"mdi:home-battery\","
-            "\"dev\":{\"ids\":[\"%s\"],\"name\":\"Deye Display\",\"mdl\":\"ESP32-P4\",\"mf\":\"DIY\"}}",
-            s_t_mode_cmd, s_t_state, s_t_avail, s_devid, s_devid);
-        esp_mqtt_client_publish(s_client, topic, payload, 0, 1, true);
-
-        snprintf(topic, sizeof(topic),
+        snprintf(num_topic, sizeof(num_topic),
                  "homeassistant/number/%s/deye_power/config", s_devid);
-        snprintf(payload, sizeof(payload),
-            "{\"name\":\"Deye Leistung\",\"cmd_t\":\"%s\",\"stat_t\":\"%s\","
-            "\"avty_t\":\"%s\",\"val_tpl\":\"{{ value_json.deye_power }}\","
-            "\"min\":1000,\"max\":20000,\"step\":100,\"unit_of_meas\":\"W\","
-            "\"mode\":\"slider\",\"uniq_id\":\"%s_deye_power\","
-            "\"icon\":\"mdi:battery-charging\","
-            "\"dev\":{\"ids\":[\"%s\"],\"name\":\"Deye Display\",\"mdl\":\"ESP32-P4\",\"mf\":\"DIY\"}}",
-            s_t_pwr_cmd, s_t_state, s_t_avail, s_devid, s_devid);
-        esp_mqtt_client_publish(s_client, topic, payload, 0, 1, true);
+
+        if (s_cfg.deny_ctrl) {
+            /* Empty retained payload = "forget this entity". */
+            esp_mqtt_client_publish(s_client, sel_topic, "", 0, 1, true);
+            esp_mqtt_client_publish(s_client, num_topic, "", 0, 1, true);
+            ESP_LOGW(TAG, "MQTT control is off -- the two HA controls were removed");
+        } else {
+            snprintf(payload, sizeof(payload),
+                "{\"name\":\"Deye Modus\",\"cmd_t\":\"%s\",\"stat_t\":\"%s\","
+                "\"avty_t\":\"%s\",\"val_tpl\":\"{{ value_json.deye_mode }}\","
+                "\"options\":[\"Normal\",\"Laden\",\"Entladen\"],"
+                "\"uniq_id\":\"%s_deye_mode\",\"icon\":\"mdi:home-battery\","
+                "\"dev\":{\"ids\":[\"%s\"],\"name\":\"Deye Display\",\"mdl\":\"ESP32-P4\",\"mf\":\"DIY\"}}",
+                s_t_mode_cmd, s_t_state, s_t_avail, s_devid, s_devid);
+            esp_mqtt_client_publish(s_client, sel_topic, payload, 0, 1, true);
+
+            snprintf(payload, sizeof(payload),
+                "{\"name\":\"Deye Leistung\",\"cmd_t\":\"%s\",\"stat_t\":\"%s\","
+                "\"avty_t\":\"%s\",\"val_tpl\":\"{{ value_json.deye_power }}\","
+                "\"min\":1000,\"max\":20000,\"step\":100,\"unit_of_meas\":\"W\","
+                "\"mode\":\"slider\",\"uniq_id\":\"%s_deye_power\","
+                "\"icon\":\"mdi:battery-charging\","
+                "\"dev\":{\"ids\":[\"%s\"],\"name\":\"Deye Display\",\"mdl\":\"ESP32-P4\",\"mf\":\"DIY\"}}",
+                s_t_pwr_cmd, s_t_state, s_t_avail, s_devid, s_devid);
+            esp_mqtt_client_publish(s_client, num_topic, payload, 0, 1, true);
+        }
     }
 
-    ESP_LOGI(TAG, "published %u HA-discovery configs + 2 controls", (unsigned)N_SENS);
+    ESP_LOGI(TAG, "published %u HA-discovery configs%s", (unsigned)N_SENS,
+             s_cfg.deny_ctrl ? " (no controls: MQTT control is off)" : " + 2 controls");
 }
 
 static void publish_state(void)
@@ -159,8 +175,12 @@ static void mqtt_event_handler(void *args, esp_event_base_t base,
         ESP_LOGI(TAG, "connected");
         portENTER_CRITICAL(&s_mux); s_st.connected = true; portEXIT_CRITICAL(&s_mux);
         esp_mqtt_client_publish(s_client, s_t_avail, "online", 0, 1, true);
-        esp_mqtt_client_subscribe(s_client, s_t_mode_cmd, 1);
-        esp_mqtt_client_subscribe(s_client, s_t_pwr_cmd, 1);
+        if (!s_cfg.deny_ctrl) {
+            esp_mqtt_client_subscribe(s_client, s_t_mode_cmd, 1);
+            esp_mqtt_client_subscribe(s_client, s_t_pwr_cmd, 1);
+        } else {
+            ESP_LOGW(TAG, "MQTT control is off -- not subscribing to the command topics");
+        }
         publish_discovery();
         publish_state();
         break;
@@ -177,6 +197,15 @@ static void mqtt_event_handler(void *args, esp_event_base_t base,
                         !strncmp(ev->topic, s_t_mode_cmd, ev->topic_len));
         bool is_pwr  = (ev->topic_len == (int)strlen(s_t_pwr_cmd) &&
                         !strncmp(ev->topic, s_t_pwr_cmd, ev->topic_len));
+
+        /* A belt to go with the braces above: a retained command from an
+         * earlier session, or a subscription the broker still holds, must not
+         * slip through after the switch was turned off. */
+        if ((is_mode || is_pwr) && s_cfg.deny_ctrl) {
+            ESP_LOGW(TAG, "MQTT command '%s' ignored -- control is switched off", d);
+            publish_state();                   /* snap HA back to reality */
+            break;
+        }
 
         if (is_mode) {
             deye_mode_t m = deye_mode_from_ha(d);

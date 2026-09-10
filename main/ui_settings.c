@@ -108,7 +108,7 @@ static lv_obj_t       *s_gw_status;
 /* MQTT tab */
 static lv_obj_t       *s_mqtt_status, *s_mqtt_kbd;
 static lv_obj_t       *s_mqtt_en, *s_mqtt_host, *s_mqtt_port, *s_mqtt_user, *s_mqtt_pass, *s_mqtt_base;
-static lv_obj_t       *s_mqtt_retain, *s_mqtt_disc, *s_mqtt_lwt;
+static lv_obj_t       *s_mqtt_retain, *s_mqtt_disc, *s_mqtt_lwt, *s_mqtt_ctrl;
 
 /* Zeit / NTP tab */
 static lv_obj_t       *s_ntp_status, *s_ntp_kbd;
@@ -122,6 +122,7 @@ static lv_obj_t       *s_sls_dd;
 static lv_obj_t       *s_sls_status_lbl;
 /* System tab: password for the writing web endpoints (see webauth.h). */
 static lv_obj_t       *s_web_pw, *s_web_kbd, *s_web_status;
+static lv_obj_t       *s_ap_pw, *s_ap_status;
 static lv_obj_t       *s_vpn_privkey, *s_vpn_pubkey, *s_vpn_psk, *s_vpn_endpoint;
 static lv_obj_t       *s_vpn_port, *s_vpn_addr, *s_vpn_mask, *s_vpn_keep;
 
@@ -1469,6 +1470,7 @@ static void mqtt_save_cb(lv_event_t *e)
     c.retain    = lv_obj_has_state(s_mqtt_retain, LV_STATE_CHECKED) ? 1 : 0;
     c.discovery = lv_obj_has_state(s_mqtt_disc,   LV_STATE_CHECKED) ? 1 : 0;
     c.lastwill  = lv_obj_has_state(s_mqtt_lwt,    LV_STATE_CHECKED) ? 1 : 0;
+    c.deny_ctrl = lv_obj_has_state(s_mqtt_ctrl,   LV_STATE_CHECKED) ? 0 : 1;
     mqtt_fwd_set_cfg(&c);
     mqtt_refresh();
 }
@@ -1508,6 +1510,12 @@ static void mqtt_tab_build(lv_obj_t *parent)
     s_mqtt_retain = make_checkbox(parent, "Retain",       300, 104, c.retain);
     s_mqtt_disc   = make_checkbox(parent, "HA Discovery", 300, 144, c.discovery);
     s_mqtt_lwt    = make_checkbox(parent, "Last Will",    300, 184, c.lastwill);
+    /* Positive wording for a negative field: deny_ctrl reads 0 on every device
+     * that existed before this switch, and 0 has to mean "as before". */
+    s_mqtt_ctrl   = make_checkbox(parent, "Steuerung erlauben", 300, 224, !c.deny_ctrl);
+    wrap_label(parent, 240, 300, 250,
+               "Aus: MQTT darf nur melden, nicht schalten. Home Assistant "
+               "bekommt die zwei Bedienelemente dann gar nicht angeboten.");
 
     s_mqtt_kbd = lv_keyboard_create(parent);
     lv_obj_set_size(s_mqtt_kbd, LV_PCT(100), 174);
@@ -2014,19 +2022,58 @@ static void sls_change_cb(lv_event_t *e)
 
 static void web_pw_status(void)
 {
-    if (!s_web_status) return;
-    bool on = web_auth_enabled();
-    lv_label_set_text(s_web_status, on
-        ? LV_SYMBOL_OK "  Passwort gesetzt \xe2\x80\x94 Schreibzugriffe verlangen es"
-        : "kein Passwort \xe2\x80\x94 jeder im Netz darf schreiben");
-    lv_obj_set_style_text_color(s_web_status, on ? COL_OK : COL_WARN, 0);
+    if (s_web_status) {
+        bool on = web_auth_enabled();
+        lv_label_set_text(s_web_status, on
+            ? LV_SYMBOL_OK "  Passwort gesetzt \xe2\x80\x94 Schreibzugriffe verlangen es"
+            : "kein Passwort \xe2\x80\x94 jeder im Netz darf schreiben");
+        lv_obj_set_style_text_color(s_web_status, on ? COL_OK : COL_WARN, 0);
+    }
+    if (s_ap_status) {
+        char psk[64] = "";
+        nvs_store_get_ap_psk(psk, sizeof(psk));
+        size_t n = strlen(psk);
+        const char *txt;
+        lv_color_t col;
+        if (n < 8) {
+            /* start_ap() opens the network below 8 characters -- WPA2 has no
+             * shorter key, so this is not a warning but a fact. */
+            txt = LV_SYMBOL_WARNING "  unter 8 Zeichen \xe2\x80\x94 das Notfall-WLAN w\xc3\xa4re OFFEN";
+            col = COL_WARN;
+        } else if (strcmp(psk, "deyedisplay") == 0) {
+            txt = LV_SYMBOL_WARNING "  Standardwert aus dem Quelltext \xe2\x80\x94 steht \xc3\xb6""ffentlich";
+            col = COL_WARN;
+        } else {
+            txt = LV_SYMBOL_OK "  eigenes Passwort gesetzt";
+            col = COL_OK;
+        }
+        lv_label_set_text(s_ap_status, txt);
+        lv_obj_set_style_text_color(s_ap_status, col, 0);
+    }
 }
 
+/* Saves both fields of this tab. Called by the keyboard's tick and by the
+ * Speichern button; writing only what actually changed keeps the log quiet and
+ * the flash unwritten. */
 static void web_pw_save_cb(lv_event_t *e)
 {
     (void)e;
-    if (!s_web_pw) return;
-    web_auth_set(lv_textarea_get_text(s_web_pw));
+    if (s_web_pw) {
+        char cur[WEB_AUTH_PW_MAX] = "";
+        web_auth_get(cur, sizeof(cur));
+        const char *txt = lv_textarea_get_text(s_web_pw);
+        if (txt && strcmp(cur, txt) != 0) web_auth_set(txt);
+    }
+    if (s_ap_pw) {
+        char cur[64] = "";
+        nvs_store_get_ap_psk(cur, sizeof(cur));
+        const char *txt = lv_textarea_get_text(s_ap_pw);
+        if (txt && strcmp(cur, txt) != 0) {
+            nvs_store_set_ap_psk(txt);
+            ESP_LOGW("ui_settings", "AP password changed -- takes effect the next "
+                                    "time the emergency WiFi comes up");
+        }
+    }
     web_pw_status();
 }
 
@@ -2050,7 +2097,10 @@ static void system_tab_build(lv_obj_t *parent)
 {
     lv_obj_set_style_bg_opa(parent, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(parent, 0, 0);
-    lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
+    /* Scrollable, like the Mod-RTU tab: with the two access sections added
+     * below the SLS block the content is taller than the panel, and a field
+     * nobody can reach is worse than no field. */
+    lv_obj_set_scroll_dir(parent, LV_DIR_VER);
     lv_obj_set_style_pad_all(parent, 22, 0);
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(parent, LV_FLEX_ALIGN_START,
@@ -2119,6 +2169,40 @@ static void system_tab_build(lv_obj_t *parent)
 
     s_web_status = lv_label_create(parent);
     lv_obj_set_style_text_font(s_web_status, F_SM, 0);
+
+    /* ---- Notfall-WLAN ----
+     * Bisher gab es dafuer nur die Konstante im Quelltext: nvs_store_set_ap_psk()
+     * existierte, hatte aber keinen Aufrufer. Hier ist er. */
+    lv_obj_t *ah = lv_label_create(parent);
+    lv_label_set_text(ah, "Notfall-WLAN (Passwort)");
+    lv_obj_set_style_text_font(ah, F_MD, 0);
+    lv_obj_set_style_text_color(ah, COL_TEXT, 0);
+
+    lv_obj_t *as = lv_label_create(parent);
+    lv_label_set_text(as,
+        "Das Netz, das aufgeht, wenn kein bekanntes WLAN erreichbar ist.\n"
+        "Mindestens 8 Zeichen \xe2\x80\x94 k\xc3\xbcrzer geht WPA2 nicht, dann w\xc3\xa4re es offen.\n"
+        "Wirkt, wenn das Notfall-WLAN das n\xc3\xa4""chste Mal aufgeht.");
+    lv_obj_set_style_text_font(as, F_SM, 0);
+    lv_obj_set_style_text_color(as, COL_SUB, 0);
+    lv_obj_set_width(as, 560);
+    lv_label_set_long_mode(as, LV_LABEL_LONG_WRAP);
+
+    char apsk[64] = "";
+    nvs_store_get_ap_psk(apsk, sizeof(apsk));
+    s_ap_pw = lv_textarea_create(parent);
+    lv_textarea_set_one_line(s_ap_pw, true);
+    lv_textarea_set_password_mode(s_ap_pw, true);
+    lv_textarea_set_max_length(s_ap_pw, 63);
+    lv_textarea_set_placeholder_text(s_ap_pw, "mindestens 8 Zeichen");
+    if (apsk[0]) lv_textarea_set_text(s_ap_pw, apsk);
+    lv_obj_set_width(s_ap_pw, 320);
+    lv_obj_set_style_bg_color(s_ap_pw, COL_PANEL, 0);
+    lv_obj_set_style_text_color(s_ap_pw, COL_TEXT, 0);
+    lv_obj_add_event_cb(s_ap_pw, web_pw_focus_cb, LV_EVENT_CLICKED, NULL);
+
+    s_ap_status = lv_label_create(parent);
+    lv_obj_set_style_text_font(s_ap_status, F_SM, 0);
 
     /* On the screen, not the page: the page is only 500 px high and the
      * keyboard needs the bottom half. tab_select() hides it on leaving. */

@@ -67,7 +67,7 @@ Weitere Funde mittlerer Schwere — behoben: ~~Netz-Sollwert ohne Grenzen im Mod
 * ~~WireGuard wird genau einmal versucht~~ — **behoben (Nachtrag).**
 * ~~`mqtt_apply()` läuft auf dem LVGL-Task~~, ~~unbekannter MQTT-Modus wird angewendet~~, ~~`atoi("abc")` = 0 W~~ — **behoben (Nachtrag 2).** Offen bleibt: es gibt keinen Schalter „Steuerung per MQTT erlauben" — wer den Broker erreicht, kann den Akku umschalten.
 * Konfigurations-Blobs `mqtt`/`ntp`/`wg` ohne Versionsfeld: ein Feld anhängen, OTA, Rollback → die ältere Firmware verwirft die Einstellungen stillschweigend.
-* Reproduzierbarkeit: `platform` folgt dem Git-HEAD, `dependencies.lock` ist gitignored, `sdkconfig.guition-p4` ist eingecheckt und schlägt `sdkconfig.defaults` — Änderungen dort wirken auf bestehenden Checkouts nicht. `CONFIG_COMPILER_OPTIMIZATION_DEBUG` (`-Og`) im Produktivbetrieb.
+* ~~Reproduzierbarkeit: `platform` folgt dem Git-HEAD, `dependencies.lock` ist gitignored~~ — **behoben (Nachtrag 8).** Offen bleibt: `sdkconfig.guition-p4` ist eingecheckt und schlägt `sdkconfig.defaults` (Änderungen dort wirken auf bestehenden Checkouts nicht), und `CONFIG_COMPILER_OPTIMIZATION_DEBUG` (`-Og`) im Produktivbetrieb.
 * Zwei Überläufe in `captive.c` (`h_scan`, `h_connect`) sind heute unerreichbar, weil `captive_portal.html` gar nicht mehr eingebettet wird — tote Seite plus tote Handler, 4 kB statischer RAM.
 
 ### Display-Oberfläche (LVGL)
@@ -262,6 +262,19 @@ Nicht am Gerät gesehen: der Hinweis für den tauben Zähler-Bus. Den gibt es nu
 **28 neue Prüfungen** (jetzt 137 insgesamt), und die interessanten decken genau das ab, was gestern noch einen Eingriff am laufenden Wechselrichter gebraucht hätte: der komplette Slave-Pfad von der Anfrage bis zur Antwort (gültige Anfrage, fremde Slave-ID, falscher Funktionscode, kaputte Prüfsumme), die 60-Sekunden-Brücke, die Stummschaltung und die Rückkehr daraus, die Einstellung „unbegrenzt", der Ablauf der Manipulation und ihr Abschalten beim Start — alles mit gestellter Uhr, ohne zwei Stunden zu warten und ohne dem Deye den Zähler wegzunehmen.
 
 **Und ein Fehler im Testaufbau selbst.** Die Gegenprobe meldete drei Mutationen als „bestanden". Ursache: das Makefile kannte die getestete Quelldatei nicht als Abhängigkeit — `make` baute nach einer Änderung unter `main/` gar nicht neu und ließ das alte Binary laufen. Jetzt `-MMD -MP` mit eingebundenen `.d`-Dateien. Dazu zwei Fallen, die jetzt im `test/README.md` stehen: `git checkout` in einer Mutationsschleife reißt uncommittete Arbeit mit (einmal passiert, Änderungen mussten neu geschrieben werden), und Apples `/usr/bin/make` (GNU make 3.81) vergleicht Zeitstempel sekundengenau — eine Änderung in derselben Sekunde wie der letzte Build wird übersehen.
+
+## Nachtrag 8 (10. September): der Bau ist wiederholbar
+
+Ein Build, der sich holt, was gerade neu ist, lässt sich nicht wiederholen — und die CI von gestern durfte deshalb fehlschlagen, ohne rot zu zählen. Beides ist erledigt.
+
+| Was | Wie |
+| --- | --- |
+| `platform` folgte dem **Git-HEAD** von pioarduino | Festgenagelt auf die Release-Marke `55.03.311` (trägt ESP-IDF 5.5.5, enthält „fix p4 rev3"). Der bisher gebaute HEAD `dd01e49` lag zwei Commits darüber; beide betreffen nur Arduino bzw. ein Beispiel, der P4-relevante Fix steckt in der Marke. Auf dem Commit selbst sitzt keine Marke, und `stable` wandert — eine Ausgabe ist der bessere Pin |
+| `dependencies.lock` war **gitignored** | Eingecheckt. Dass sie wirklich bindet, ist nachgemessen und nicht angenommen: `managed_components` weggeworfen, neu gebaut — die Datei kommt **byteidentisch** zurück (LVGL 9.5.0, esp_lvgl_port 2.9.0, esp_hosted 2.12.8, esp_wifi_remote 1.6.4). Die Bereiche im Manifest (`^9.2.0`, `*`) sind damit faktisch fest |
+| Der Firmware-Job in der CI war `continue-on-error` | Das Flag ist weg — ein roter Bau bedeutet jetzt, dass etwas **in diesem Repository** kaputt ist. Dazu ein Schritt `git diff --exit-code -- dependencies.lock`: schreibt ein Bau die Sperre um, sind Manifest und Sperre auseinandergelaufen |
+| Die Wiki-Seite beschrieb einen Pin, den es im Code **nicht gab** (`platform_packages` mit IDF 5.5.4) | Neu geschrieben auf den tatsächlichen Stand — samt der Begründung, warum man `framework-espidf` niemals allein festnagelt (die Bau-Skripte gehören zu der IDF, die die Plattform mitbringt; sonst `montserrat_medium.ttf.S not found`) und warum der Startabsturz an seiner echten Ursache hängt (`esp_hosted ==2.12.8`), nicht an einer IDF-Version |
+
+**Nachweis:** kompletter Bau von Null mit der Marke in 103 s, Plattform meldet `55.3.311+sha.2a01b88`, gleiche Toolchain und gleiche IDF wie vorher; Firmware per OTA aufs Gerät, Bewährung bestanden, alle Teilsysteme unverändert. Einmal ist der allererste Bau nach `rm -rf .pio/build` mit `ninja: fatal: chdir to '.../TryCompile-XXXXXX'` abgebrochen und beim zweiten Aufruf ohne Änderung durchgelaufen — ein Ausrutscher beim Erzeugen des Build-Systems, in der Wiki-Seite notiert.
 
 ## Gut gemacht — nicht anfassen
 

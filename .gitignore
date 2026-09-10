@@ -5,7 +5,10 @@
 .vscode/ipch
 sdkconfig.waveshare-p4
 managed_components
-dependencies.lock
+# dependencies.lock ist ABSICHTLICH versioniert (frueher hier ignoriert): sie
+# haelt fest, mit welchen Komponentenversionen diese Firmware gebaut wurde.
+# Zusammen mit der festgenagelten Plattform in platformio.ini baut damit jeder
+# Checkout dasselbe.
 .DS_Store
 
 # Generated each build by scripts/build_number.py (version.json is the

@@ -17,16 +17,14 @@ jobs:
 
   # The real build. Kept separate so a broken firmware build never hides a
   # failing test, and vice versa.
+  #
+  # This job used to be continue-on-error, because `platform` followed the git
+  # HEAD of pioarduino and could go red without a line changing here. It is
+  # pinned to a release tag now (platformio.ini), so a red build means
+  # something in THIS repository broke, and the job counts.
   firmware:
     name: Firmware bauen
     runs-on: ubuntu-latest
-    # continue-on-error, and that is not laziness: `platform` in
-    # platformio.ini points at the git HEAD of pioarduino, so this job can go
-    # red because somebody else pushed, without a single line changing here.
-    # A CI job that cries wolf teaches people to ignore CI. Pinning the
-    # platform (append #<tag> to the URL) is the fix -- see the reproducibility
-    # note in wiki/Code-Review-2026-09.md -- and then this flag comes off.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,6 +43,12 @@ jobs:
         run: pip install --upgrade platformio
       - name: Bauen
         run: pio run -e guition-p4
+      # The point of pinning: what the pinned platform resolves must be what is
+      # committed. If a build rewrites the lock file, the two have drifted and
+      # somebody has to look -- silently building against something else is
+      # exactly what the pin is meant to prevent.
+      - name: dependencies.lock passt zum festgenagelten Stand
+        run: git diff --exit-code -- dependencies.lock
       - name: Groesse und Artefakte
         if: always()
         run: |

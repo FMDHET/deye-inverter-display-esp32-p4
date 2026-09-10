@@ -147,26 +147,70 @@ In `sdkconfig.defaults` stehen Optionen, die nicht offensichtlich sind. Jede dav
 | `CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192` | Beim Start passiert viel gleichzeitig (WLAN hochfahren, Oberfläche bauen). Mit dem Standardwert reicht der Arbeitsplatz dafür nicht. |
 | `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` | Der Wachhund, der eine nicht startende Firmware von selbst zurücknimmt. Siehe [OTA und Recovery](OTA-und-Recovery#der-automatische-rückfall). Wirkt erst, wenn der Bootloader einmal per USB geschrieben wurde. |
 
-## Warum die ESP-IDF-Version festgenagelt ist
+## Was festgenagelt ist, und warum genau so
 
-In `platformio.ini` steht die Plattform-Adresse ohne Versionsangabe. Das heißt: PlatformIO holt sich beim ersten Bauen immer den **neuesten** Stand — und damit auch eine ESP-IDF-Version, die niemand ausgesucht hat.
+Ein Build, der sich beim ersten Aufruf holt, was gerade neu ist, ist kein
+Build, den man wiederholen kann. Hier ist deshalb **jede** bewegliche Stelle
+festgelegt — aber jede an ihrer eigenen, richtigen Stelle.
 
-Das ist einmal teuer geworden. Ein Build, der sich dabei ESP-IDF 5.5.5 gezogen hat, brach schon beim Start ab:
+**Die Plattform** (`platformio.ini`):
+
+```ini
+platform = https://github.com/pioarduino/platform-espressif32.git#55.03.311
+```
+
+Ohne das `#` folgt die Adresse dem Git-HEAD von pioarduino: zwei Checkouts
+derselben Firmware können dann mit verschiedenen ESP-IDF-Versionen gebaut
+werden, und die CI kann rot werden, ohne dass sich hier eine Zeile geändert
+hat. Die Marke `55.03.311` trägt ESP-IDF 5.5.5 und enthält „fix p4 rev3".
+
+**Aber niemals `framework-espidf` allein.** Das ist versucht worden (5.5.4, um
+einen Startabsturz zu umgehen) und bricht den Bau sofort:
+
+```text
+Source `.pio\build\guition-p4\montserrat_medium.ttf.S' not found
+```
+
+Die Bau-Skripte der Plattform passen zu der IDF, die sie mitbringt; tauscht man
+nur das eine Paket darunter aus, finden sie den erzeugten Assembler-Code für
+die eingebettete Schrift nicht mehr. Wer eine andere IDF braucht, nagelt die
+**ganze Plattform** auf eine Ausgabe fest, die diese IDF mitbringt.
+
+**Der Startabsturz** ist an seiner tatsächlichen Ursache festgelegt, nicht an
+der IDF-Version:
 
 ```text
 assert failed: sdio_mempool_create sdio_drv.c:258 (buf_mp_g)
 ```
 
-Das passiert in der Startroutine des WLAN-Bausteins — **bevor** das eigentliche Programm anläuft. Also kein Bildschirm, kein WLAN, keine Update-Funktion. Rettung nur per USB-Kabel. Mit 5.5.4 startet dieselbe Firmware anstandslos.
+Das passiert in der Startroutine des WLAN-Bausteins — **bevor** das Programm
+anläuft. Kein Bildschirm, kein WLAN, keine Update-Funktion; Rettung nur per
+Kabel. Schuld war nicht die IDF, sondern `esp_hosted`, das von `~2.12.0` auf
+2.12.12 hochgelaufen war. In `main/idf_component.yml` steht deshalb
+`espressif/esp_hosted: "==2.12.8"` — die Version, die zur C6-Firmware auf
+diesem Modul passt. Host und Ko-Prozessor sind hier ein Paar: anheben nur
+zusammen, und den ersten Build per USB mit angehängtem Monitor flashen, nie
+blind über WLAN.
 
-Deshalb ist die Version jetzt ausdrücklich festgelegt:
+**Die übrigen Komponenten** stehen als Bereiche im Manifest (`^9.2.0`, `*`) —
+festgehalten werden sie durch **`dependencies.lock`**, und die Datei ist
+absichtlich eingecheckt (früher war sie ignoriert). Dass sie wirklich bindet,
+ist nachgemessen: `managed_components` wegwerfen, neu bauen — die Lock-Datei
+kommt byteidentisch zurück, mit LVGL 9.5.0, esp_lvgl_port 2.9.0, esp_hosted
+2.12.8. Ein neu veröffentlichtes 9.6 ändert daran nichts, solange das Manifest
+gleich bleibt. Die CI prüft genau das mit `git diff --exit-code --
+dependencies.lock`: schreibt ein Bau die Datei um, sind Manifest und Sperre
+auseinandergelaufen und jemand muss hinsehen.
 
-```ini
-platform_packages =
-    framework-espidf @ https://github.com/pioarduino/esp-idf/releases/download/v5.5.4/esp-idf-v5.5.4.tar.xz
-```
+**Anheben** heißt also: Marke in `platformio.ini` tauschen, einmal komplett neu
+bauen (`rm -rf .pio/build`), aufs Gerät flashen, prüfen — und die geänderte
+`dependencies.lock` mit committen.
 
-Wer sie anhebt, sollte das **bewusst** tun — und den ersten Build einer neuen ESP-IDF-Version per USB mit angehängtem Monitor flashen, nie blind über WLAN.
+> [!NOTE]
+> Der allererste Bau nach einem `rm -rf .pio/build` ist einmal mit
+> `ninja: fatal: chdir to '.../TryCompile-XXXXXX'` abgebrochen und lief beim
+> zweiten Aufruf ohne Änderung durch. Ein Ausrutscher beim Erzeugen des
+> Build-Systems, kein Problem der Festlegung — einfach noch einmal starten.
 
 ## Die erste Installation, Schritt für Schritt
 

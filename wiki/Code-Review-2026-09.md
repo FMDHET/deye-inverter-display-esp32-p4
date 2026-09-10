@@ -295,6 +295,24 @@ Bewusst als **eigene Runde**, nicht als Anhängsel an den Toolchain-Pin: eine ge
 
 Dazu ein kleines Werkzeug für die Tage danach: `python3 scripts/health.py` fragt alle vier Auskunfts-Endpunkte ab und sagt „alles unauffällig" oder listet auf, was ansteht — Absturz, Coredump, knapper DMA-Speicher, stummer Zähler, fehlende Geräte, aktive Phasenmanipulation. Rückgabewert ≠ 0, wenn etwas dran ist, also auch für einen Cronjob brauchbar.
 
+## Nachtrag 10 (10. September): Tests für die Akku-Steuerung
+
+Bewusst reine Host-Arbeit: das `-Os`-Beobachtungsfenster aus Nachtrag 9 lief noch, und neue Firmware darüberzuspielen hätte genau die Zuordnung zerstört, für die dieser Wechsel eine eigene Runde bekam. Getestet werden kann trotzdem — `deye_ctrl.c` war die sicherheitsrelevanteste Datei ohne einen einzigen Test, und sie schreibt in einen Wechselrichter an der Hausinstallation.
+
+**79 Prüfungen** (jetzt 216 insgesamt), und sie decken vor allem das ab, was am Gerät teuer oder langsam nachzustellen ist:
+
+* **Welche Register jeder Modus schreibt** — inklusive der Umrechnung Watt → Ampere in Register 128 (`amps = power_w / 50`), wo ein Rechenfehler mit der falschen Leistung lädt und niemandem auffällt.
+* **Die Rückleseverifikation und ihre drei Fehlerfälle:** Bus tot, Rückleser tot, und der interessante — der Wechselrichter antwortet „ok" und behält seinen alten Wert. Genau das sah vor der Verifikation wie Erfolg aus. Die Attrappe kann das simulieren (`fake_rtu_deaf`), was der eigentliche Grund ist, dass dieser Test etwas wert ist.
+* **Der 2-Stunden-Zähler**, samt der Frage, ob er unter Null unterläuft — die Werte sind `unsigned`, ein Unterlauf hätte 49 Tage Restzeit gemeldet.
+* **Der Neustart-Pfad:** ein gespeicherter Zwangsmodus wird erkannt, aber nicht sofort geschrieben (die Zweidrahtleitung braucht ihre zehn Sekunden), das Display zeigt in dieser Zeit, in welchem Modus der **Wechselrichter** steht und nicht, was wir uns wünschen — und der Eintrag wird erst gelöscht, wenn Normal bestätigt ist.
+* **Dass die SLS-Drosselung den Nutzer-Sollwert nie anfasst** (sonst springt der Schieber in Home Assistant von selbst).
+
+**Gegenprobe:** fünf Mutationen, alle gefangen — Ampere-Umrechnung verdoppelt (2 Fehler), NVS ohne Bestätigung geräumt (2), rückgelesenen Wert nicht verglichen (3), Drosselung fasst den Nutzer-Sollwert an (2), gespeicherter Modus beim Start ignoriert (1).
+
+Nebenbei repariert: die Log-Attrappe verwarf ihre Argumente, wodurch Variablen, die nur geloggt werden, auf dem Host unbenutzt aussahen — zwei falsche Warnungen in `deye_ctrl.c`. Sie kompiliert die Argumente jetzt unter `if (0)`; damit prüft der Compiler die Formatzeichenketten aller Logaufrufe gleich mit.
+
+Nicht abgedeckt: die Schleife von `deye_ctrl_task()` selbst, sie blockiert auf einer Task-Benachrichtigung. Ihre Bestandteile sind es.
+
 ## Gut gemacht — nicht anfassen
 
 * Frische-Schranke des Netzwerts (`modbus_tcp_grid_w_fresh`): nur ein echter erfolgreicher Read setzt den Zeitstempel, `reconfigure_apply()` invalidiert bewusst, überlaufsichere Zeitarithmetik. Sicherheitsschienen der Manipulation: Hauptschalter aus, nur bei frischem Zähler, NaN abgewiesen, ±100 kW geklemmt, seiteneffektfreies `compute_served()`.

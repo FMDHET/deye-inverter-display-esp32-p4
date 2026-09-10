@@ -119,9 +119,11 @@ Aus demselben Grund ist `coredump` **hinten** angehängt worden und nicht irgend
 make -C test
 ```
 
-Zwei Suiten, die ohne Hardware laufen und in ein paar Sekunden durch sind: der
-Rechenkern des Regelpfads (`compute_served`, CRC, SDM630-Antwort, Konfig-Grenzen)
-und das Passwort-Tor der Web-Schnittstellen. Zusammen rund 100 Prüfungen. Kein
+Drei Suiten, die ohne Hardware laufen und in ein paar Sekunden durch sind: der
+Rechenkern des Regelpfads (`compute_served`, der komplette Slave-Pfad von der
+Anfrage bis zur Antwort, CRC, Konfig-Grenzen), das Passwort-Tor der
+Web-Schnittstellen und die Akku-Steuerung (Registerfolgen, Rückleseverifikation,
+2-Stunden-Ablauf, Neustart-Pfad). Zusammen über 200 Prüfungen. Kein
 Framework und kein Download — ein Compiler und ein Makefile, damit die Tests
 laufen, bevor irgendetwas geholt werden muss.
 

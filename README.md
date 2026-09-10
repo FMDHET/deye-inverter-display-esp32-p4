@@ -186,8 +186,8 @@ Voraussetzung: [PlatformIO](https://platformio.org/) mit der `pioarduino`-Plattf
 make -C test        # Host-Tests, keine Hardware noetig, ein paar Sekunden
 ```
 
-Zwei Suiten (~100 Prüfungen): der Rechenkern des Regelpfads und das Passwort-Tor
-der Web-Schnittstellen. Aufbau und Regeln in [`test/README.md`](test/README.md);
+Drei Suiten (über 200 Prüfungen): der Rechenkern des Regelpfads, das
+Passwort-Tor der Web-Schnittstellen und die Akku-Steuerung. Aufbau und Regeln in [`test/README.md`](test/README.md);
 in CI laufen sie bei jedem Push.
 
 ### Über USB (Erstinstallation)

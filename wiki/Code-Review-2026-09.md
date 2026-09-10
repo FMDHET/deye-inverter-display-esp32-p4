@@ -67,7 +67,7 @@ Weitere Funde mittlerer Schwere — behoben: ~~Netz-Sollwert ohne Grenzen im Mod
 * ~~WireGuard wird genau einmal versucht~~ — **behoben (Nachtrag).**
 * ~~`mqtt_apply()` läuft auf dem LVGL-Task~~, ~~unbekannter MQTT-Modus wird angewendet~~, ~~`atoi("abc")` = 0 W~~ — **behoben (Nachtrag 2).** Offen bleibt: es gibt keinen Schalter „Steuerung per MQTT erlauben" — wer den Broker erreicht, kann den Akku umschalten.
 * Konfigurations-Blobs `mqtt`/`ntp`/`wg` ohne Versionsfeld: ein Feld anhängen, OTA, Rollback → die ältere Firmware verwirft die Einstellungen stillschweigend.
-* ~~Reproduzierbarkeit: `platform` folgt dem Git-HEAD, `dependencies.lock` ist gitignored~~ — **behoben (Nachtrag 8).** Offen bleibt: `sdkconfig.guition-p4` ist eingecheckt und schlägt `sdkconfig.defaults` (Änderungen dort wirken auf bestehenden Checkouts nicht), und `CONFIG_COMPILER_OPTIMIZATION_DEBUG` (`-Og`) im Produktivbetrieb.
+* ~~Reproduzierbarkeit: `platform` folgt dem Git-HEAD, `dependencies.lock` ist gitignored~~ — **behoben (Nachtrag 8).** ~~`CONFIG_COMPILER_OPTIMIZATION_DEBUG` (`-Og`) im Produktivbetrieb~~ — **behoben (Nachtrag 9).** Offen bleibt: `sdkconfig.guition-p4` ist eingecheckt und schlägt `sdkconfig.defaults` — Änderungen dort wirken auf bestehenden Checkouts nicht.
 * Zwei Überläufe in `captive.c` (`h_scan`, `h_connect`) sind heute unerreichbar, weil `captive_portal.html` gar nicht mehr eingebettet wird — tote Seite plus tote Handler, 4 kB statischer RAM.
 
 ### Display-Oberfläche (LVGL)
@@ -275,6 +275,25 @@ Ein Build, der sich holt, was gerade neu ist, lässt sich nicht wiederholen — 
 | Die Wiki-Seite beschrieb einen Pin, den es im Code **nicht gab** (`platform_packages` mit IDF 5.5.4) | Neu geschrieben auf den tatsächlichen Stand — samt der Begründung, warum man `framework-espidf` niemals allein festnagelt (die Bau-Skripte gehören zu der IDF, die die Plattform mitbringt; sonst `montserrat_medium.ttf.S not found`) und warum der Startabsturz an seiner echten Ursache hängt (`esp_hosted ==2.12.8`), nicht an einer IDF-Version |
 
 **Nachweis:** kompletter Bau von Null mit der Marke in 103 s, Plattform meldet `55.3.311+sha.2a01b88`, gleiche Toolchain und gleiche IDF wie vorher; Firmware per OTA aufs Gerät, Bewährung bestanden, alle Teilsysteme unverändert. Einmal ist der allererste Bau nach `rm -rf .pio/build` mit `ninja: fatal: chdir to '.../TryCompile-XXXXXX'` abgebrochen und beim zweiten Aufruf ohne Änderung durchgelaufen — ein Ausrutscher beim Erzeugen des Build-Systems, in der Wiki-Seite notiert.
+
+## Nachtrag 9 (10. September): auf Größe übersetzen
+
+Bewusst als **eigene Runde**, nicht als Anhängsel an den Toolchain-Pin: eine geänderte Optimierungsstufe verschiebt das Timing im ganzen Programm und kann schlafende Wettläufe wecken. Wenn danach etwas kippt, muss klar sein, woran es lag.
+
+`-Og` stand nicht aus einem Grund dort, es war die Vorgabe. Dieses Gerät wird nicht per JTAG durchgesteppt, und ein Absturz wird über den Coredump ausgewertet — dafür braucht es Symbole im ELF, keine Optimierungsstufe. Also `-Os`:
+
+| | Flash | freier DMA-Speicher am Gerät |
+| --- | --- | --- |
+| `-Og` (vorher) | 2 148 784 B (51,2 %) | `dma` 74 kB, `dma_min` 54 kB |
+| `-Os` (jetzt) | 1 936 688 B (46,2 %) | `dma` 102 kB, `dma_min` **71 kB** |
+
+**212 kB kleiner** — und der zweite Wert ist der eigentliche Gewinn: der freie DMA-fähige interne Speicher stieg um 17 kB. Genau an diesem Vorrat hingen die OTA-Abstürze (`dma_min` lag damals bei einstelligen kB, siehe die SDIO-Geschichte oben). Kleinerer Code heißt weniger IRAM-resident, also mehr übrig für die Transportpuffer.
+
+**Die Zusicherungen bleiben an** (`COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE`, `ASSERTION_LEVEL=2`). Sie abzuschalten wäre die naheliegende zweite Hälfte eines „Release-Builds" und genau die falsche: der SDIO-Fehler hat sich als `assert` gemeldet, und ein Coredump mit Grund im Klartext ist mehr wert als die paar Kilobyte.
+
+**Nachweis am Gerät:** Bau ohne eine einzige neue Warnung (nur die vorbestehende aus `esp_wireguard`) — bei `-Os` ist das nicht selbstverständlich, dort tauchen sonst gern `maybe-uninitialized`-Meldungen auf. Firmware per OTA, Bewährung bestanden. Der zeitkritische Pfad unverändert: die Emulation beantwortet **502 Anfragen/min** gegenüber 503 vorher, Antwortalter 19 ms, der Deye-Master liest alle 15 Registerblöcke, 4/4 Geräte, MQTT und Uhr in Ordnung. Im Log nichts Neues.
+
+Dazu ein kleines Werkzeug für die Tage danach: `python3 scripts/health.py` fragt alle vier Auskunfts-Endpunkte ab und sagt „alles unauffällig" oder listet auf, was ansteht — Absturz, Coredump, knapper DMA-Speicher, stummer Zähler, fehlende Geräte, aktive Phasenmanipulation. Rückgabewert ≠ 0, wenn etwas dran ist, also auch für einen Cronjob brauchbar.
 
 ## Gut gemacht — nicht anfassen
 

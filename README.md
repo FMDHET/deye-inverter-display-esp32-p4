@@ -299,7 +299,7 @@ main/
 components/esp_wireguard  eingebundene WireGuard-Implementierung (BSD-3, trombik)
 test/                     Host-Tests (make -C test) plus IDF-Attrappen in test/fakes
 .github/workflows/        CI: Host-Tests bei jedem Push, dazu ein Firmware-Bau
-scripts/                  Build-Zähler und SPIFFS-Image-Erzeugung
+scripts/                  Build-Zähler, SPIFFS-Image-Erzeugung, health.py (Gerätecheck)
 register tables/          Register-Karten: Deye SG04LP3, Eltako DSZ15/16, SunSpec, Fronius
 deye-register-map.csv     kommentierte Deye-Registerliste
 docs/img/                 Bilder dieser Dokumentation

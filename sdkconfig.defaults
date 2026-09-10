@@ -207,3 +207,22 @@ CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
 CONFIG_ESP_COREDUMP_CAPTURE_DRAM=n
 CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=32
 CONFIG_ESP_COREDUMP_STACK_SIZE=1280
+
+# Uebersetzen auf Groesse (-Os) statt auf Debugbarkeit (-Og). -Og war die
+# Vorgabe, nicht eine Entscheidung: das Geraet haengt an der Wand, es wird nicht
+# per JTAG durchgesteppt, und ein Absturz wird ueber den Coredump ausgewertet --
+# dafuer braucht es Symbole (die im ELF stehen), keine Optimierungsstufe.
+# Gemessen an dieser Firmware: 2 148 784 -> 1 936 720 Byte, also 212 kB oder
+# rund 10 % weniger, und ein OTA-Upload entsprechend kuerzer.
+#
+# Die Zusicherungen bleiben AN (COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE,
+# ASSERTION_LEVEL=2). Sie abzuschalten waere die naheliegende zweite Haelfte
+# eines "Release-Builds" und genau die falsche: der SDIO-Fehler im WLAN-Treiber
+# hat sich als assert gemeldet, und ein Coredump mit Grund im Klartext ist mehr
+# wert als die paar Kilobyte.
+#
+# Achtung beim Anheben oder Zurueckdrehen: eine geaenderte Optimierungsstufe
+# verschiebt das Timing im ganzen Programm und kann schlafende Wettlaeufe
+# wecken. Ein Tag Beobachtung danach ist Teil der Aenderung, nicht Kuer --
+# siehe /log, served.req und dma_min in /ota.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y

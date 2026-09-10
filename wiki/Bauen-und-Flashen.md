@@ -146,6 +146,8 @@ In `sdkconfig.defaults` stehen Optionen, die nicht offensichtlich sind. Jede dav
 | `CONFIG_ESP_NETIF_BRIDGE_EN=y` | Klingt nach Netzwerkbrücke, ist aber nur ein Trick: die Option schaltet nebenbei eine andere Einstellung um, ohne die das Gerät beim VPN-Aufbau abstürzt. |
 | `CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192` | Beim Start passiert viel gleichzeitig (WLAN hochfahren, Oberfläche bauen). Mit dem Standardwert reicht der Arbeitsplatz dafür nicht. |
 | `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` | Der Wachhund, der eine nicht startende Firmware von selbst zurücknimmt. Siehe [OTA und Recovery](OTA-und-Recovery#der-automatische-rückfall). Wirkt erst, wenn der Bootloader einmal per USB geschrieben wurde. |
+| `CONFIG_COMPILER_OPTIMIZATION_SIZE=y` | Übersetzen auf Größe (`-Os`) statt auf Debugbarkeit (`-Og`). `-Og` war die Vorgabe, keine Entscheidung: dieses Gerät wird nicht per JTAG durchgesteppt, und ein Absturz wird über den Coredump ausgewertet — dafür braucht es Symbole im ELF, keine Optimierungsstufe. Gemessen: 2 148 784 → 1 936 720 Byte, rund 10 % weniger, und der freie DMA-Speicher stieg von 54 auf 71 kB — genau der Vorrat, an dem die OTA-Abstürze hingen. Die **Zusicherungen bleiben an**; sie abzuschalten wäre die naheliegende zweite Hälfte eines „Release-Builds" und genau die falsche. |
+| `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y` | Ein Absturz hinterlässt Task, Programmzähler und Stapelspeicher im Flash statt nur das Wort „PANIC". Siehe [Fehlersuche](Fehlersuche#nach-einem-absturz). |
 
 ## Was festgenagelt ist, und warum genau so
 

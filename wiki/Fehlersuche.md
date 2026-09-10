@@ -23,6 +23,15 @@ curl -s http://<ip>/log?tail=3000          # was ist gerade passiert
 curl -s http://<ip>/ota | jq .coredump     # was war beim letzten Absturz
 ```
 
+Wer nicht jedes Mal überlegen will, welche Zahl wo steht und ab wann sie schlecht ist, nimmt den Sammelblick:
+
+```bash
+python3 scripts/health.py                  # alles Wichtige in acht Zeilen
+python3 scripts/health.py --log 40         # dazu das Ende des Logs
+```
+
+Er fragt alle vier Endpunkte ab, sagt „alles unauffällig" oder listet auf, was auffällt (Absturz, Coredump, knapper DMA-Speicher, stummer Zähler, fehlende Geräte, aktive Phasenmanipulation), und liefert einen Rückgabewert ≠ 0, wenn etwas ansteht — damit taugt er auch für einen Cronjob.
+
 ### Die Hinweiszeile auf dem Hauptbildschirm
 
 Sie ist versteckt, solange alles stimmt. Was sie zeigen kann, von dringend nach harmlos:

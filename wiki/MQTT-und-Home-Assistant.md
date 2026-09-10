@@ -25,14 +25,20 @@ Was du brauchst: einen Broker im Netz. Meistens ist das **Mosquitto**, oft schon
 | Retain | ein | siehe unten |
 | HA Discovery | ein | siehe unten |
 | Last Will | ein | siehe unten |
+| Steuerung erlauben | ein | Aus: MQTT darf nur melden, nicht schalten — siehe unten |
 
-### Die drei Schalter erklärt
+### Die Schalter erklärt
 
 **Retain** („behalten"): Normalerweise vergisst der Broker eine Nachricht, sobald er sie verteilt hat. Wer sich später anmeldet, sieht nichts — bis die nächste Nachricht kommt. Mit Retain merkt sich der Broker die jeweils letzte Nachricht und gibt sie neuen Interessenten sofort. Praktisch: Home Assistant zeigt nach einem Neustart direkt Werte an, statt erst leer zu sein. Nachteil: nach einem Ausfall des Displays stehen die alten Werte noch da, obwohl sie nicht mehr aktuell sind.
 
 **Last Will** („letzter Wille"): Beim Anmelden hinterlegt das Gerät beim Broker eine Nachricht mit der Anweisung „falls ich mich unerwartet nicht mehr melde, schicke das bitte". Es ist dann `offline`. Ohne diesen Mechanismus würden Anzeigen einfach für immer den letzten Wert zeigen, ohne dass jemand merkt, dass die Quelle weg ist.
 
 **HA Discovery**: siehe nächster Abschnitt.
+
+**Steuerung erlauben**: Wer den Broker erreicht, kann sonst den Akku umschalten — MQTT kennt kein zweites Passwort neben dem des Brokers, und das [Passwort für die Web-Zugriffe](Einstellungen#system) hilft hier nicht. Ausgeschaltet passiert dreierlei: das Gerät abonniert die Kommando-Fächer gar nicht erst, ein trotzdem eintreffendes Kommando (etwa eine retained Nachricht aus einer früheren Sitzung) wird abgewiesen und der echte Zustand neu gemeldet, und die zwei Bedienelemente werden in Home Assistant **gelöscht** statt nur nicht mehr angeboten. Das Melden läuft unverändert weiter.
+
+> [!NOTE]
+> Der Schalter steht ab Werk auf **ein**, und zwar bewusst: er kam später dazu, und ein Update, das stillschweigend eine laufende Automatisierung abwürgt, schickt einen auf die falsche Fährte. Wer MQTT nur zum Zuschauen benutzt, schaltet ihn aus.
 
 ## Die Fächer
 
@@ -107,7 +113,9 @@ mosquitto_pub -h broker -t deye-display/deye/mode/set  -m Entladen
 mosquitto_pub -h broker -t deye-display/deye/mode/set  -m Normal
 ```
 
-Der Weg dahinter ist genau derselbe wie beim Antippen am Gerät: die Firmware schreibt die passenden Register über die Zweidrahtleitung. Auch der [SLS-Schutz](Deye-Steuerung#der-sls-schutz) greift genauso — es gibt keine Hintertür, die ihn umgeht.
+Der Weg dahinter ist genau derselbe wie beim Antippen am Gerät: die Firmware schreibt die passenden Register über die Zweidrahtleitung. Auch der [SLS-Schutz](Deye-Steuerung#der-sls-schutz) greift genauso — es gibt keine Hintertür, die ihn umgeht. Und wie jeder Zwangsmodus läuft auch ein per MQTT gesetzter nach zwei Stunden ab und wird von einem Neustart abgeräumt, siehe [Ein Zwang ist nur geborgt](Deye-Steuerung#ein-zwang-ist-nur-geborgt).
+
+Antwortet das Gerät nicht auf die Kommandos, steht im Log `MQTT control is off`: dann ist der Schalter **Steuerung erlauben** aus.
 
 ## Beispiel-Automation
 

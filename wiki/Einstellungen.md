@@ -105,6 +105,16 @@ curl -u :meinPasswort -X POST --data-binary @firmware.bin http://<ip>/ota
 > [!WARNING]
 > Das ist HTTP-Basic ohne Verschlüsselung: es hält einen Irrtum oder einen neugierigen Mitbewohner ab, nicht jemanden, der den Netzverkehr mitliest. Von außen erreichbar sollte das Gerät nur über den [VPN-Tunnel](Zeit-und-VPN) sein. Zwei Wege bleiben ohnehin ungeschützt, weil ihr Protokoll kein Passwort kennt: die **Modbus-Brücke auf Port 502** und **MQTT-Kommandos** — wer den Broker erreicht, kann den Akku umschalten.
 
+**Notfall-WLAN (Passwort)** — das Netz, das aufgeht, wenn kein bekanntes WLAN erreichbar ist. Bis hierhin gab es dafür nur die Konstante im Quelltext (`deyedisplay`), die damit auf jedem Gerät gleich und öffentlich bekannt war; die Funktion zum Ändern existierte, hatte aber keinen Aufrufer. Jetzt steht das Feld hier, und die Zeile darunter sagt, woran man ist:
+
+| Anzeige | Bedeutung |
+| --- | --- |
+| „Standardwert aus dem Quelltext — steht öffentlich" | noch nie geändert |
+| „unter 8 Zeichen — das Notfall-WLAN wäre OFFEN" | WPA2 kennt keinen kürzeren Schlüssel, das Gerät macht daraus ein offenes Netz |
+| „eigenes Passwort gesetzt" | in Ordnung |
+
+Wirksam wird es, wenn das Notfall-WLAN das nächste Mal aufgeht — ein laufender Zugangspunkt wird nicht mitten im Betrieb umgestellt.
+
 **Einstellungen sichern** — `GET /config` liefert alles, was du je eingestellt hast, als eine JSON-Datei: WLAN-Netze samt Passwörtern, MQTT-Zugang, Geräteliste, Zähler-Einstellungen und den **privaten WireGuard-Schlüssel**. Genau der ist der Grund für diese Funktion: er steht nirgendwo sonst, und ein gelöschtes NVS bedeutet, den Tunnel auf beiden Seiten neu einzurichten.
 
 ```bash

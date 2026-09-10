@@ -62,11 +62,11 @@ Weitere Funde mittlerer Schwere — behoben: ~~Netz-Sollwert ohne Grenzen im Mod
 
 ### Kern und Sicherheit
 
-* ~~Notfall-WLAN wird nie wieder abgebaut~~ — **behoben (Nachtrag).** ~~`/ota` und die Deye-Steuerung haben kein Passwort~~ — **behoben (Nachtrag 5).** Offen bleibt: das AP-Passwort ist weiterhin die veröffentlichte Konstante — setzen lässt es sich inzwischen nur über die Sicherungsdatei (`/config`), nicht am Display.
+* ~~Notfall-WLAN wird nie wieder abgebaut~~ — **behoben (Nachtrag).** ~~`/ota` und die Deye-Steuerung haben kein Passwort~~ — **behoben (Nachtrag 5).** ~~Offen bleibt: das AP-Passwort ist weiterhin die veröffentlichte Konstante~~ — **behoben (Nachtrag 11):** Feld im System-Tab.
 * ~~Netzwerkwahl springt zum falschen Netz~~ — **behoben (Nachtrag).**
 * ~~WireGuard wird genau einmal versucht~~ — **behoben (Nachtrag).**
-* ~~`mqtt_apply()` läuft auf dem LVGL-Task~~, ~~unbekannter MQTT-Modus wird angewendet~~, ~~`atoi("abc")` = 0 W~~ — **behoben (Nachtrag 2).** Offen bleibt: es gibt keinen Schalter „Steuerung per MQTT erlauben" — wer den Broker erreicht, kann den Akku umschalten.
-* Konfigurations-Blobs `mqtt`/`ntp`/`wg` ohne Versionsfeld: ein Feld anhängen, OTA, Rollback → die ältere Firmware verwirft die Einstellungen stillschweigend.
+* ~~`mqtt_apply()` läuft auf dem LVGL-Task~~, ~~unbekannter MQTT-Modus wird angewendet~~, ~~`atoi("abc")` = 0 W~~ — **behoben (Nachtrag 2).** ~~Offen bleibt: es gibt keinen Schalter „Steuerung per MQTT erlauben"~~ — **behoben (Nachtrag 11).**
+* ~~Konfigurations-Blobs `mqtt`/`ntp`/`wg` ohne Versionsfeld: ein Feld anhängen, OTA, Rollback → die ältere Firmware verwirft die Einstellungen stillschweigend.~~ — **behoben (Nachtrag 11)**, ohne Versionsfeld: siehe dort, warum das der falsche Weg gewesen wäre.
 * ~~Reproduzierbarkeit: `platform` folgt dem Git-HEAD, `dependencies.lock` ist gitignored~~ — **behoben (Nachtrag 8).** ~~`CONFIG_COMPILER_OPTIMIZATION_DEBUG` (`-Og`) im Produktivbetrieb~~ — **behoben (Nachtrag 9).** Offen bleibt: `sdkconfig.guition-p4` ist eingecheckt und schlägt `sdkconfig.defaults` — Änderungen dort wirken auf bestehenden Checkouts nicht.
 * Zwei Überläufe in `captive.c` (`h_scan`, `h_connect`) sind heute unerreichbar, weil `captive_portal.html` gar nicht mehr eingebettet wird — tote Seite plus tote Handler, 4 kB statischer RAM.
 
@@ -312,6 +312,34 @@ Bewusst reine Host-Arbeit: das `-Os`-Beobachtungsfenster aus Nachtrag 9 lief noc
 Nebenbei repariert: die Log-Attrappe verwarf ihre Argumente, wodurch Variablen, die nur geloggt werden, auf dem Host unbenutzt aussahen — zwei falsche Warnungen in `deye_ctrl.c`. Sie kompiliert die Argumente jetzt unter `if (0)`; damit prüft der Compiler die Formatzeichenketten aller Logaufrufe gleich mit.
 
 Nicht abgedeckt: die Schleife von `deye_ctrl_task()` selbst, sie blockiert auf einer Task-Benachrichtigung. Ihre Bestandteile sind es.
+
+## Nachtrag 11 (10. September): der Sicherheitsblock
+
+Drei Punkte, die zusammengehören: wer darf schalten, und was passiert mit den Einstellungen, wenn eine Firmware zurückgenommen wird.
+
+### Ein Rollback verliert die Einstellungen nicht mehr
+
+`nvs_get_blob()` kürzt nicht. Ist der Puffer kleiner als der gespeicherte Datensatz, gibt es `ESP_ERR_NVS_INVALID_LENGTH` und **nichts** — die ältere Firmware sah nach einem Rückschritt also „keine Konfiguration", fiel still auf Vorgaben zurück und überschrieb den Datensatz beim nächsten Speichern. MQTT-Zugang, Uhr, WireGuard-Schlüssel: weg.
+
+`get_blob_prefix()` liest jetzt erst die Größe, holt bei Bedarf den ganzen Datensatz und behält den Teil, den diese Firmware kennt. Da Felder nur angehängt werden, **sind** die ersten *n* Bytes eines neueren Datensatzes die ältere Struktur.
+
+Kein Versionsfeld — obwohl der Fund es vorschlug. Ein Versionsfeld müsste ausgerechnet die Firmware lesen, die den Datensatz nicht lesen kann; es hilft also erst ab der übernächsten Version und verlangt von jedem Leser Mitarbeit. Die Präfix-Regel braucht keine Mitarbeit der Zukunft, nur dass Felder weiterhin hinten angehängt werden — und das ist ohnehin schon die Regel für jede dieser Strukturen.
+
+### MQTT darf jetzt auch nur zuschauen
+
+Das Feld heißt absichtlich `deny_ctrl` und nicht `allow_ctrl`: es ist angehängt, liest auf jedem bestehenden Gerät 0, und 0 muss „wie bisher" heißen. Andernfalls würgt ein Update stillschweigend eine laufende Home-Assistant-Automatisierung ab, und der Betreiber sucht den Fehler an der falschen Stelle.
+
+Ausgeschaltet: keine Abos auf die Kommando-Fächer, jedes trotzdem eintreffende Kommando wird abgewiesen und der echte Zustand neu gemeldet — und die zwei HA-Bedienelemente werden **gelöscht** (leere retained Nachricht), nicht nur nicht mehr veröffentlicht. Sonst blieben in Home Assistant zwei Schaltflächen stehen, die still nichts tun; das ist schlechter als gar keine.
+
+### Das AP-Passwort ist einstellbar
+
+`nvs_store_set_ap_psk()` gab es schon, nur hatte sie keinen Aufrufer — die veröffentlichte Konstante war auf jedem Gerät dieselbe. Jetzt ein Feld im System-Tab, mit einer Zeile, die sagt, woran man ist: Standardwert aus dem Quelltext, unter 8 Zeichen (dann macht `start_ap()` daraus ein **offenes** Netz, WPA2 kennt keinen kürzeren Schlüssel), oder in Ordnung. Der System-Tab ist dafür scrollbar geworden — ein Feld, das niemand erreicht, ist schlimmer als keins.
+
+### Nachweis
+
+Am Gerät: Steuerung aus → `not subscribing to the command topics`, `the two HA controls were removed`, MQTT meldet weiter; wieder ein → `+ 2 controls`. Alle Konfigurationen haben das Update überlebt (MQTT-Host, Sollwert −350 W, Überbrückung 60 s), das AP-Feld zeigt die Warnung „Standardwert aus dem Quelltext".
+
+Den Rollback-Pfad kann man am Gerät **nicht** auslösen — einen längeren Datensatz schriebe nur eine zukünftige Firmware. Also 50 Prüfungen mit einem NVS-Ersatz im Speicher (`test_nvs_store`), dessen `nvs_get_blob()` an genau einer Stelle originalgetreu ist: es kürzt nicht. Eine Attrappe, die stillschweigend gekürzt hätte, hätte den Test über den Fehler hinweg bestehen lassen. Gegenprobe: Präfix-Regel wieder ausgebaut → drei Fehler, mit `4362` = `ESP_ERR_NVS_INVALID_LENGTH` im Klartext.
 
 ## Gut gemacht — nicht anfassen
 

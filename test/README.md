@@ -19,6 +19,7 @@ Getestet wird das, was **rechnet und entscheidet**, ohne Hardware:
 | --- | --- |
 | `test_modbus_rtu` | `compute_served()` — was der Wechselrichter zu sehen bekommt: die Frische-Schranke, der Netz-Sollwert, die Phasenmanipulation samt NaN- und Grenzwertabwehr. Dazu `crc16`, `sdm630_response`, `clamp_cfg` und die No-Op-Erkennung in `modbus_rtu_set_cfg()`. |
 | `test_webauth` | Das Passwort-Tor: fehlender, falscher, kaputter und richtiger `Authorization`-Kopf, Präfixe, Doppelpunkte im Passwort, Setzen und Löschen, und dass ein fehlgeschlagener Flash-Schreibvorgang das Tor **nicht** scharf stellt. |
+| `test_nvs_store` | Der Speicher aller Einstellungen, vor allem `get_blob_prefix()`: kürzerer Datensatz (alte Felder erhalten, neue bleiben 0), **längerer** Datensatz (wird gelesen statt abgelehnt — der Rollback-Fall, den man am Gerät gar nicht auslösen kann, dafür bräuchte es eine zukünftige Firmware), fehlender Schlüssel, die Vorgabewerte, und dass eine beschädigte Partition beim Start gelöscht wird. |
 | `test_deye_ctrl` | Die Akku-Steuerung: welche Register jeder Modus schreibt (samt der Umrechnung Watt → Ampere in Register 128), die Rückleseverifikation und ihre drei Fehlerfälle — Bus tot, Rückleser tot, und „der Wechselrichter antwortet ok und behält seinen alten Wert" —, Klemmung und Persistenz, dass die SLS-Drosselung den Nutzer-Sollwert nie anfasst, der 2-Stunden-Zähler ohne Unterlauf, und der Neustart-Pfad samt der Regel, dass der gespeicherte Modus erst nach Bestätigung gelöscht wird. |
 
 **Nicht** getestet wird alles, was einen Bus, einen Bildschirm oder ein Netz
@@ -76,7 +77,8 @@ Test sie bewegt.
    `WWW-Authenticate` weggelassen (1), Passwort trotz Flash-Fehler übernommen
    (2), Ampere-Umrechnung verdoppelt (2), NVS ohne Bestätigung geräumt (2),
    rückgelesenen Wert nicht verglichen (3), Drosselung fasst den Nutzer-Sollwert
-   an (2), gespeicherter Modus beim Start ignoriert (1). Danach `git checkout` —
+   an (2), gespeicherter Modus beim Start ignoriert (1), Präfix-Regel wieder
+   ausgebaut (3), AP-Standardpasswort entfernt (1). Danach `git checkout` —
    der Produktivcode bleibt, wie er war.
 
 Die erwarteten CRC-Werte in `test_modbus_rtu.c` stammen bewusst **nicht** aus

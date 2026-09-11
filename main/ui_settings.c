@@ -815,6 +815,24 @@ static void dev_dialog_close(void)
 
 static void dev_cancel_cb(lv_event_t *e) { (void)e; dev_dialog_close(); }
 
+/* Hold the poll field at the control-critical ceiling while the dialog is open.
+ * Also called once with NULL right after the field is built, so opening an
+ * existing device with a too-slow interval shows the corrected value instead of
+ * the stored one. Leaves an empty field alone -- empty means "use the default",
+ * and the default is already inside the cap. */
+static void mb_role_poll_cap_cb(lv_event_t *e)
+{
+    (void)e;
+    if (!s_mb_poll || !s_mb_role_dd) return;
+    if (!is_ctrl_role((uint8_t)lv_dropdown_get_selected(s_mb_role_dd))) return;
+    const char *t = lv_textarea_get_text(s_mb_poll);
+    if (!t || t[0] == '\0') return;
+    if (strtol(t, NULL, 10) <= MB_CRIT_MAX_POLL_MS) return;
+    char b[8];
+    snprintf(b, sizeof(b), "%u", (unsigned)MB_CRIT_MAX_POLL_MS);
+    lv_textarea_set_text(s_mb_poll, b);
+}
+
 static void dev_save_cb(lv_event_t *e)
 {
     (void)e;
@@ -830,9 +848,16 @@ static void dev_save_cb(lv_event_t *e)
     c.port       = (uint16_t)field_num(s_mb_port, 1, 65535, 0);
     c.slave      = (uint8_t) field_num(s_mb_unit, 1, 247, 1);
     c.poll_ms    = (uint16_t)field_num(s_mb_poll, MB_MIN_POLL_MS, MB_MAX_POLL_MS, 0);
-    c.timeout_ms = (uint16_t)field_num(s_mb_tmo, MB_MIN_TIMEOUT_MS, MB_MAX_TIMEOUT_MS, 0);
-    c.mfr     = (uint8_t)lv_dropdown_get_selected(s_mb_mfr_dd);
     c.role    = (uint8_t)lv_dropdown_get_selected(s_mb_role_dd);
+    /* A control-critical role keeps a tighter ceiling: its reading expires
+     * after MB_GRID_MAX_AGE_MS, so a slower interval means the meter emulation
+     * is looking at a stale value most of the time. modbus_tcp clamps this too
+     * (an imported backup never passes through here) -- doing it in the form as
+     * well is what makes the corrected number visible in the field. */
+    if (is_ctrl_role(c.role) && c.poll_ms > MB_CRIT_MAX_POLL_MS)
+        c.poll_ms = MB_CRIT_MAX_POLL_MS;
+    c.timeout_ms = (uint16_t)field_num(s_mb_tmo, MB_MIN_TIMEOUT_MS, MB_MAX_TIMEOUT_MS, 0);
+    c.mfr     = (uint8_t)lv_dropdown_get_selected(s_mb_mfr_dd);   /* role: above */
     c.enabled = lv_obj_has_state(s_mb_en, LV_STATE_CHECKED) ? 1 : 0;
 
     if (s_mb_edit_idx >= 0 && s_mb_edit_idx < s_mb_devn) {
@@ -1017,6 +1042,12 @@ static void open_dev_dialog(int idx)
     lv_textarea_set_max_length(s_mb_poll, 5);
     lv_textarea_set_accepted_chars(s_mb_poll, "0123456789");
     lv_obj_align(s_mb_poll, LV_ALIGN_TOP_LEFT, 510, 230);
+    /* Picking a control-critical role pulls the interval down to the cap right
+     * here, while the dialog is open. Saving clamps it anyway -- but a number
+     * that changes behind a closed dialog is a number the operator types again
+     * tomorrow, so let them watch it happen. */
+    lv_obj_add_event_cb(s_mb_role_dd, mb_role_poll_cap_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    mb_role_poll_cap_cb(NULL);
 
     lv_obj_t *tl2 = lv_label_create(s_mb_dialog);
     lv_label_set_text(tl2, "Timeout (ms)"); lv_obj_set_style_text_color(tl2, COL_SUB, 0);

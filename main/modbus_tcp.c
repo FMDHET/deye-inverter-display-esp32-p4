@@ -3,6 +3,7 @@
 #include "ui_flow.h"
 #include "lvgl_port.h"
 #include "deye_ctrl.h"
+#include "sls_guard.h"
 
 #include <string.h>
 #include <errno.h>
@@ -153,6 +154,21 @@ static int load_cfg_into(mb_dev_cfg_t *devs)
         if (devs[i].poll_ms == 0) devs[i].poll_ms = MB_DEFAULT_POLL_MS;
         if (devs[i].poll_ms < MB_MIN_POLL_MS) devs[i].poll_ms = MB_MIN_POLL_MS;
         if (devs[i].poll_ms > MB_MAX_POLL_MS) devs[i].poll_ms = MB_MAX_POLL_MS;
+        /* A control-critical role gets a tighter ceiling than the display-only
+         * ones: its reading has an expiry date (MB_GRID_MAX_AGE_MS) and an
+         * interval above that guarantees it is expired most of the time. The
+         * clamp is here rather than only in the settings page so an imported
+         * backup or a record from an older firmware is fixed up too. Say so in
+         * the log -- a silently corrected setting is one the operator will set
+         * again tomorrow. */
+        if (is_ctrl_role(devs[i].role) && devs[i].poll_ms > MB_CRIT_MAX_POLL_MS) {
+            ESP_LOGW(TAG, "%s (%s): poll %u ms is slower than the %u ms freshness "
+                          "window -- clamped to %u ms",
+                     devs[i].ip, modbus_tcp_role_name(devs[i].role),
+                     (unsigned)devs[i].poll_ms, (unsigned)MB_GRID_MAX_AGE_MS,
+                     (unsigned)MB_CRIT_MAX_POLL_MS);
+            devs[i].poll_ms = MB_CRIT_MAX_POLL_MS;
+        }
         if (devs[i].timeout_ms == 0) devs[i].timeout_ms = MB_DEFAULT_TIMEOUT_MS;
         if (devs[i].timeout_ms < MB_MIN_TIMEOUT_MS) devs[i].timeout_ms = MB_MIN_TIMEOUT_MS;
         if (devs[i].timeout_ms > MB_MAX_TIMEOUT_MS) devs[i].timeout_ms = MB_MAX_TIMEOUT_MS;
@@ -211,24 +227,72 @@ static int recv_all(int s, uint8_t *buf, int n)
     return 0;
 }
 
+/* Transaction id for the next request. Shared by all poll workers, which is
+ * fine: it only has to tell CONSECUTIVE requests on ONE socket apart, and two
+ * workers drawing the same number are on different sockets. */
+static uint16_t next_tid(void)
+{
+    static uint16_t tid;
+    return __atomic_add_fetch(&tid, 1, __ATOMIC_RELAXED);
+}
+
+/* Longest response we will frame: 1 byte count + 125 registers. */
+#define MB_TCP_MAX_REGS   125
+/* How many foreign frames to step over before giving up and reconnecting. */
+#define MB_TCP_RESYNC     4
+
+/* One FC03/FC04 read.
+ *
+ * The request used to carry a constant transaction id 0x0001 that nobody
+ * checked on the way back, and the response was framed as a fixed 9 bytes
+ * (MBAP + fc + byte count) -- which meant any answer that was not the shape we
+ * expected left its body in the stream. The socket is kept open across polls,
+ * so from then on every read returned the previous register block: the same
+ * trap `rtu_drain()` guards on the two-wire side, where a late answer would
+ * otherwise be handed to the next caller.
+ *
+ * Now the id counts up and is verified together with the unit id, and framing
+ * follows the MBAP length field instead of an assumed size -- so a frame that
+ * is not ours can be read to its end and dropped, and the next one examined. */
 static int mb_read(int s, uint8_t unit, uint8_t fc,
                    uint16_t addr, uint16_t count, uint16_t *out)
 {
+    if (count == 0 || count > MB_TCP_MAX_REGS) return -3;
+
+    uint16_t tid = next_tid();
     uint8_t req[12] = {
-        0x00, 0x01, 0x00, 0x00, 0x00, 0x06, unit, fc,
+        (uint8_t)(tid >> 8), (uint8_t)tid, 0x00, 0x00, 0x00, 0x06, unit, fc,
         (uint8_t)(addr >> 8), (uint8_t)addr,
         (uint8_t)(count >> 8), (uint8_t)count,
     };
     if (send(s, req, sizeof(req), 0) != (int)sizeof(req)) return -1;
-    uint8_t h[9];
-    if (recv_all(s, h, 9) < 0) return -1;
-    if (h[7] != fc) return -2;
-    int bc = h[8];
-    if (bc != count * 2 || bc > 250) return -3;
-    uint8_t d[250];
-    if (recv_all(s, d, bc) < 0) return -1;
-    for (int i = 0; i < count; i++) out[i] = (uint16_t)((d[i * 2] << 8) | d[i * 2 + 1]);
-    return 0;
+
+    for (int attempt = 0; attempt < MB_TCP_RESYNC; attempt++) {
+        uint8_t h[8];                       /* MBAP (7) + function code */
+        if (recv_all(s, h, sizeof(h)) < 0) return -1;
+
+        /* Protocol id must be 0; the length field covers unit + PDU. Anything
+         * else is not Modbus-TCP -- the stream is lost, let the caller
+         * reconnect rather than hunt for a frame boundary. */
+        if (h[2] || h[3]) return -4;
+        int plen = (h[4] << 8) | h[5];
+        if (plen < 2 || plen > 2 + MB_TCP_MAX_REGS * 2) return -4;
+
+        int body = plen - 2;                /* bytes following the function code */
+        uint8_t d[1 + MB_TCP_MAX_REGS * 2];
+        if (body > 0 && recv_all(s, d, body) < 0) return -1;
+
+        /* Not the answer to THIS request: fully consumed above, so drop it and
+         * look at the next frame instead of mistaking it for ours. */
+        if (((h[0] << 8) | h[1]) != tid || h[6] != unit) continue;
+
+        if (h[7] != fc) return -2;          /* exception, or a different function */
+        if (body != 1 + count * 2 || d[0] != count * 2) return -3;
+        for (int i = 0; i < count; i++)
+            out[i] = (uint16_t)((d[1 + i * 2] << 8) | d[2 + i * 2]);
+        return 0;
+    }
+    return -5;                              /* too many foreign frames */
 }
 
 static float words_to_f32(uint16_t hi, uint16_t lo)
@@ -710,8 +774,7 @@ static void worker_task(void *arg)
         /* Priority 1/2: a worker serving a grid / Deye-meter device runs higher. */
         bool critical = false;
         for (int j = 0; j < cnt; j++)
-            if (same_ipport(&devs[j], ip, port) &&
-                (devs[j].role == MB_ROLE_GRID || devs[j].role == MB_ROLE_DEYE_METER))
+            if (same_ipport(&devs[j], ip, port) && is_ctrl_role(devs[j].role))
                 critical = true;
         int want_prio = critical ? MB_PRIO_CRIT : MB_PRIO_BG;
         if (want_prio != cur_prio) { vTaskPrioritySet(NULL, want_prio); cur_prio = want_prio; }
@@ -725,8 +788,7 @@ static void worker_task(void *arg)
         for (int pass = 0; pass < 2; pass++) {
             for (int j = 0; j < cnt; j++) {
                 if (!same_ipport(&devs[j], ip, port)) continue;
-                bool crit = (devs[j].role == MB_ROLE_GRID || devs[j].role == MB_ROLE_DEYE_METER);
-                if (crit != (pass == 0)) continue;
+                if (is_ctrl_role(devs[j].role) != (pass == 0)) continue;
                 uint16_t iv = devs[j].poll_ms ? devs[j].poll_ms : MB_DEFAULT_POLL_MS;
                 if (iv < fastest) fastest = iv;
                 uint32_t last; bool valid;
@@ -818,6 +880,50 @@ static void worker_task(void *arg)
         if (trouble) vTaskDelay(pdMS_TO_TICKS(3000));
         else         vTaskDelay(pdMS_TO_TICKS(nap > 0 ? nap : 50));
     }
+}
+
+/* ------------------------- SLS export guard ---------------------------
+ * The decision lives in sls_guard.h (pure, host-tested). Here is only what it
+ * needs from the device: the mode, a grid reading that is allowed to steer,
+ * and the configured fuse rating. */
+static void sls_guard_tick(void)
+{
+    static sls_guard_state_t st;
+
+    /* A protection function must read the CONTROL value with its age bound,
+     * not the display aggregate: that one can be a substitute (the Deye's own
+     * CT) and carries no age limit, so the guard could throttle -- or fail to
+     * throttle -- on a dead sensor. */
+    float grid_w = 0;
+    if (deye_ctrl_get_mode() != DEYE_MODE_FORCE_DISCHARGE ||
+        !modbus_tcp_grid_w_fresh(&grid_w, MB_GRID_MAX_AGE_MS)) {
+        st.below_ms = 0;
+        return;
+    }
+    uint8_t sls_a = nvs_store_get_sls_a();
+    if (sls_a == 0) { st.below_ms = 0; return; }   /* guard switched off */
+
+    /* max_export = SLS_A x 3 phases x 230 V x 0.9 */
+    float max_export_w = (float)sls_a * 3.0f * 230.0f * 0.9f;
+    float export_w     = -grid_w;                  /* grid negative = export */
+    int   applied      = deye_ctrl_get_power();
+
+    sls_decision_t d = sls_guard_decide(export_w, max_export_w, applied,
+                                        deye_ctrl_get_user_power(), now_ms(),
+                                        DEYE_POWER_MIN, &st);
+    if (!d.write) return;
+
+    deye_ctrl_set_throttled(d.target_w);
+
+    if (d.excess_w > 0)
+        ESP_LOGW(TAG, "SLS guard: export %.0f W is %.0f W over the %.0f W limit "
+                      "(SLS %u A)%s -- %d -> %d W",
+                 export_w, d.excess_w, max_export_w, (unsigned)sls_a,
+                 d.urgent ? ", urgent" : "", applied, d.target_w);
+    else
+        ESP_LOGI(TAG, "SLS guard: export %.0f W has headroom under %.0f W "
+                      "-- stepping back up %d -> %d W",
+                 export_w, max_export_w, applied, d.target_w);
 }
 
 /* Aggregator: applies reconfig, then every AGG_TICK_MS rebuilds the energy
@@ -913,43 +1019,7 @@ static void agg_task(void *arg)
         s_st.connected = connected;
         portEXIT_CRITICAL(&s_mux);
 
-        /* SLS export guard: during forced discharge, throttle reg143 (sell power)
-         * so that grid export never exceeds 90% of the fuse rating.
-         * Math: max_export = SLS_A × 3 × 230 V × 0.9
-         * If export > max: throttle = user_setpoint − overshoot
-         * If export ≤ max: restore to user_setpoint.
-         * Dead-band ±200 W avoids constant RTU writes from measurement noise. */
-        /* A protection function must read the CONTROL value with its age bound,
-         * not the display aggregate: that one can be a substitute (the Deye's
-         * own CT) and carries no age limit, so the guard could throttle -- or
-         * fail to throttle -- on a dead sensor. */
-        float sls_grid_w = 0;
-        if (deye_ctrl_get_mode() == DEYE_MODE_FORCE_DISCHARGE &&
-            modbus_tcp_grid_w_fresh(&sls_grid_w, MB_GRID_MAX_AGE_MS)) {
-            uint8_t sls_a = nvs_store_get_sls_a();
-            if (sls_a > 0) {
-                float max_export_w = (float)sls_a * 3.0f * 230.0f * 0.9f;
-                float export_w     = -sls_grid_w;  /* netz negative = export */
-                int   user_pw      = deye_ctrl_get_user_power();
-                int   target_pw;
-                if (export_w > max_export_w) {
-                    float excess = export_w - max_export_w;
-                    target_pw = (int)((float)user_pw - excess);
-                    if (target_pw < 1000) target_pw = 1000;
-                } else {
-                    target_pw = user_pw;
-                }
-                if (abs(target_pw - deye_ctrl_get_power()) > 200) {
-                    deye_ctrl_set_throttled(target_pw);
-                    if (export_w > max_export_w)
-                        ESP_LOGW(TAG, "SLS guard: export %.0f W > limit %.0f W (SLS %uA) -- throttle → %d W",
-                                 export_w, max_export_w, (unsigned)sls_a, target_pw);
-                    else
-                        ESP_LOGI(TAG, "SLS guard: export %.0f W OK -- restore → %d W",
-                                 export_w, target_pw);
-                }
-            }
-        }
+        sls_guard_tick();
 
         if (has_any && connected && app_lvgl_lock(100)) {
             if (a.pv_v)    ui_flow_set_pv(a.pv / 1000.0f);     else ui_flow_clear_pv();

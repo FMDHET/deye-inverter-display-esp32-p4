@@ -797,9 +797,15 @@ static void do_master(int idx, int port, const mb_rtu_bus_cfg_t *c)
 
 /* ----------------------- Self-test ------------------------------------ */
 
-/* Bus B (master UART, port) sends a Modbus FC03 request to bus A's slave_id.
- * Bus A's slave task, running normally, picks it up and responds.
- * Called from bus 1's task with bus 1's UART port. */
+/* The MASTER bus sends a Modbus FC03 request carrying the SLAVE bus's id; the
+ * slave task, running normally, picks it up and responds. Which bus is which
+ * comes from the configuration -- it used to be hard-wired to "bus 1 sends,
+ * bus 0 answers", which is exactly backwards on a device configured the other
+ * way round (bus 0 master, bus 1 slave, the layout in use here). The test then
+ * transmitted onto the bus the Deye is actively polling -- a collision on the
+ * live control bus -- and asked for the Deye's own id, so it could only ever
+ * report FAIL. modbus_rtu_selftest_start() refuses the request unless a real
+ * master/slave pair exists, so by the time we get here the roles are sound. */
 static void do_selftest(int port, uint8_t slave_id)
 {
     mb_rtu_selftest_result_t res = { .state = MB_RTU_SELFTEST_FAIL, .latency_ms = -1 };
@@ -872,15 +878,19 @@ static void bus_task(void *arg)
         s_st.bus[idx].role    = c.role;
         portEXIT_CRITICAL(&s_mux);
 
-        /* Self-test runs on the master bus (idx 1); slave (idx 0) responds normally. */
-        if (idx == 1 && s_selftest_req) {
+        if (!c.enabled) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }
+
+        /* Self-test: whichever bus is the enabled MASTER sends, the enabled
+         * SLAVE answers out of its normal loop. Checked here and not by index,
+         * and only for an enabled bus -- the old `idx == 1` sat in front of the
+         * enabled check and would transmit on a bus that is switched off.
+         * The pair was already validated in modbus_rtu_selftest_start(). */
+        if (s_selftest_req && c.role == MB_RTU_MASTER) {
             s_selftest_req = false;
             mb_rtu_cfg_t tmp; modbus_rtu_get_cfg(&tmp);
-            do_selftest(port, tmp.bus[0].slave_id);
+            do_selftest(port, tmp.bus[idx ^ 1].slave_id);
             continue;
         }
-
-        if (!c.enabled) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }
 
         if (c.role == MB_RTU_SLAVE) do_slave(idx, port, &c);
         else                        do_master(idx, port, &c);
@@ -1228,14 +1238,42 @@ esp_err_t modbus_rtu_set_cfg(const mb_rtu_cfg_t *cfg)
     return e;
 }
 
+/* The test needs one enabled MASTER to ask and one enabled SLAVE to answer.
+ * Without that pair nothing can respond, so refusing here is the whole point:
+ * the master bus would otherwise put a request onto the wire that only the
+ * Deye can hear -- and on a slave bus that request lands in the middle of the
+ * Deye's own polling. Returns a reason string, or NULL when the pair is fine. */
+static const char *selftest_why_not(const mb_rtu_cfg_t *c)
+{
+    int master = -1, slave = -1;
+    for (int i = 0; i < MB_RTU_BUSES; i++) {
+        if (!c->bus[i].enabled) continue;
+        if (c->bus[i].role == MB_RTU_MASTER) master = i;
+        else                                 slave  = i;
+    }
+    if (master < 0 && slave < 0) return "Kein RS485-Bus ist eingeschaltet";
+    if (master < 0)              return "Kein Bus ist Master -- niemand kann fragen";
+    if (slave  < 0)              return "Kein Bus ist Slave -- niemand kann antworten";
+    return NULL;
+}
+
 void modbus_rtu_selftest_start(void)
 {
+    mb_rtu_cfg_t cfg; modbus_rtu_get_cfg(&cfg);
+    const char *why = selftest_why_not(&cfg);
+
     portENTER_CRITICAL(&s_mux);
-    s_selftest_result.state      = MB_RTU_SELFTEST_PENDING;
+    s_selftest_result.state      = why ? MB_RTU_SELFTEST_FAIL : MB_RTU_SELFTEST_PENDING;
     s_selftest_result.latency_ms = -1;
     s_selftest_result.error[0]   = '\0';
+    if (why) snprintf(s_selftest_result.error, sizeof(s_selftest_result.error), "%s", why);
     portEXIT_CRITICAL(&s_mux);
-    s_selftest_req = true;   /* picked up by bus 1's task on its next loop */
+
+    if (why) {
+        ESP_LOGW(TAG, "selftest refused: %s", why);
+        return;                 /* deliberately NOT queued: nothing may go out */
+    }
+    s_selftest_req = true;      /* picked up by the master bus's task */
 }
 
 mb_rtu_selftest_result_t modbus_rtu_selftest_result(void)

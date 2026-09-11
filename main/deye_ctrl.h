@@ -49,6 +49,10 @@ typedef struct {
     uint32_t left_s;         /* until the automatic fallback (0 = Normal)   */
     uint8_t  checked;        /* registers read back on the last apply       */
     uint8_t  failed;         /* of those, how many did not match            */
+    /* Register writes since boot. The Deye holds 142/143 in EEPROM, so this is
+     * a wear counter, not a statistic: it is the number the SLS guard's rate
+     * limit exists to keep small. Visible in /api/deye/live. */
+    uint32_t writes;
 } deye_ctrl_status_t;
 void        deye_ctrl_get_status(deye_ctrl_status_t *out);
 
@@ -56,7 +60,10 @@ void        deye_ctrl_get_status(deye_ctrl_status_t *out);
 esp_err_t deye_ctrl_apply(deye_mode_t mode, int power_w);
 
 /* Throttle the discharge power without changing the user setpoint.
- * Called exclusively by the SLS grid-export guard in modbus_tcp.c. */
+ * Called exclusively by the SLS grid-export guard in modbus_tcp.c.
+ * Writes the sell-power register ALONE -- the work mode is already what it
+ * should be, and register 142 lives in the inverter's EEPROM like 143 does.
+ * A mode change requested in parallel still wins and writes both. */
 esp_err_t deye_ctrl_set_throttled(int power_w);
 
 #ifdef __cplusplus

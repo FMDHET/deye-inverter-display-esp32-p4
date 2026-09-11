@@ -55,9 +55,32 @@ typedef struct {
     char     name[24];    /* user label shown in the UI (APPENDED -> devs5) */
 } mb_dev_cfg_t;
 
+/* Roles whose reading reaches the inverter rather than just the screen: the
+ * grid meter feeds the Eastron emulation and the SLS guard, the Deye meter
+ * feeds the same balance. They are polled first, on a higher-priority worker
+ * and with a tighter interval ceiling -- three places that used to spell the
+ * same pair of roles out by hand. */
+static inline bool is_ctrl_role(uint8_t role)
+{
+    return role == MB_ROLE_GRID || role == MB_ROLE_DEYE_METER;
+}
+
+/* Max age at which the grid reading still counts as a real value for anything
+ * that steers or protects (the Eastron emulation, the SLS export guard).
+ * Generous enough for a congested multi-device poll cycle, far below the time
+ * in which the household load can change dangerously. */
+#define MB_GRID_MAX_AGE_MS  12000
+
 #define MB_DEFAULT_POLL_MS    2000
 #define MB_MIN_POLL_MS        200
 #define MB_MAX_POLL_MS        60000
+/* A device whose reading STEERS the inverter may not be polled slower than the
+ * age at which that reading stops counting (MB_GRID_MAX_AGE_MS, above). At
+ * 60 s the grid meter would be stale for 48 s out of every 60 and the meter
+ * emulation would spend most of its life in the bridge and then silent -- an
+ * interval the settings page happily accepted. A third of the window leaves
+ * room for two missed polls before the value ages out. */
+#define MB_CRIT_MAX_POLL_MS   (MB_GRID_MAX_AGE_MS / 3)
 #define MB_DEFAULT_TIMEOUT_MS 500
 #define MB_MIN_TIMEOUT_MS     100
 #define MB_MAX_TIMEOUT_MS     10000
@@ -83,12 +106,6 @@ void      modbus_tcp_get_status(modbus_tcp_status_t *out);
  * MUST gate on this and stay passive on false -- never regulate against a
  * frozen value (that caused a 15 kW export runaway). */
 bool      modbus_tcp_grid_w_fresh(float *out_w, uint32_t max_age_ms);
-
-/* Max age at which the grid reading still counts as a real value for anything
- * that steers or protects (the Eastron emulation, the SLS export guard).
- * Generous enough for a congested multi-device poll cycle, far below the time
- * in which the household load can change dangerously. */
-#define MB_GRID_MAX_AGE_MS  12000
 
 /* Deye values supplied by the RTU master (modbus_rtu.c) instead of TCP. They
  * feed the Deye node + house balance; SoC also comes from here. */

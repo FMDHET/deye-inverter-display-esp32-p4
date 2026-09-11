@@ -161,10 +161,10 @@ static esp_err_t live_handler(httpd_req_t *req)
     deye_ctrl_get_status(&cs);
     o = jcat(s_live_json, LIVE_CAP, o,
              "\"ctrl\":{\"mode\":%d,\"mode_name\":\"%s\",\"power\":%d,\"user_power\":%d,"
-             "\"age\":%u,\"left\":%u,\"checked\":%u,\"failed\":%u}}",
+             "\"age\":%u,\"left\":%u,\"checked\":%u,\"failed\":%u,\"writes\":%u}}",
              (int)cs.mode, deye_ctrl_mode_name(cs.mode), cs.power_w, cs.user_power_w,
              (unsigned)cs.age_s, (unsigned)cs.left_s,
-             (unsigned)cs.checked, (unsigned)cs.failed);
+             (unsigned)cs.checked, (unsigned)cs.failed, (unsigned)cs.writes);
     (void)o;
 
     httpd_resp_set_type(req, "application/json");

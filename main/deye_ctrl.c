@@ -32,6 +32,13 @@ static TaskHandle_t         s_task;
 static volatile uint32_t    s_mode_ms;
 /* Verification result of the last apply (see write_verify). */
 static volatile uint8_t     s_checked, s_failed;
+/* Register writes issued since boot -- 142/143 sit in the inverter's EEPROM,
+ * so this counts wear (see deye_ctrl_status_t.writes). */
+static volatile uint32_t    s_writes;
+/* Set by deye_ctrl_apply(), cleared by the task when it has written the whole
+ * mode. A throttle arriving in between must not downgrade that to a
+ * power-only write, so the flag -- never the throttle -- decides. */
+static volatile bool        s_write_full;
 /* Set at start when a forced mode survived a restart in the INVERTER and has to
  * be undone; s_undo_mode only names it in the log. */
 static volatile bool        s_undo_pending;
@@ -46,8 +53,17 @@ static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
  * only: at 9600 baud each transaction costs the Deye poll a gap, and the
  * time-of-use arrays (166-177) are 12 more registers whose failure the write
  * return code already reveals. */
+/* Unverified write. Same counter as write_verify: the time-of-use arrays wear
+ * the inverter's EEPROM exactly like the decisive registers do. */
+static int write_raw(uint16_t reg, uint16_t val)
+{
+    s_writes++;
+    return modbus_rtu_deye_write(reg, val);
+}
+
 static int write_verify(uint16_t reg, uint16_t val)
 {
+    s_writes++;
     int rc = modbus_rtu_deye_write(reg, val);
     if (rc != 0) {
         s_checked++; s_failed++;
@@ -96,15 +112,15 @@ static void deye_ctrl_write_regs(deye_mode_t mode, int power_w)
     case DEYE_MODE_FORCE_CHARGE: {            /* charge: reg128 = charge current (A) @ ~50V */
         int rc3, rc4;
         int amps = power_w / 50;             /* WR ignores reg126(W); reacts to reg128 in A */
-        rc1 = modbus_rtu_deye_write(REG_NORMAL_126, (uint16_t)power_w);
+        rc1 = write_raw(REG_NORMAL_126, (uint16_t)power_w);
         rc3 = write_verify(REG_NORMAL_127, 99);
         rc4 = write_verify(REG_NORMAL_128, (uint16_t)amps);
         /* SOC set-points for the six time-of-use slots all to 99 % */
         for (int reg = 166; reg <= 171; reg++)
-            modbus_rtu_deye_write(reg, 99);
+            write_raw(reg, 99);
         /* grid-charge enable flags for the six slots all ON */
         for (int reg = 172; reg <= 177; reg++)
-            modbus_rtu_deye_write(reg, 1);
+            write_raw(reg, 1);
         ESP_LOGW(TAG, "Laden -> reg126=%d (rc=%d) reg127=99 (rc=%d) reg128=%dA (rc=%d) reg166-171=99 reg172-177=1 [%u/%u verified]",
                  power_w, rc1, rc3, amps, rc4,
                  (unsigned)(s_checked - s_failed), (unsigned)s_checked);
@@ -118,15 +134,15 @@ static void deye_ctrl_write_regs(deye_mode_t mode, int power_w)
         int rc3, rc4, rc5;
         rc1 = write_verify(REG_WORK_MODE,  2);
         rc2 = write_verify(REG_SELL_POWER, 20000);
-        rc3 = modbus_rtu_deye_write(REG_NORMAL_126, 5000);
-        rc4 = modbus_rtu_deye_write(REG_NORMAL_127, 10);
-        rc5 = modbus_rtu_deye_write(REG_NORMAL_128, 40);
+        rc3 = write_raw(REG_NORMAL_126, 5000);
+        rc4 = write_raw(REG_NORMAL_127, 10);
+        rc5 = write_raw(REG_NORMAL_128, 40);
         /* SOC set-points for the six time-of-use slots all back to 13 % */
         for (int reg = 166; reg <= 171; reg++)
-            modbus_rtu_deye_write(reg, 13);
+            write_raw(reg, 13);
         /* grid-charge enable flags for the six slots all OFF */
         for (int reg = 172; reg <= 177; reg++)
-            modbus_rtu_deye_write(reg, 0);
+            write_raw(reg, 0);
         ESP_LOGW(TAG, "Normal -> reg142=%d reg143=%d reg126=%d reg127=%d reg128=%d reg166-171=13 reg172-177=0 [%u/%u verified]",
                  rc1, rc2, rc3, rc4, rc5,
                  (unsigned)(s_checked - s_failed), (unsigned)s_checked);
@@ -138,6 +154,18 @@ static void deye_ctrl_write_regs(deye_mode_t mode, int power_w)
     ESP_LOGW(TAG, "%s -> reg142 rc=%d, reg143 rc=%d (power=%d W) [%u/%u verified]",
              deye_ctrl_mode_name(mode), rc1, rc2, power_w,
              (unsigned)(s_checked - s_failed), (unsigned)s_checked);
+}
+
+/* Sell power alone, for a throttle that does not change the mode. The full
+ * writer would send register 142 again with the value it already holds -- one
+ * more EEPROM cycle per correction, for nothing. Verified like any decisive
+ * register: a throttle that silently fails is a fuse that is not protected. */
+static void deye_ctrl_write_power(int power_w)
+{
+    s_checked = s_failed = 0;
+    int rc = write_verify(REG_SELL_POWER, (uint16_t)power_w);
+    ESP_LOGW(TAG, "SLS-Drosselung -> reg143=%d W (rc=%d) [%u/%u verified]",
+             power_w, rc, (unsigned)(s_checked - s_failed), (unsigned)s_checked);
 }
 
 /* Put the inverter back to Normal and record that as the standing state.
@@ -161,6 +189,21 @@ static bool fall_back_to_normal(const char *why)
     ESP_LOGE(TAG, "Normal not confirmed (%u of %u registers) -- keeping the stored "
                   "mode so it is retried", (unsigned)s_failed, (unsigned)s_checked);
     return false;
+}
+
+/* One write round, as the task performs it. Kept out of the task loop so the
+ * rule below can be checked without a scheduler. */
+static void deye_ctrl_write_pending(void)
+{
+    /* Latest wins -- but a pending mode change outranks a throttle: it may
+     * have arrived after the throttle already notified us, and writing only
+     * the power would leave the inverter in the previous work mode. */
+    bool full = s_write_full;
+    s_write_full = false;
+    if (full || s_mode != DEYE_MODE_FORCE_DISCHARGE)
+        deye_ctrl_write_regs(s_mode, s_power_w);
+    else
+        deye_ctrl_write_power(s_power_w);
 }
 
 static void deye_ctrl_task(void *arg)
@@ -205,7 +248,7 @@ static void deye_ctrl_task(void *arg)
             continue;
         }
 
-        if (requested) deye_ctrl_write_regs(s_mode, s_power_w);  /* latest wins */
+        if (requested) deye_ctrl_write_pending();
     }
 }
 
@@ -253,6 +296,7 @@ esp_err_t deye_ctrl_apply(deye_mode_t mode, int power_w)
     nvs_store_set_deye_mode((uint8_t)mode);
     if (mode != DEYE_MODE_NORMAL) nvs_store_set_deye_power((uint16_t)power_w);
 
+    s_write_full = true;   /* a mode change always writes the whole set */
     ESP_LOGI(TAG, "apply mode=%s power=%d W (queued)", deye_ctrl_mode_name(mode), power_w);
     if (s_task) xTaskNotifyGive(s_task);
     return ESP_OK;
@@ -270,6 +314,7 @@ void deye_ctrl_get_status(deye_ctrl_status_t *out)
                         : (age >= DEYE_FORCE_MAX_S ? 0 : DEYE_FORCE_MAX_S - age);
     out->checked      = s_checked;
     out->failed       = s_failed;
+    out->writes       = s_writes;
 }
 
 esp_err_t deye_ctrl_set_throttled(int power_w)

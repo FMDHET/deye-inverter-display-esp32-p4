@@ -8,7 +8,12 @@
 (function () {
   try {
     var q = new URLSearchParams(location.search).get("theme");
-    var t = q || localStorage.getItem("theme");
+    /* Nur ein GUELTIGER Parameter ueberstimmt. Vorher gewann jeder Wert das
+     * ODER, also schluckte ein Tippfehler (?theme=drak) die gespeicherte Wahl
+     * und die Seite fiel auf die Systemeinstellung zurueck -- waehrend die
+     * Leiste unten weiter die gespeicherte Wahl hervorhob. Dieselbe Pruefung
+     * wie in urlOverride() weiter unten, damit beide dasselbe meinen. */
+    var t = (q === "light" || q === "dark") ? q : localStorage.getItem("theme");
     if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
   } catch (e) {}
 })();
@@ -1900,13 +1905,21 @@ async function importRegs(input){
       startX = e.clientX; startW = th.offsetWidth;
       grip.setPointerCapture(e.pointerId);
       const move = ev => { th.style.width = Math.max(40, startW + ev.clientX - startX) + 'px'; };
+      // Aufräumen auch bei pointercancel: das Handy feuert das, sobald die
+      // Geste zum Scrollen wird oder ein Anruf dazwischenkommt. Vorher blieb
+      // der move-Listener dann hängen und die Spalte folgte dem Finger auch
+      // ohne gedrückte Taste. lostpointercapture kommt in allen drei Fällen,
+      // ist also die eine Stelle, an der das Ende zuverlässig ankommt.
       const up = () => {
-        grip.releasePointerCapture(e.pointerId);
         grip.removeEventListener('pointermove', move);
         grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+        grip.removeEventListener('lostpointercapture', up);
       };
       grip.addEventListener('pointermove', move);
       grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
+      grip.addEventListener('lostpointercapture', up);
       e.preventDefault(); e.stopPropagation();
     });
   });
@@ -1917,17 +1930,45 @@ async function importRegs(input){
 /* ---------------- Farbschema-Umschalter ---------------- */
 (function () {
   var btns = document.querySelectorAll(".theme button");
-  function mark() {
-    var cur = "auto";
-    try { cur = localStorage.getItem("theme") || "auto"; } catch (e) {}
-    btns.forEach(function (b) { b.classList.toggle("on", b.dataset.themeSet === cur); });
+
+  /* ?theme=light|dark ueberstimmt die gespeicherte Wahl (Skript im <head>).
+   * Die Markierung las aber nur localStorage -- die Seite stand dann dunkel
+   * da, waehrend "Hell" hervorgehoben war. Sie zeigt jetzt, was wirklich
+   * gilt, und sagt im Tooltip dazu, dass es aus der URL kommt. */
+  function urlOverride() {
+    try {
+      var q = new URLSearchParams(location.search).get("theme");
+      return (q === "light" || q === "dark") ? q : null;
+    } catch (e) { return null; }
   }
+
+  function mark() {
+    var forced = urlOverride(), cur = forced;
+    if (!cur) { try { cur = localStorage.getItem("theme") || "auto"; } catch (e) { cur = "auto"; } }
+    btns.forEach(function (b) {
+      var on = b.dataset.themeSet === cur;
+      b.classList.toggle("on", on);
+      if (on && forced) b.title = "Durch ?theme=" + forced + " in der URL erzwungen";
+      else b.removeAttribute("title");
+    });
+  }
+
   btns.forEach(function (b) {
     b.addEventListener("click", function () {
       var v = b.dataset.themeSet;
       try { v === "auto" ? localStorage.removeItem("theme") : localStorage.setItem("theme", v); } catch (e) {}
       if (v === "auto") document.documentElement.removeAttribute("data-theme");
       else document.documentElement.setAttribute("data-theme", v);
+      /* Den URL-Parameter dabei entfernen, sonst ueberstimmt er die gerade
+       * getroffene Wahl beim naechsten Laden wieder -- und der Nutzer klickt
+       * ein zweites Mal auf denselben Knopf. */
+      try {
+        if (urlOverride()) {
+          var u = new URL(location.href);
+          u.searchParams.delete("theme");
+          history.replaceState(null, "", u);
+        }
+      } catch (e) {}
       mark();
     });
   });

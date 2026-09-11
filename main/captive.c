@@ -6,6 +6,7 @@
 #include "meter_web.h"
 #include "applog.h"
 #include "config_web.h"
+#include "dns_hijack.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -186,23 +187,11 @@ static void dns_task(void *arg)
             n = DNS_BUF_LEN;
         }
 
-        memcpy(tx, rx, n);
-        tx[2] = 0x81;                 /* QR=1, RD copied */
-        tx[3] = 0x80;                 /* RA=1, RCODE=0   */
-        tx[6] = 0x00; tx[7] = 0x01;   /* ANCOUNT = 1     */
-        tx[8] = 0x00; tx[9] = 0x00;   /* NSCOUNT = 0     */
-        tx[10] = 0x00; tx[11] = 0x00; /* ARCOUNT = 0     */
-
-        int p = n;
-        tx[p++] = 0xC0; tx[p++] = 0x0C;          /* name -> offset 12   */
-        tx[p++] = 0x00; tx[p++] = 0x01;          /* type A              */
-        tx[p++] = 0x00; tx[p++] = 0x01;          /* class IN            */
-        tx[p++] = 0x00; tx[p++] = 0x00;
-        tx[p++] = 0x00; tx[p++] = 0x3C;          /* TTL 60s             */
-        tx[p++] = 0x00; tx[p++] = 0x04;          /* RDLENGTH 4          */
-        uint32_t ip = ap_ip_u32();
-        memcpy(&tx[p], &ip, 4);                  /* RDATA = AP IP       */
-        p += 4;
+        /* Built from the question, never echoed whole -- see dns_hijack.h for
+         * why (an EDNS0 OPT record used to end up where the answer belongs).
+         * A query we cannot parse gets no reply at all. */
+        int p = dns_build_reply(rx, n, ap_ip_u32(), tx, (int)sizeof(tx));
+        if (p < 0) continue;
 
         sendto(s_dns_sock, tx, p, 0, (struct sockaddr *)&src, slen);
     }

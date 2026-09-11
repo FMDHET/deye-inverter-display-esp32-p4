@@ -1,0 +1,30 @@
+#0  panic_abort (details=details@entry=0x4ff7b798 "assert failed: block_locate_free tlsf_control_functions.h:618 (block_size(block) >= *size)") at components/esp_system/panic.c:491
+491	    asm("unimp");   // should be an invalid operation on RISC-V targets
+[Current thread is 1 (process 1341636216)]
+[Switching to thread 1 (process 1341636216)]
+#0  panic_abort (details=details@entry=0x4ff7b798 "assert failed: block_locate_free tlsf_control_functions.h:618 (block_size(block) >= *size)") at components/esp_system/panic.c:491
+491	    asm("unimp");   // should be an invalid operation on RISC-V targets
+#0  panic_abort (details=details@entry=0x4ff7b798 "assert failed: block_locate_free tlsf_control_functions.h:618 (block_size(block) >= *size)") at components/esp_system/panic.c:491
+#1  0x4ff08cba in esp_system_abort (details=details@entry=0x4ff7b798 "assert failed: block_locate_free tlsf_control_functions.h:618 (block_size(block) >= *size)") at components/esp_system/port/esp_system_chip.c:87
+#2  0x4ff11374 in __assert_func (file=<optimized out>, line=<optimized out>, func=<optimized out>, expr=<optimized out>) at components/newlib/src/assert.c:81
+#3  0x4ff1011a in search_suitable_block (control=<optimized out>, fli=<optimized out>, sli=<optimized out>) at components/heap/tlsf/tlsf_control_functions.h:359
+#4  block_locate_free (control=<optimized out>, size=<optimized out>) at components/heap/tlsf/tlsf_control_functions.h:612
+#5  tlsf_malloc (tlsf=0x48000014, size=size@entry=356) at components/heap/tlsf/tlsf.c:444
+#6  0x4ff0fb12 in multi_heap_malloc_impl (heap=0x48000000, size=356) at components/heap/multi_heap.c:216
+#7  multi_heap_malloc_impl (heap=0x48000000, size=356) at components/heap/multi_heap.c:208
+#8  0x4ff01d3c in aligned_or_unaligned_alloc (offset=0, heap=<optimized out>, size=<optimized out>, alignment=<optimized out>) at components/heap/heap_caps_base.c:93
+#9  heap_caps_aligned_alloc_base (alignment=<optimized out>, alignment@entry=4, size=<optimized out>, size@entry=356, caps=<optimized out>, caps@entry=4096) at components/heap/heap_caps_base.c:175
+#10 0x4ff01d50 in heap_caps_malloc_base (size=size@entry=356, caps=caps@entry=4096) at components/heap/heap_caps_base.c:202
+#11 0x4ff01ea8 in heap_caps_malloc (size=356, caps=caps@entry=4096) at components/heap/heap_caps.c:84
+#12 0x4001e198 in outbox_enqueue (outbox=outbox@entry=0x4ff78244, message=message@entry=0x4ff7b934, tick=<optimized out>) at components/mqtt/esp-mqtt/lib/mqtt_outbox.c:52
+#13 0x4001ae38 in mqtt_enqueue (client=client@entry=0x48406608, remaining_data=remaining_data@entry=0x0, remaining_len=remaining_len@entry=0) at components/mqtt/esp-mqtt/mqtt_client.c:1242
+#14 0x4001aed0 in mqtt_client_enqueue_publish (client=client@entry=0x48406608, topic=topic@entry=0x4ff7ba48 "homeassistant/sensor/deyedisp_000000/grid_w/config", data=data@entry=0x4ff7bac0 "{\"name\":\"Netz\",\"stat_t\":\"deye-display/state\",\"avty_t\":\"deye-display/availability\",\"val_tpl\":\"{{ value_json.grid_w }}\",\"unit_of_meas\":\"W\",\"dev_cla\":\"power\",\"stat_cla\":\"measurement\",\"uniq_id\":\"deyedisp_"..., len=len@entry=299, qos=qos@entry=1, retain=retain@entry=1, store=store@entry=false) at components/mqtt/esp-mqtt/mqtt_client.c:2159
+#15 0x4001d724 in esp_mqtt_client_publish (client=0x48406608, topic=topic@entry=0x4ff7ba48 "homeassistant/sensor/deyedisp_000000/grid_w/config", data=data@entry=0x4ff7bac0 "{\"name\":\"Netz\",\"stat_t\":\"deye-display/state\",\"avty_t\":\"deye-display/availability\",\"val_tpl\":\"{{ value_json.grid_w }}\",\"unit_of_meas\":\"W\",\"dev_cla\":\"power\",\"stat_cla\":\"measurement\",\"uniq_id\":\"deyedisp_"..., len=<optimized out>, len@entry=0, qos=qos@entry=1, retain=retain@entry=1) at components/mqtt/esp-mqtt/mqtt_client.c:2213
+#16 0x40014e70 in publish_discovery () at main/mqtt_fwd.c:101
+#17 0x400154d6 in mqtt_event_handler (args=<optimized out>, base=<optimized out>, event_id=1, event_data=<optimized out>) at main/mqtt_fwd.c:184
+#18 0x400fc052 in handler_execute (loop=0x4ff7a554, handler=<optimized out>, post=...) at components/esp_event/esp_event.c:136
+#19 esp_event_loop_run (event_loop=0x4ff7a554, ticks_to_run=ticks_to_run@entry=0) at components/esp_event/esp_event.c:686
+#20 0x4001af54 in esp_mqtt_dispatch_event (client=client@entry=0x48406608) at components/mqtt/esp-mqtt/mqtt_client.c:1069
+#21 0x4001af7c in esp_mqtt_dispatch_event_with_msgid (client=client@entry=0x48406608) at components/mqtt/esp-mqtt/mqtt_client.c:1047
+#22 0x4001bc88 in esp_mqtt_task (pv=0x48406608, pv@entry=<error reading variable: value has been optimized out>) at components/mqtt/esp-mqtt/mqtt_client.c:1725
+#23 0x4ff0a752 in vPortTaskWrapper (pxCode=<optimized out>, pvParameters=<optimized out>) at components/freertos/FreeRTOS-Kernel/portable/riscv/port.c:257

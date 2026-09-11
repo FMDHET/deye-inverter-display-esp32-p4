@@ -416,6 +416,55 @@ Nicht am Gerät geprüft: die Ablehnung des Selbsttests bei fehlender Gegenstell
 
 *Zweitens* ist die Sekunden-Falle aus Nachtrag 7 ein zweites Mal zugeschnappt. Der erste Mutationslauf meldete alle zwölf als „gefangen", der Kontrolllauf danach war aber **rot**: die Läufe waren teilweise gegen das Binary der *vorigen* Mutation gefahren, weil Apples `make` 3.81 Zeitstempel sekundengenau vergleicht und das Zurückschreiben in dieselbe Sekunde fiel. Mit `make -C test clean` vor jedem Lauf sah das Ergebnis anders aus — und erst dann fiel die überlebende Mutation auf. Steht jetzt als Regel im `test/README.md`: **Mutationsergebnisse ohne sauberen Neubau sind keine Ergebnisse.**
 
+## Nachtrag 13 (11. September): der Absturz vom Morgen, ausgewertet
+
+Beim Flashen von Nachtrag 12 fiel nebenbei auf, dass das Gerät zwischendurch neu gestartet war: um 07:57 meldete es 15 h 27 min Laufzeit, um 09:12 noch 70 min und `reset: PANIC`. Der Absturz lag also bei etwa **08:02**, nach 15,5 Stunden Betrieb. Das Ring-Log reicht nicht über einen Neustart hinaus — der Absturz selbst steht nirgends. Der Coredump war da, und der reichte.
+
+### Erst musste das ELF zurück
+
+`espcoredump.py` lehnt eine Firmware ab, deren SHA256 nicht exakt die des abgestürzten Abbilds ist. Bitgleich wird ein Nachbau aber nie: `build_number.py` kompiliert einen Zeitstempel ein. Der Umweg ist eine Zeile — die Datei ist eine 24-Byte-Kopfzeile vor einem regulären RISC-V-ELF-Core, abschneiden und gdb lädt ihn ohne jede Prüfung.
+
+Dass die Adressen trotzdem stimmen, ist **der Ertrag von Nachtrag 8**: fester Plattform-Pin, eingecheckte `dependencies.lock`. Aus Commit `5409858` mit auf 273 zurückgesetztem Zähler entsteht wieder „Build #274 v1.0.185", alle eingebetteten Zeichenketten sind längengleich, und jedes Symbol löst sauber auf. Ohne diese Arbeit wäre der Coredump eine Liste nackter Zahlen geblieben. Der Weg steht jetzt in [`docs/coredumps/README.md`](../docs/coredumps/README.md).
+
+### Was passiert ist
+
+```
+mqtt_task
+ └ esp_mqtt_task → dispatch_event → mqtt_event_handler(event_id=1 = CONNECTED)
+    └ mqtt_fwd.c:101  publish_discovery()
+       └ esp_mqtt_client_publish("homeassistant/sensor/.../grid_w/config", qos=1, retain=1)
+          └ mqtt_enqueue → outbox_enqueue → heap_caps_malloc(356, MALLOC_CAP_DEFAULT)
+             └ tlsf_malloc(tlsf=0x48000014, size=356)
+                └ block_locate_free → search_suitable_block → ASSERT
+                   block_size(block) >= *size
+```
+
+Die Freiliste des Allokators sagte „hier liegt ein Block, der groß genug ist", der Kopf dieses Blocks sagte etwas anderes. Das ist **keine Speicherknappheit** — zum Zeitpunkt des Absturzes waren 28 MB frei —, sondern eine **beschädigte Verwaltungsstruktur**.
+
+Und zwar in welchem Speicher: `tlsf = 0x48000014`, der Heap selbst bei `0x48000000`. Laut `soc.h` des P4 ist `SOC_EXTRAM_LOW = 0x48000000`, internes DRAM beginnt erst bei `0x4FF00000` — beschädigt ist also der **PSRAM-Heap**. Dazu passt, dass jedes Codesymbol bei `0x4ff…` auflöst und die MQTT-Client-Struktur bei `0x48406608` liegt.
+
+**MQTT ist das Opfer, nicht die Ursache.** Die 356-Byte-Anforderung beim Wiederverbinden war schlicht die erste, die über die kaputte Stelle stolperte. Alle 33 Tasks standen im Normalzustand, kein OTA, kein Dateisystem-Schreibvorgang, die Oberfläche zeichnete gerade (`taskLVGL` in `lv_obj_get_style_prop`).
+
+### Warum man den Verursacher nicht sieht
+
+Zwei Gründe, und beide sind wichtiger als der Befund selbst:
+
+1. Der Coredump enthält **die Task-Stacks, aber keine Heaps** und kein `.data`. `registered_heaps` liest sich als 0 (das kommt aus dem ELF, nicht aus dem Abbild), PSRAM-Adressen sind gar nicht zugreifbar. Der beschädigte Block ist nicht mehr einsehbar.
+2. `CONFIG_HEAP_POISONING_DISABLED=y`. Ohne Wächterbytes fällt ein Überlauf erst auf, wenn der Allokator Wochen später darüber läuft — Tatort und Fundort haben dann nichts mehr miteinander zu tun.
+
+### Was geprüft und ausgeschlossen wurde
+
+Unsere eigenen PSRAM-Puffer sind durchgesehen, keiner schreibt über seine Grenze:
+
+* `applog.c` — der 48-kB-Log-Ring. `ring_push()` klemmt `n` auf `LOG_CAP`, teilt am Umbruch und schreibt ausschließlich innerhalb `[0, LOG_CAP)`. Der naheliegendste Verdächtige (er schreibt 15 Stunden lang ununterbrochen) ist sauber.
+* `config_web.c` — der einzige Puffer, dessen Größe aus einer HTTP-Anfrage stammt. Alloziert `content_len + 1`, liest höchstens `content_len`, setzt die Null auf `body[got]`.
+
+Das ist **keine vollständige Prüfung** aller Schreibzugriffe ins PSRAM, und der Verursacher kann ebenso gut außerhalb unseres Codes liegen: `CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y` verlegt die Transportpuffer des WLAN-Koprozessors bewusst ins PSRAM (das war die Lösung für die OTA-Abstürze), und `CONFIG_SPIRAM_SPEED_200M=y` fährt das PSRAM am oberen Ende. Beides sind plausible Richtungen. **Belegt ist keine davon** — es gibt genau ein Vorkommnis in 15,5 Stunden.
+
+### Was daraus folgt
+
+Ein einzelner Absturz, dessen Verursacher unsichtbar ist, lässt sich nicht durch Nachdenken aufklären. Entweder man macht ihn sichtbar (Heap-Wächter einschalten und beobachten, zu Lasten von Laufzeit und Speicher) oder man wartet auf die Wiederholung. Die Entscheidung liegt beim Betreiber; die Auswertung steht hier, damit ein zweiter Coredump sofort vergleichbar ist.
+
 ## Gut gemacht — nicht anfassen
 
 * Frische-Schranke des Netzwerts (`modbus_tcp_grid_w_fresh`): nur ein echter erfolgreicher Read setzt den Zeitstempel, `reconfigure_apply()` invalidiert bewusst, überlaufsichere Zeitarithmetik. Sicherheitsschienen der Manipulation: Hauptschalter aus, nur bei frischem Zähler, NaN abgewiesen, ±100 kW geklemmt, seiteneffektfreies `compute_served()`.

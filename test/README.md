@@ -20,7 +20,8 @@ Getestet wird das, was **rechnet und entscheidet**, ohne Hardware:
 | `test_modbus_rtu` | `compute_served()` — was der Wechselrichter zu sehen bekommt: die Frische-Schranke, der Netz-Sollwert, die Phasenmanipulation samt NaN- und Grenzwertabwehr. Dazu `crc16`, `sdm630_response`, `clamp_cfg` und die No-Op-Erkennung in `modbus_rtu_set_cfg()`. |
 | `test_webauth` | Das Passwort-Tor: fehlender, falscher, kaputter und richtiger `Authorization`-Kopf, Präfixe, Doppelpunkte im Passwort, Setzen und Löschen, und dass ein fehlgeschlagener Flash-Schreibvorgang das Tor **nicht** scharf stellt. |
 | `test_nvs_store` | Der Speicher aller Einstellungen, vor allem `get_blob_prefix()`: kürzerer Datensatz (alte Felder erhalten, neue bleiben 0), **längerer** Datensatz (wird gelesen statt abgelehnt — der Rollback-Fall, den man am Gerät gar nicht auslösen kann, dafür bräuchte es eine zukünftige Firmware), fehlender Schlüssel, die Vorgabewerte, und dass eine beschädigte Partition beim Start gelöscht wird. |
-| `test_deye_ctrl` | Die Akku-Steuerung: welche Register jeder Modus schreibt (samt der Umrechnung Watt → Ampere in Register 128), die Rückleseverifikation und ihre drei Fehlerfälle — Bus tot, Rückleser tot, und „der Wechselrichter antwortet ok und behält seinen alten Wert" —, Klemmung und Persistenz, dass die SLS-Drosselung den Nutzer-Sollwert nie anfasst, der 2-Stunden-Zähler ohne Unterlauf, und der Neustart-Pfad samt der Regel, dass der gespeicherte Modus erst nach Bestätigung gelöscht wird. |
+| `test_sls_guard` | Der SLS-Exportschutz — die einzige Stelle, deren Versagen eine Sicherung ist und keine falsche Zahl: dass die Korrektur von der **angewandten** Leistung ausgeht (und nicht vom Nutzer-Sollwert, was den Regler früher schwingen ließ), dass sie konvergiert statt zu pendeln, die Hysterese und die 60-Sekunden-Haltezeit vor dem Zurückgeben, die Schreibratenbremse und ihre Notfall-Umgehung bei großem Überschuss, das Zurückgehen in Stufen bis exakt auf einen krummen Sollwert, und der Überlauf der Betriebszeit nach 49 Tagen. |
+| `test_deye_ctrl` | Die Akku-Steuerung: welche Register jeder Modus schreibt (samt der Umrechnung Watt → Ampere in Register 128), die Rückleseverifikation und ihre drei Fehlerfälle — Bus tot, Rückleser tot, und „der Wechselrichter antwortet ok und behält seinen alten Wert" —, Klemmung und Persistenz, dass die SLS-Drosselung den Nutzer-Sollwert nie anfasst, der 2-Stunden-Zähler ohne Unterlauf, und der Neustart-Pfad samt der Regel, dass der gespeicherte Modus erst nach Bestätigung gelöscht wird. Dazu der Schreibpfad der Drosselung: sie fasst **nur** Register 143 an, eine parallel angeforderte Moduswahl sticht sie trotzdem, und der Verschleißzähler sieht auch die unverifizierten Schreibvorgänge. |
 
 **Nicht** getestet wird alles, was einen Bus, einen Bildschirm oder ein Netz
 braucht: die UART-Tasks, LVGL, WLAN, MQTT, OTA. Ebenso nicht die Schleife von
@@ -80,6 +81,24 @@ Test sie bewegt.
    an (2), gespeicherter Modus beim Start ignoriert (1), Präfix-Regel wieder
    ausgebaut (3), AP-Standardpasswort entfernt (1). Danach `git checkout` —
    der Produktivcode bleibt, wie er war.
+
+   Zuletzt zwölf weitere für den Exportschutz und den Selbsttest: Korrektur
+   wieder vom Nutzer-Sollwert (2 Tests), Hysterese entfernt (1), Haltezeit
+   entfernt (7), Rückgabe springt statt zu stufen (5), Schreibratenbremse
+   entfernt (1), Notfall-Umgehung entfernt (1), Mindestleistung entfernt (1),
+   Drosselung schreibt wieder den ganzen Modus (2), Moduswahl zur reinen
+   Leistungsänderung degradiert (1), Verschleißzähler übersieht die
+   unverifizierten Schreibvorgänge (1), Selbsttest ignoriert die Bus-Rollen
+   (2), abgeschalteter Bus zählt trotzdem (1).
+
+   Dabei ist die Sekunden-Falle oben ein zweites Mal zugeschnappt: alle zwölf
+   Mutationen meldeten „gefangen", der Kontrolllauf danach war aber rot — die
+   Läufe waren teils gegen das Binary der **vorigen** Mutation gefahren. Mit
+   `make -C test clean` vor jedem Lauf war das Ergebnis ein anderes: eine
+   Mutation überlebte, und sie hatte recht. Die doppelte Klemmung auf die
+   Mindestleistung in `sls_guard.h` konnte kein Ergebnis ändern und ist jetzt
+   einfach. **Also: Mutationsergebnisse ohne sauberen Neubau sind keine
+   Ergebnisse.**
 
 Die erwarteten CRC-Werte in `test_modbus_rtu.c` stammen bewusst **nicht** aus
 diesem Code, sondern aus einer unabhängigen Python-Implementierung:

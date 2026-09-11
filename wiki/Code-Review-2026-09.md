@@ -11,7 +11,7 @@ Diese Seite hält fest, **was behoben wurde** (mit Nachweis), **was offen ist** 
 * **Die Web-Oberfläche `/deye` ist jetzt auf dem iPhone benutzbar**: Tabellenzeilen werden zu Karten, die eingegebenen Werte werden vor dem Senden geprüft, das Polling stapelt sich nicht mehr.
 * **Der Modbus-Regelpfad ist entschieden und umgesetzt** (Nachtrag 4): ein ausgefallenes Gerät blockiert seine IP-Mitbewohner nicht mehr, der CT-Eingang des Deye ist kein Regelwert mehr (Regel- und Anzeigewert sind jetzt getrennte Variablen), ein Zwangsmodus wird beim Start abgeräumt und läuft nach 2 h ab, und das 0-W-Halten ist eine Brücke mit Ablauf statt eines Dauerzustands.
 * **Diagnose und Zugriffsschutz nachgezogen** (Nachtrag 5): Coredump und `GET /log` machen einen Absturz und den laufenden Betrieb ohne Kabel auswertbar, ein am Display gesetztes Passwort schützt alle schreibenden Web-Pfade, und `GET /config` sichert die Einstellungen samt WireGuard-Schlüssel.
-* **Offen und wichtig:** MQTT-Kommandos und die Modbus-Brücke kennen kein Passwort, das AP-Passwort ist weiterhin die veröffentlichte Konstante, und die Konfig-Blobs `mqtt`/`ntp`/`wg` haben kein Versionsfeld. Die Display-Oberfläche ist abgearbeitet (Nachträge 1–3), darunter die zwei Fehler, die das Gerät unbedienbar machen konnten: Touch-Ausfall beim Start und Helligkeit 0 %.
+* ~~**Offen und wichtig:** MQTT-Kommandos und die Modbus-Brücke kennen kein Passwort, das AP-Passwort ist weiterhin die veröffentlichte Konstante, und die Konfig-Blobs `mqtt`/`ntp`/`wg` haben kein Versionsfeld.~~ — MQTT-Schalter, AP-Passwort und rollback-feste Blobs in Nachtrag 11; die offene Brücke ist eine Festlegung des Betreibers, kein Fund. Seit **Nachtrag 12** ist auch die Offen-Liste des Regelpfads leer. Die Display-Oberfläche ist abgearbeitet (Nachträge 1–3), darunter die zwei Fehler, die das Gerät unbedienbar machen konnten: Touch-Ausfall beim Start und Helligkeit 0 %.
 
 ## Behoben
 
@@ -58,7 +58,9 @@ Entschieden wurde: (1) weitergehen statt Runde abbrechen, dazu eine Altersgrenze
 
 Weitere Funde mittlerer Schwere — behoben: ~~Netz-Sollwert ohne Grenzen im Modul~~, ~~`deye_req_run` liefert nach einem Timeout das Ergebnis der vorigen Anfrage~~, ~~keine Absicherung gegen verspätete RS485-Antworten, FC16-Echo ungeprüft~~ (alle Nachtrag 2), ~~SLS-Exportschutz rechnet mit veralteten Daten~~ (Nachtrag 4).
 
-**Noch offen:** Modbus-TCP-Transaktions-ID ist konstant `1`; der SLS-Schutz schreibt bei jeder ±200-W-Änderung in EEPROM-Register; ~~Phasenmanipulation bleibt über Neustarts aktiv, ohne Ablauf und ohne Hinweis auf dem Hauptbildschirm~~ (behoben, Nachtrag 7); `poll_ms` bis 60 s erlaubt, obwohl der Zähler nach 12 s als veraltet gilt; Selbsttest sendet auf Bus 1 unabhängig von dessen Rolle; die Bridge erlaubt jedem im LAN Schreibzugriff auf alle Deye-Register.
+~~**Noch offen:** Modbus-TCP-Transaktions-ID ist konstant `1`; der SLS-Schutz schreibt bei jeder ±200-W-Änderung in EEPROM-Register; Phasenmanipulation bleibt über Neustarts aktiv, ohne Ablauf und ohne Hinweis auf dem Hauptbildschirm; `poll_ms` bis 60 s erlaubt, obwohl der Zähler nach 12 s als veraltet gilt; Selbsttest sendet auf Bus 1 unabhängig von dessen Rolle~~ — Phasenmanipulation behoben in Nachtrag 7, die übrigen vier in **Nachtrag 12** (der SLS-Punkt war dabei größer als notiert: der Regler schwang, siehe dort).
+
+Dass die Bridge jedem im LAN Schreibzugriff auf alle Deye-Register erlaubt, ist **kein offener Punkt mehr, sondern eine Festlegung**: der Betreiber will das System offen, Lesen und Schreiben im LAN sind gewollt. Dasselbe gilt für das Web-Passwort, das am Gerät bewusst leer bleibt.
 
 ### Kern und Sicherheit
 
@@ -82,8 +84,7 @@ Weitere Funde mittlerer Schwere — behoben: ~~Netz-Sollwert ohne Grenzen im Mod
 
 * ~~`/api/devices` escaped Gerätenamen nicht~~, ~~`build_number.py` zählt bei IDE-Targets hoch~~, ~~`/ota/rollback` prüft den Slot-Zustand nicht~~, ~~`probeRead` ohne Wiedereintrittsschutz~~, ~~`dirty`-Flag nur durch Senden gelöscht~~ — **alle behoben (Nachtrag 2).**
 * ~~kein Coredump-Abschnitt~~ — **behoben (Nachtrag 5).**
-* **Offen:** DNS-Hijack im Captive Portal hängt die Antwort hinter einen mitkopierten EDNS-OPT-Record; Clients mit EDNS0 (Windows, Chrome) sehen eine kaputte Antwort.
-* **Offen, kosmetisch:** Spaltengriffe im Register-Tab ohne `pointercancel`; die Theme-Markierung zeigt nicht, wenn `?theme=` in der URL überstimmt.
+* ~~DNS-Hijack im Captive Portal hängt die Antwort hinter einen mitkopierten EDNS-OPT-Record~~, ~~Spaltengriffe im Register-Tab ohne `pointercancel`~~, ~~die Theme-Markierung zeigt nicht, wenn `?theme=` in der URL überstimmt~~ — **alle behoben (Nachtrag 12)**, samt einem dabei gefundenen vierten: ein *ungültiges* `?theme=` verschluckte die gespeicherte Wahl.
 
 ## Nachtrag (gleicher Tag): fünf weitere Punkte behoben
 
@@ -340,6 +341,80 @@ Ausgeschaltet: keine Abos auf die Kommando-Fächer, jedes trotzdem eintreffende 
 Am Gerät: Steuerung aus → `not subscribing to the command topics`, `the two HA controls were removed`, MQTT meldet weiter; wieder ein → `+ 2 controls`. Alle Konfigurationen haben das Update überlebt (MQTT-Host, Sollwert −350 W, Überbrückung 60 s), das AP-Feld zeigt die Warnung „Standardwert aus dem Quelltext".
 
 Den Rollback-Pfad kann man am Gerät **nicht** auslösen — einen längeren Datensatz schriebe nur eine zukünftige Firmware. Also 50 Prüfungen mit einem NVS-Ersatz im Speicher (`test_nvs_store`), dessen `nvs_get_blob()` an genau einer Stelle originalgetreu ist: es kürzt nicht. Eine Attrappe, die stillschweigend gekürzt hätte, hätte den Test über den Fehler hinweg bestehen lassen. Gegenprobe: Präfix-Regel wieder ausgebaut → drei Fehler, mit `4362` = `ESP_ERR_NVS_INVALID_LENGTH` im Klartext.
+
+## Nachtrag 12 (11. September): Regelpfad und Web, die letzten offenen Punkte
+
+Der Betreiber hat entschieden, dass das System **offen** bleibt: Lesen und Schreiben im LAN ist gewollt, die Modbus-Brücke auf Port 502 und das fehlende Web-Passwort sind damit keine offenen Punkte mehr, sondern eine Festlegung. Übrig blieben vier Punkte im Regelpfad und drei im Web.
+
+### Der SLS-Exportschutz war ein Oszillator
+
+Notiert war „schreibt bei jeder ±200-W-Änderung in EEPROM-Register". Beim Hinsehen war es schlimmer: der Regler konnte gar nicht anders.
+
+Er korrigierte gegen den **Nutzer-Sollwert** und stellte diesen wieder her, sobald die Einspeisung unter der Grenze lag — unter der Grenze lag sie aber nur *wegen* der Drosselung. Also: drosseln, Einspeisung fällt, zurückstellen, Einspeisung steigt, drosseln. Zwei Ticks pro Runde, 1,6 s, jedes Mal zwei EEPROM-Register. Und ein zweiter Fehler steckte in derselben Zeile: steht die Anlage bereits auf 9235 W und liegt noch 500 W über der Grenze, ergibt `Nutzer-Sollwert − Überschuss` = 9500 W — **mehr** Leistung, während die Sicherung über ihrer Auslegung liegt.
+
+| | vorher | jetzt |
+| --- | --- | --- |
+| Bezugsgröße der Korrektur | Nutzer-Sollwert | **angewandte** Leistung — das konvergiert |
+| Zurückgeben | sofort auf voll, sobald unter der Grenze | erst nach 1000 W Luft **und** 60 s Ruhe, dann eine 500-W-Stufe |
+| Totband | ±200 W | die 500-W-Stufe selbst: eine kleinere Änderung kann kein neues Ziel ergeben |
+| Schreibrate | bis zu 75 Korrekturen/min | höchstens eine pro 10 s — bei großem Überschuss sofort, die schützende Richtung wartet nie |
+| Register je Korrektur | 142 **und** 143 | nur 143; der Arbeitsmodus steht ja schon richtig |
+
+Die Entscheidung liegt jetzt in `sls_guard.h` — eine reine Funktion aus (Messwert, Zustand, Uhr), ohne Zugriff auf Bus, NVS oder Anzeige. Das ist der Punkt: ihre interessanten Fälle heißen „die Einspeisung hatte eine Minute lang Luft" und „die erste Korrektur reichte nicht", und die will niemand vor einem Sicherungskasten nachstellen. `modbus_tcp.c` liest weiter Modus, Zähler und Sicherungsgröße und fragt hier nach der Antwort.
+
+Dazu ein **Verschleißzähler**: `/api/deye/live` meldet unter `ctrl` jetzt `writes` — jeden Registerschreibvorgang seit dem Start, auch die unverifizierten. Wer wissen will, was die Ratenbremse wert ist, kann es ablesen statt schätzen.
+
+### Der Selbsttest sendete auf den falschen Bus
+
+`do_selftest()` war fest verdrahtet: Bus 1 fragt, Bus 0 antwortet. Dieses Gerät ist genau andersherum konfiguriert — **Bus A (0) = Master, Bus B (1) = Slave**. Der Test schickte seine Anfrage also auf den Bus, den der Deye gerade pollt, fragte dabei nach der Slave-ID des *Master*-Busses (also der des Deye), und konnte deshalb nur FAIL melden. Die Prüfung stand außerdem **vor** der `enabled`-Abfrage: auf einem abgeschalteten Bus wurde ebenfalls gesendet.
+
+Jetzt fragt, wer als Master konfiguriert ist, und gemeint ist die ID dessen, der als Slave konfiguriert ist. Fehlt eine der beiden Hälften oder ist ein Bus aus, wird die Anfrage **abgelehnt statt gesendet**, mit einem Grund im Klartext („Kein Bus ist Slave — niemand kann antworten"). Am Gerät: **PASS (50 ms)** — zum ersten Mal.
+
+### Ein Zähler darf nicht langsamer abgefragt werden, als sein Wert altert
+
+`poll_ms` ging bis 60 s, der Netzwert gilt aber nach 12 s als veraltet. Ein so eingestellter Zähler wäre 48 von 60 Sekunden abgelaufen gewesen, die Emulation hätte die meiste Zeit in der Überbrückung und danach stumm gestanden — und die Eingabemaske nahm den Wert an. Steuerungsrelevante Rollen (Netz-Zähler, Deye-AC-Zähler) bekommen jetzt einen eigenen Deckel von einem Drittel des Frischefensters, also 4000 ms. Zwei verpasste Abfragen passen noch hinein.
+
+Geklemmt wird beim Laden — eine zurückgespielte Sicherung kommt gar nicht erst durch die Maske — **und** in der Maske selbst, dort schon beim Umstellen der Rolle, damit die korrigierte Zahl sichtbar wird und nicht hinter einem geschlossenen Dialog passiert. Nachweis am Gerät: Netzzähler auf 60 s importiert, Log meldet `poll 60000 ms is slower than the 12000 ms freshness window -- clamped to 4000 ms`, Wertalter über 24 s gemessen höchstens 3,7 s, Emulation durchgehend `fresh`. Danach die ursprünglichen 800 ms zurückgespielt.
+
+### Modbus-TCP: Transaktions-ID und Rahmenbildung
+
+Die Anfrage trug konstant `0x0001`, und niemand prüfte sie in der Antwort. Die Antwort wurde außerdem als feste neun Bytes gelesen — was nicht diese Form hatte, ließ seinen Rumpf im Strom liegen. Da die Verbindung über Abfragerunden hinweg offen bleibt, hätte ab da **jede** Lesung den vorigen Registerblock geliefert: dieselbe Falle, gegen die `rtu_drain()` auf der Zweidrahtleitung schützt.
+
+Die ID zählt jetzt hoch und wird zusammen mit der Unit-ID geprüft; die Rahmenbildung folgt dem MBAP-Längenfeld statt einer angenommenen Größe. Ein fremder Rahmen kann damit zu Ende gelesen und verworfen werden — bis zu vier, danach gilt der Strom als verloren und der Aufrufer baut die Verbindung neu auf (was er nach einem Fehler ohnehin tut).
+
+Ehrlich gesagt: ein *nachgewiesener* Fehlgriff war das nicht. Jede fehlgeschlagene Lesung wirft die Verbindung weg, das Fenster ist also klein. Es ist Absicherung nach demselben Muster, das auf der RS485-Seite schon zweimal einen echten Fehler hatte.
+
+### Web: der Captive-Portal-DNS log Windows und Chrome an
+
+Die Antwort entstand als **Kopie des ganzen Pakets**, danach wurde `ARCOUNT` auf 0 gesetzt und eine Antwort angehängt. Das Nullsetzen entfernt den EDNS0-OPT-Record aber nicht, es kündigt ihn nur nicht mehr an — er lag weiterhin zwischen Frage und angehängter Antwort. Der Client las also den OPT-Record an der Stelle der Antwort, deutete ihn als solche (Wurzelname, Typ 41) und gab auf. Windows und Chrome hängen genau diesen Record an: das Portal öffnete sich ausgerechnet bei den beiden Clients nicht, auf die es ankommt.
+
+Die Antwort wird jetzt **aus der Frage aufgebaut**, nicht aus einer Kopie — was wir nicht verstehen, wird damit gar nicht erst übernommen. Dazu: eine AAAA-Frage bekommt NOERROR ohne Datensätze statt eines A-Records (der Client fragt dann nach A, statt die Antwort für kaputt zu halten), und der Namensparser begrenzt alles gegen die Paketlänge — Labels, die 255-Byte-Grenze, und Kompressionszeiger, die in einer Frage nichts zu suchen haben und eine Schleife wären. Das Ganze liegt in `dns_hijack.h`, weil es ein Parser ist, den jeder füttern kann, der das Notfall-WLAN erreicht.
+
+Nicht am Gerät nachgewiesen: der DNS-Teil läuft nur bei aktivem SoftAP, und dafür müsste das WLAN ausfallen. Dafür gibt es 42 Prüfungen, darunter der EDNS-Fall Byte für Byte.
+
+### Web, klein
+
+Die Spaltengriffe im Register-Tab räumen jetzt auch bei `pointercancel` und `lostpointercapture` auf — am Telefon feuert das, sobald die Geste zum Scrollen wird; vorher blieb der `pointermove`-Zuhörer hängen und die Spalte folgte dem Finger ohne gedrückte Taste.
+
+Die Theme-Leiste zeigte die **gespeicherte** Wahl, während `?theme=` in der URL die Seite überstimmte: die Seite stand dunkel da, hervorgehoben war „Hell". Sie zeigt jetzt, was wirklich gilt, sagt im Tooltip woher, und ein Klick entfernt den Parameter aus der URL — sonst überstimmt er die gerade getroffene Wahl beim nächsten Laden wieder.
+
+**Und dabei ein zweiter Fehler gefunden, den niemand notiert hatte.** Um die Markierung zu prüfen, ist die Theme-Logik aus der *ausgelieferten* Seite herausgeschnitten und unter Node gegen ein Minimal-DOM gelaufen — fünf Fälle, kein Nachbau. Vier stimmten. Der fünfte: `?theme=quatsch` verschluckte die gespeicherte Wahl. Das Kopf-Skript schrieb `var t = q || localStorage.getItem("theme")`, und jeder nicht-leere Parameter gewinnt ein ODER — ein Tippfehler in der URL warf die Seite also auf die Systemeinstellung zurück. Jetzt überstimmt nur ein *gültiger* Wert, mit derselben Prüfung wie die Leiste darunter.
+
+### Nachweis am Gerät
+
+Build 284 per OTA, Bewährung bestanden, Slot `ota_0` VALID. Die Emulation beantwortet **503 Anfragen/min** — derselbe Wert wie vor dem `-Os`-Wechsel in Nachtrag 9, der zeitkritische Pfad ist also unverändert. Antwortalter 88 ms, Deye online mit 15 Registerblöcken, 4/4 Geräte, MQTT und Uhr in Ordnung, `dma_min` 71 kB. Selbsttest PASS (50 ms). Kein neuer Eintrag im Log.
+
+Nicht am Gerät geprüft: die Ablehnung des Selbsttests bei fehlender Gegenstelle — dafür müsste man dem Deye den Zähler wegnehmen. Die vier Prüfungen dazu laufen auf dem Host.
+
+### Tests
+
+**121 neue Prüfungen** (jetzt 387 insgesamt), zwei neue Suiten. `test_sls_guard` deckt den Regler ab, `test_dns_hijack` den DNS-Aufbau; dazu fünf Prüfungen für den neuen Schreibpfad der Drosselung und vier für die Bus-Rollen des Selbsttests.
+
+**Gegenprobe: 18 Mutationen, alle gefangen** — und sie hat sich doppelt bezahlt gemacht.
+
+*Erstens* überlebte eine Mutation: die doppelte Klemmung auf die Mindestleistung in `sls_guard.h` konnte kein Ergebnis ändern. `%` schneidet zur Null hin ab, ein Ziel unterhalb der Mindestleistung landet nach dem Runden also höchstens bei 500 W — und die Klemmung danach fängt jeden dieser Fälle ohnehin. Die erste ist ersatzlos gestrichen.
+
+*Zweitens* ist die Sekunden-Falle aus Nachtrag 7 ein zweites Mal zugeschnappt. Der erste Mutationslauf meldete alle zwölf als „gefangen", der Kontrolllauf danach war aber **rot**: die Läufe waren teilweise gegen das Binary der *vorigen* Mutation gefahren, weil Apples `make` 3.81 Zeitstempel sekundengenau vergleicht und das Zurückschreiben in dieselbe Sekunde fiel. Mit `make -C test clean` vor jedem Lauf sah das Ergebnis anders aus — und erst dann fiel die überlebende Mutation auf. Steht jetzt als Regel im `test/README.md`: **Mutationsergebnisse ohne sauberen Neubau sind keine Ergebnisse.**
 
 ## Gut gemacht — nicht anfassen
 

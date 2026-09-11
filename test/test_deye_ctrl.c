@@ -22,6 +22,8 @@ static void reset_all(void)
     s_undo_pending = false;
     s_undo_tries   = 0;
     s_task         = NULL;
+    s_write_full   = false;   /* deye_ctrl_apply() leaves this set */
+    s_writes       = 0;
 }
 
 /* ------------------------- what gets written --------------------------- */
@@ -247,6 +249,89 @@ static void test_fallback_restarts_the_clock(void)
     CHECK_I(st.age_s, 0);                   /* not an hour old */
 }
 
+/* ------------------- the SLS throttle's write path ---------------------
+ * Registers 142 and 143 live in the inverter's EEPROM. A throttle changes
+ * only the sell power, so re-sending the work mode with the value it already
+ * holds costs a write cycle for nothing -- and the guard corrects repeatedly
+ * by design. */
+
+static void test_a_throttle_writes_only_the_sell_power(void)
+{
+    reset_all();
+    s_mode    = DEYE_MODE_FORCE_DISCHARGE;
+    s_power_w = 8500;
+    fake_rtu_reset();
+
+    deye_ctrl_write_pending();              /* no full write requested */
+
+    CHECK_I(fake_rtu_wrote(143), 1);
+    CHECK_I(fake_rtu_wrote(142), 0);        /* the work mode is untouched */
+    CHECK_I(fake_rtu_reg(143), 8500);
+    CHECK_I(s_failed, 0);
+    CHECK_I(s_checked, 1);                  /* still read back */
+}
+
+static void test_a_pending_mode_change_outranks_a_throttle(void)
+{
+    reset_all();
+    s_mode       = DEYE_MODE_FORCE_DISCHARGE;
+    s_power_w    = 8500;
+    s_write_full = true;                    /* deye_ctrl_apply() got in */
+    fake_rtu_reset();
+
+    deye_ctrl_write_pending();
+
+    /* Both registers: writing only the power would leave the inverter in
+     * whatever work mode it had before. */
+    CHECK_I(fake_rtu_wrote(142), 1);
+    CHECK_I(fake_rtu_wrote(143), 1);
+    CHECK_I(fake_rtu_reg(142), 3);
+    CHECK(!s_write_full);                   /* and the flag is consumed */
+}
+
+static void test_a_throttle_outside_discharge_writes_the_whole_mode(void)
+{
+    reset_all();
+    s_mode    = DEYE_MODE_NORMAL;           /* nothing should throttle here */
+    s_power_w = 5000;
+    fake_rtu_reset();
+
+    deye_ctrl_write_pending();
+
+    /* The short path is only correct while Selling First is in force. Outside
+     * it, fall back to writing the complete set rather than poking 143. */
+    CHECK_I(fake_rtu_wrote(142), 1);
+    CHECK_I(fake_rtu_reg(142), 2);
+}
+
+static void test_apply_asks_for_a_full_write(void)
+{
+    reset_all();
+    CHECK(!s_write_full);
+    deye_ctrl_apply(DEYE_MODE_FORCE_DISCHARGE, 6000);
+    CHECK(s_write_full);
+}
+
+static void test_the_wear_counter_sees_every_register(void)
+{
+    reset_all();
+    s_writes = 0;
+    deye_ctrl_write_regs(DEYE_MODE_NORMAL, 5000);
+    /* 142, 143, 126, 127, 128 and the two arrays of six: the unverified ones
+     * wear the EEPROM exactly like the read-back ones. */
+    CHECK_I(s_writes, 5 + 6 + 6);
+
+    deye_ctrl_status_t st;
+    deye_ctrl_get_status(&st);
+    CHECK_I(st.writes, 17);
+
+    /* A throttle is one write, which is the whole point of the short path. */
+    s_mode = DEYE_MODE_FORCE_DISCHARGE;
+    deye_ctrl_write_pending();
+    deye_ctrl_get_status(&st);
+    CHECK_I(st.writes, 18);
+}
+
 int main(void)
 {
     RUN(test_normal_writes_the_reset_values);
@@ -262,5 +347,10 @@ int main(void)
     RUN(test_start_is_quiet_when_nothing_was_forced);
     RUN(test_fallback_clears_the_store_only_once_confirmed);
     RUN(test_fallback_restarts_the_clock);
+    RUN(test_a_throttle_writes_only_the_sell_power);
+    RUN(test_a_pending_mode_change_outranks_a_throttle);
+    RUN(test_a_throttle_outside_discharge_writes_the_whole_mode);
+    RUN(test_apply_asks_for_a_full_write);
+    RUN(test_the_wear_counter_sees_every_register);
     return t_report("deye_ctrl");
 }

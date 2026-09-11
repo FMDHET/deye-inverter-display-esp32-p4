@@ -542,6 +542,79 @@ static void test_manipulation_is_off_after_a_restart(void)
     fake_nvs_fail = false;
 }
 
+/* ---------------------- self-test bus selection ------------------------
+ * The test asks over one bus and is answered over the other. It used to be
+ * wired to "bus 1 asks, bus 0 answers" regardless of configuration -- which
+ * on this installation (bus 0 master, bus 1 slave) meant transmitting onto
+ * the bus the Deye is actively polling, asking for the Deye's own id, and
+ * reporting FAIL every time. The pair now comes from the roles. */
+
+static mb_rtu_cfg_t pair_cfg(uint8_t master_idx)
+{
+    mb_rtu_cfg_t c;
+    memset(&c, 0, sizeof(c));
+    for (int i = 0; i < MB_RTU_BUSES; i++) {
+        c.bus[i].enabled  = 1;
+        c.bus[i].baud     = 9600;
+        c.bus[i].slave_id = (uint8_t)(i + 1);
+        c.bus[i].role     = (i == master_idx) ? MB_RTU_MASTER : MB_RTU_SLAVE;
+    }
+    return c;
+}
+
+static void test_selftest_accepts_either_bus_as_master(void)
+{
+    /* Both layouts are legitimate; neither may be privileged. */
+    mb_rtu_cfg_t a = pair_cfg(0);
+    CHECK(selftest_why_not(&a) == NULL);
+    mb_rtu_cfg_t b = pair_cfg(1);
+    CHECK(selftest_why_not(&b) == NULL);
+}
+
+static void test_selftest_refuses_without_a_partner(void)
+{
+    /* Two masters: the request would go out and nothing could answer it. */
+    mb_rtu_cfg_t c = pair_cfg(0);
+    c.bus[1].role = MB_RTU_MASTER;
+    CHECK(selftest_why_not(&c) != NULL);
+
+    /* Two slaves: nobody to ask with. */
+    c = pair_cfg(0);
+    c.bus[0].role = MB_RTU_SLAVE;
+    CHECK(selftest_why_not(&c) != NULL);
+}
+
+static void test_selftest_refuses_when_a_bus_is_switched_off(void)
+{
+    /* A disabled bus cannot answer -- and the old code did not even look at
+     * `enabled`: the check sat in FRONT of it, so the test transmitted on a
+     * bus the operator had switched off. */
+    mb_rtu_cfg_t c = pair_cfg(0);
+    c.bus[1].enabled = 0;
+    CHECK(selftest_why_not(&c) != NULL);
+
+    c = pair_cfg(0);
+    c.bus[0].enabled = 0;
+    CHECK(selftest_why_not(&c) != NULL);
+
+    c = pair_cfg(0);
+    c.bus[0].enabled = c.bus[1].enabled = 0;
+    CHECK(selftest_why_not(&c) != NULL);
+}
+
+static void test_selftest_says_which_half_is_missing(void)
+{
+    /* The reason reaches the operator on the display, so it has to name the
+     * missing half rather than just "failed". */
+    mb_rtu_cfg_t c = pair_cfg(0);
+    c.bus[1].role = MB_RTU_MASTER;          /* no slave */
+    CHECK(strstr(selftest_why_not(&c), "Slave") != NULL);
+
+    c = pair_cfg(0);
+    c.bus[0].role = MB_RTU_SLAVE;           /* no master */
+    CHECK(strstr(selftest_why_not(&c), "Master") != NULL);
+}
+
 int main(void)
 {
     RUN(test_stale_serves_zero);
@@ -563,5 +636,9 @@ int main(void)
     RUN(test_hold_forever_keeps_the_old_behaviour);
     RUN(test_manipulation_expires_on_its_own);
     RUN(test_manipulation_is_off_after_a_restart);
+    RUN(test_selftest_accepts_either_bus_as_master);
+    RUN(test_selftest_refuses_without_a_partner);
+    RUN(test_selftest_refuses_when_a_bus_is_switched_off);
+    RUN(test_selftest_says_which_half_is_missing);
     return t_report("modbus_rtu");
 }

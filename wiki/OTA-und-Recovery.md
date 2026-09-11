@@ -139,6 +139,16 @@ Nützlich, wenn gerade kein `curl` zur Hand ist — oder wenn jemand ohne Entwic
 
 `heap_min` daneben ist der niedrigste freie Speicherstand seit dem Start. Ein Upload, der an Speichermangel stirbt, ist daran auch später noch zu erkennen, obwohl der aktuelle Wert längst wieder normal ist. Der Tab „System & Update" zeigt beides, Absturzursachen in Rot.
 
+Die **Laufzeit** steht in der Kopfzeile der Seite und ist damit auf jedem Tab zu sehen. Sie läuft mit: die Seite zählt die Sekunden selbst weiter und fragt das Gerät nur alle 30 s, weil der Webserver auf Port 80 nur vier Verbindungen gleichzeitig hat und die sich Zähler-Tab, Spiegel und Brücke teilen. Zwischen zwei Abgleichen ist die Zahl also gerechnet, nicht gemessen — und das gibt sie zu:
+
+| Anzeige | Bedeutung |
+| --- | --- |
+| `2 T  05:13:44` | normal, mit dem Gerät abgeglichen |
+| `… (?)` in Orange | zwei Abgleiche in Folge ohne Antwort — weitergezählt, nicht gemessen |
+| Zahl in Rot | die Laufzeit ist **zurückgesprungen**, das Gerät hat also neu gestartet |
+
+Der rote Hinweis ist der eigentliche Nutzen: ein Neustart, den niemand ausgelöst hat, fällt sonst nur auf, wenn man zufällig zweimal hinsieht — genau so ist der Absturz vom 11. September entdeckt worden (siehe [Code-Review](Code-Review-2026-09#nachtrag-13-11-september-der-absturz-vom-morgen-ausgewertet)). Ein Neustart, den man auf dieser Seite selbst angestoßen hat, wird **nicht** rot markiert: eine Warnung für das, was man gerade angeklickt hat, erzieht dazu, Warnungen zu ignorieren.
+
 > [!TIP]
 > **Langsamer Upload ist ein Warnzeichen.** Der Chip nimmt normalerweise über 100 kB/s an; ein Update ist also nach wenigen Sekunden durch. Kriecht es stattdessen bei 10 bis 20 kB/s, liegt das erfahrungsgemäß nicht am Gerät, sondern am sendenden Rechner. Ein Fall aus der Praxis: ein Mac, der gleichzeitig über WLAN **und** über eine Dock-Ethernetbuchse im selben Subnetz hing. Die Systemroute nahm das Ethernet, und darüber kamen nur 21 kB/s an, über WLAN dagegen 148 kB/s — Faktor sieben. Prüfen mit `ifconfig | grep "inet 192"`; sind es zwei Adressen im gleichen Netz, hilft `curl --interface <ip>`, um den schnellen Weg zu erzwingen.
 

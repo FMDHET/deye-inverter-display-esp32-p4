@@ -150,6 +150,12 @@
   header.hub h1 { margin:0; }
   header.hub .spacer { flex:1; }
   header.hub a.ext { color:var(--link); text-decoration:none; font-size:12px; }
+  /* Die Laufzeit zaehlt zwischen zwei Abgleichen lokal weiter. Solange das
+     Geraet antwortet, ist das die Wahrheit; antwortet es nicht mehr, ist die
+     Zahl geraten -- und dann muss sie das auch sagen (.stale). */
+  .upt { font-variant-numeric:tabular-nums; }
+  .upt.stale { color:var(--warn); }
+  .upt.restarted { color:var(--err); font-weight:600; }
   header.hub a.ext:hover { text-decoration:underline; }
   .theme { display:inline-flex; border:1px solid var(--bdi); border-radius:6px; overflow:hidden; }
   .theme button { border:none; border-radius:0; padding:4px 10px; font-size:12px; background:transparent; color:var(--mut); }
@@ -325,6 +331,7 @@
 <header class="hub">
   <h1>Deye Display</h1>
   <span class="sub" style="margin:0;" id="hubVer">&hellip;</span>
+  <span class="sub upt" style="margin:0;" id="hubUpt" title="Laufzeit seit dem letzten Neustart">&hellip;</span>
   <span class="spacer"></span>
   <a class="ext" href="/" target="_blank">Display-Spiegel &#8599;</a>
   <a class="ext" href="/recovery" target="_blank">Recovery-Seite &#8599;</a>
@@ -613,6 +620,78 @@
     return d + " T  " + p(h) + ":" + p(m) + ":" + p(sec);
   }
 
+
+  /* ---------------- Laufzeit: eine Uhr fuer beide Anzeigen ----------------
+   * Die Laufzeit stand vorher still: sie wurde nur beim Laden der Seite und
+   * beim Oeffnen dieses Tabs geholt. Eine Zahl, die "Laufzeit" heisst und sich
+   * nicht bewegt, ist im besten Fall nutzlos und im schlechteren falsch.
+   *
+   * Jetzt zaehlt sie lokal weiter und gleicht sich nur alle UPT_SYNC_MS am
+   * Geraet ab -- der :80-Server hat vier Sockets, die sich Zaehler-Tab,
+   * Spiegel und Bruecke teilen, also wird hier nicht jede Sekunde gefragt.
+   *
+   * Lokal weiterzaehlen heisst aber: zwischen zwei Abgleichen ist die Zahl
+   * gerechnet, nicht gemessen. Zwei Faelle muss sie deshalb zugeben koennen --
+   * das Geraet antwortet nicht mehr (dann ist sie geraten), und es ist neu
+   * gestartet (dann war sie falsch). */
+  var UPT_SYNC_MS  = 30000;
+  var uptBase = null;   /* Laufzeit (s) beim letzten Abgleich   */
+  var uptAt   = 0;      /* Date.now() dieses Abgleichs          */
+  var uptMiss = 0;      /* Abgleiche in Folge ohne Antwort      */
+  var uptBoot = 0;      /* Date.now() einer erkannten Neustart-Meldung */
+
+  function uptNow() {
+    if (uptBase == null) return null;
+    return uptBase + Math.floor((Date.now() - uptAt) / 1000);
+  }
+
+  function uptRender() {
+    var el = [document.getElementById("hubUpt"), document.getElementById("sUpt")];
+    var s = uptNow();
+    var txt, stale = uptMiss >= 2, boot = uptBoot && (Date.now() - uptBoot) < 60000;
+    if (s == null)      txt = "…";
+    else if (stale)     txt = fmtUptime(s) + " (?)";
+    else                txt = fmtUptime(s);
+    for (var i = 0; i < el.length; i++) {
+      if (!el[i]) continue;
+      el[i].textContent = txt;
+      el[i].classList.toggle("stale", !!stale);
+      el[i].classList.toggle("restarted", !!boot);
+      el[i].title = stale
+        ? "Geraet antwortet nicht — weitergezaehlt, nicht gemessen"
+        : (boot ? "Das Geraet wurde gerade neu gestartet"
+                : "Laufzeit seit dem letzten Neustart");
+    }
+  }
+
+  /* Uhr aus einer /ota-Antwort nachziehen. Wird auch von sysLoadInfo()
+   * aufgerufen, damit ein Tabwechsel gratis ein Abgleich ist. */
+  window.uptSync = function (uptime) {
+    if (uptime == null) { uptMiss++; uptRender(); return; }
+    var was = uptNow();
+    /* Rueckwaerts heisst Neustart -- die einzige Erklaerung dafuer, dass ein
+     * Geraet weniger lange laeuft als eben noch. Toleranz, weil der lokale
+     * Zaehler um eine Sekunde vorauslaufen kann. Nicht hervorgehoben wird ein
+     * Neustart, den man auf dieser Seite selbst ausgeloest hat (busy): eine
+     * rote Warnung fuer das, was man gerade angeklickt hat, erzieht dazu, rote
+     * Warnungen zu ignorieren. */
+    if (was != null && uptime + 5 < was && !busy) uptBoot = Date.now();
+    uptBase = uptime; uptAt = Date.now(); uptMiss = 0;
+    uptRender();
+  };
+
+  setInterval(uptRender, 1000);
+  setInterval(function () {
+    /* Waehrend eines laufenden Updates nicht dazwischenfunken: der Upload
+     * teilt sich die vier Sockets des :80-Servers, und den Neustart danach
+     * verfolgt ohnehin waitBack(). */
+    if (busy) return;
+    fetch("/ota", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { window.uptSync(j.uptime); })
+      .catch(function () { window.uptSync(null); });
+  }, UPT_SYNC_MS);
+
   window.sysLoadInfo = function () {
     fetch("/ota", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
       var v = j.version + " (#" + j.build + ")";
@@ -622,7 +701,7 @@
       document.getElementById("sFs").textContent  = "#" + j.fs_build;
       document.getElementById("sRun").textContent = j.running;
       document.getElementById("sTgt").textContent = j.target_slot;
-      document.getElementById("sUpt").textContent = (j.uptime != null) ? fmtUptime(j.uptime) : "-";
+      window.uptSync(j.uptime);      /* setzt beide Anzeigen, siehe oben */
       /* Absturzursachen hervorheben: SW ist unser eigener Neustart nach einem
        * Update, POWERON/EXT sind harmlos -- alles andere ist ein Befund. */
       var rst = j.reset || "-";

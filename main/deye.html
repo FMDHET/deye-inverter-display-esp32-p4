@@ -107,7 +107,7 @@
   #tab-meter td.c-mode select { width:100%; }
   #tab-meter td.c-pw { text-align:left; padding-left:18px; }
   /* Name/IP/Typ/Rolle sind Text -- linksbuendig wie ihre Kopfzellen. */
-  #devBody > tr > td:nth-child(-n+4) { text-align:left; }
+  #devBody > tr > td:nth-child(-n+2) { text-align:left; }
   .pos { color:var(--warn); }   /* Bezug        */
   .neg { color:var(--acc); }    /* Einspeisung  */
   .man { color:var(--man); }    /* manipuliert  */
@@ -297,33 +297,56 @@
     #manipBody > tr > td.c-val input { flex:1 1 8em; width:auto; }
     #manipBody > tr > td.c-eff { font-size:12px; }
 
-    /* Geraete: Name + Status als Kopfzeile, darunter IP/Typ/Rolle, dann die
-       drei Phasen nebeneinander, Leistung und Alter zum Schluss. */
+    /* Geraete: Name + Status als Kopfzeile, darunter die IP, dann die drei
+       Phasen nebeneinander, Leistung und Alter zum Schluss. (Typ und Rolle
+       standen frueher mit in der Tabelle; sie sagen nichts, was der Name nicht
+       schon sagt, und sind raus.) */
     /* Jede Zelle bekommt ihren festen Platz -- die automatische Platzierung
        schob die Statuspille ueber den Namen und verteilte den Rest je nach
-       Textlaenge anders. Zeile 1: Name + Status. Zeile 2: IP (zwei Drittel,
-       sonst zu lang) + Typ. Zeile 3: Rolle. Zeile 4: L1 L2 L3. Zeile 5:
-       Leistung + Alter. Die Meta-Zeilen sind Beiwerk, deshalb kleiner. */
+       Textlaenge anders. Zeile 1: Name + Status. Zeile 2: IP. Zeile 3:
+       L1 L2 L3. Zeile 4: Leistung + Alter. Die IP ist Beiwerk, deshalb kleiner. */
     #devBody > tr { grid-template-columns:repeat(3,minmax(0,1fr)); }
     #tab-meter #devBody > tr > td:first-child { grid-column:1 / 3; grid-row:1; }
     #devBody > tr > td.c-st { grid-column:3; grid-row:1; justify-self:end;
                               border-bottom:1px solid var(--bd); padding-bottom:4px; align-self:stretch; }
-    #devBody > tr > td:nth-child(2)  { grid-column:1 / 3; grid-row:2; }
-    #devBody > tr > td:nth-child(3)  { grid-column:3;     grid-row:2; }
-    #devBody > tr > td:nth-child(4)  { grid-column:1 / -1; grid-row:3; }
-    #devBody > tr > td:nth-child(6)  { grid-column:1; grid-row:4; }
-    #devBody > tr > td:nth-child(7)  { grid-column:2; grid-row:4; }
-    #devBody > tr > td:nth-child(8)  { grid-column:3; grid-row:4; }
-    #devBody > tr > td.c-pw          { grid-column:1 / 3; grid-row:5; padding-left:0; }
-    #devBody > tr > td:nth-child(10) { grid-column:3;     grid-row:5; }
-    #devBody > tr > td:nth-child(2), #devBody > tr > td:nth-child(3),
-    #devBody > tr > td:nth-child(4) { font-size:12px; color:var(--mut); }
+    #devBody > tr > td:nth-child(2)  { grid-column:1 / -1; grid-row:2; font-size:12px; color:var(--mut); }
+    #devBody > tr > td:nth-child(4)  { grid-column:1; grid-row:3; }
+    #devBody > tr > td:nth-child(5)  { grid-column:2; grid-row:3; }
+    #devBody > tr > td:nth-child(6)  { grid-column:3; grid-row:3; }
+    #devBody > tr > td.c-pw          { grid-column:1 / 3; grid-row:4; padding-left:0; }
+    #devBody > tr > td:nth-child(8)  { grid-column:3;     grid-row:4; }
     #tab-meter #devBody > tr > td[colspan] { grid-column:1 / -1; grid-row:auto; }
     /* Summenzeile: die Platzhalter fuer U/I tragen nichts. */
     #phaseBody > tr.sum > td:nth-child(2), #phaseBody > tr.sum > td:nth-child(3) { display:none; }
 
     /* Deye je Phase: drei Gruppen zu je drei Werten -> Dreierraster. */
     #lvPhaseBody > tr { grid-template-columns:repeat(3,minmax(0,1fr)); }
+
+    /* ---- Reduziert am Telefon: nur Leistungen und Batterie ----
+     * Spannung, Strom, Frequenz, Temperatur, IP-Adressen, Alter der Werte
+     * und die Erklaertexte sind Werkbank-Details fuer den grossen Bildschirm.
+     * Am Telefon will man sehen, was erzeugt, verbraucht, gespeichert und
+     * an den Deye gemeldet wird -- sonst nichts. Die Daten bleiben im DOM,
+     * nur ausgeblendet; wer sie braucht, dreht das Telefon nicht, sondern
+     * nimmt den Rechner. */
+    .tile .foot .det { display:none; }
+    #tab-meter p.hint.expl { display:none; }
+    /* Doppelte ID im Selektor mit Absicht: die allgemeine Zellenregel oben
+       (#tab-meter .xscroll tbody > tr > td { display:block }) ist spezifischer
+       als "#phaseBody > tr > td:nth-child()" und wuerde das display:none
+       wieder aufheben. */
+    #tab-meter #phaseBody > tr > td:nth-child(2),              /* U            */
+    #tab-meter #phaseBody > tr > td:nth-child(3),              /* I            */
+    #tab-meter #phaseBody > tr > td:nth-child(8) { display:none; }   /* an Deye [A] */
+    #tab-meter #lvPhaseBody > tr > td:nth-child(3),            /* Netz intern  */
+    #tab-meter #lvPhaseBody > tr > td:nth-child(5),            /* WR U         */
+    #tab-meter #lvPhaseBody > tr > td:nth-child(6) { display:none; } /* WR I     */
+    #tab-meter #devBody > tr > td:nth-child(2),                /* IP           */
+    #tab-meter #devBody > tr > td:nth-child(8) { display:none; }     /* Phasen-Alter */
+    #devBody > tr > td:nth-child(4)  { grid-row:2; }
+    #devBody > tr > td:nth-child(5)  { grid-row:2; }
+    #devBody > tr > td:nth-child(6)  { grid-row:2; }
+    #devBody > tr > td.c-pw          { grid-column:1 / -1; grid-row:3; }
   }
 </style></head>
 <body>
@@ -396,7 +419,7 @@
     <tbody id="phaseBody"></tbody>
   </table>
   </div>
-  <p class="hint" style="margin:10px 0 0;">
+  <p class="hint expl" style="margin:10px 0 0;">
     Vorzeichen wie beim Zähler: <span class="pos">+ = Netzbezug</span>,
     <span class="neg">&minus; = Einspeisung</span>. Spannung und Strom in der
     rechten Hälfte werden von der Emulation aus der Leistung erzeugt
@@ -442,13 +465,12 @@
   <table>
     <thead><tr>
       <th style="text-align:left;">Name</th><th style="text-align:left;">IP</th>
-      <th style="text-align:left;">Typ</th><th style="text-align:left;">Rolle</th>
       <th>Status</th><th>L1 [W]</th><th>L2 [W]</th><th>L3 [W]</th><th style="text-align:left;padding-left:18px;">Leistung</th><th>Phasen-Alter</th>
     </tr></thead>
     <tbody id="devBody"></tbody>
   </table>
   </div>
-  <p class="hint" style="margin:10px 0 0;">
+  <p class="hint expl" style="margin:10px 0 0;">
     Eltako-Zähler liefern L1…L3 direkt (Eingangsregister 0…17). Beim Fronius
     kennt SunSpec <b>keine</b> Wirkleistung je Phase &ndash; nur Strom und
     Spannung (AphA…C, PhVphA…C); die Spalten sind daher U&nbsp;×&nbsp;I, also
@@ -481,7 +503,7 @@
     <tbody id="lvPhaseBody"></tbody>
   </table>
   </div>
-  <p class="hint" style="margin:10px 0 0;">
+  <p class="hint expl" style="margin:10px 0 0;">
     „CT" ist der externe Wandler-/Zählereingang (Register&nbsp;616&hellip;619)
     &ndash; das ist der Wert, den unsere SDM630-Emulation füttert und auf den
     der Deye regelt. „intern" ist seine eigene Messung am Netzanschluss
@@ -991,8 +1013,6 @@ function render(d, live) {
     dh += "<tr>" +
       "<td>" + esc(g.name || g.mfr) + "</td>" +
       td(esc(g.ip) + ":" + g.slave, "", "IP") +
-      td(esc(g.mfr), "", "Typ") +
-      td(esc(g.role), "", "Rolle") +
       td(g.conn ? '<span class="pill ok">ok</span>' : '<span class="pill bad">weg</span>', "c-st") +
       td(p ? '<span class="' + cls(p[0]) + '">' + fmt(p[0]) + "</span>" : "–", "", "L1 [W]") +
       td(p ? '<span class="' + cls(p[1]) + '">' + fmt(p[1]) + "</span>" : "–", "", "L2 [W]") +
@@ -1009,8 +1029,6 @@ function render(d, live) {
     dh += '<tr' + (on ? "" : ' class="stale"') + ">" +
       "<td>Deye (AC-Ausgang)</td>" +
       td("RS485 / RTU", "hint", "IP") +
-      td("Deye", "", "Typ") +
-      td("Wechselrichter", "", "Rolle") +
       td(live.online ? '<span class="pill ok">ok</span>' : '<span class="pill bad">weg</span>', "c-st") +
       td(span(cls(iv.p[0]), fmt(iv.p[0])), "", "L1 [W]") +
       td(span(cls(iv.p[1]), fmt(iv.p[1])), "", "L2 [W]") +
@@ -1019,7 +1037,7 @@ function render(d, live) {
       td((live.age / 1000).toFixed(1) + " s", "", "Phasen-Alter") +
       "</tr>";
   }
-  $("devBody").innerHTML = dh || '<tr><td colspan="10" class="hint">Kein Modbus-TCP-Gerät konfiguriert.</td></tr>';
+  $("devBody").innerHTML = dh || '<tr><td colspan="8" class="hint">Kein Modbus-TCP-Gerät konfiguriert.</td></tr>';
 }
 
 /* ---------- Was der Deye selbst misst (/api/deye/live) ---------- */
@@ -1065,19 +1083,22 @@ function renderLive(l, served, why) {
   const inv = l.inv, ld = l.load, gr = l.grid, ba = l.bat;
 
   /* ---- Kacheln ---- */
+  /* .det = Beiwerk (Frequenz, Spannung, Strom, Temperatur): am Telefon
+   * ausgeblendet, dort zaehlen nur Leistungen und Ladestand. */
   tile("tInv", has(BLK.out), fmtW(inv.total), cls(inv.total),
-       fmt(inv.freq, 2) + " Hz am Ausgang");
+       '<span class="det">' + fmt(inv.freq, 2) + " Hz am Ausgang</span>");
 
   tile("tLoad", has(BLK.out), fmtW(ld.total), "",
        "davon Backup/UPS " + fmt(ld.ups_total) + " W");
 
   tile("tGrid", has(BLK.grid), fmtW(gr.ct_total), cls(gr.ct_total),
-       "intern " + fmt(gr.inner_total) + " W · gesamt " + fmt(gr.total) + " W · "
-       + fmt(gr.freq, 2) + " Hz");
+       '<span class="det">' + "intern " + fmt(gr.inner_total) + " W · gesamt " + fmt(gr.total) + " W · "
+       + fmt(gr.freq, 2) + " Hz</span>");
 
   tile("tBat", has(BLK.bat), fmtW(ba.p), cls(ba.p),
-       fmt(ba.soc) + " % · " + fmt(ba.v, 2) + " V · " + fmt(ba.i, 1) + " A · "
-       + fmt(ba.t, 1) + " °C · " + (ba.p > 0.5 ? "entlädt" : (ba.p < -0.5 ? "lädt" : "Ruhe")));
+       fmt(ba.soc) + " % · " + (ba.p > 0.5 ? "entlädt" : (ba.p < -0.5 ? "lädt" : "Ruhe"))
+       + '<span class="det"> · ' + fmt(ba.v, 2) + " V · " + fmt(ba.i, 1) + " A · "
+       + fmt(ba.t, 1) + " °C</span>");
 
   /* ---- Gegenprobe: was wir senden vs. was er am CT sieht ----
    * Genau hier wird die Manipulation sichtbar (oder eben nicht). Der Deye

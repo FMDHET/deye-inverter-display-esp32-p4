@@ -129,6 +129,10 @@
  * statt zu schrumpfen. .stale dimmt eine Gruppe, deren Registerblock in der
  * letzten Runde nicht geantwortet hat -- die Zahlen stehen dann noch da, sind
  * aber sichtbar von gestern. */
+  th .m { display:none; }
+  #manipFold > summary { list-style:none; cursor:default; }
+  #manipFold > summary::-webkit-details-marker { display:none; }
+  #manipFold > summary h2 { display:inline; }
   .tiles { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
   .tile { border:1px solid var(--bd); border-radius:6px; padding:8px 10px; background:var(--bg); }
   .tile .lbl  { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
@@ -343,10 +347,63 @@
     #tab-meter #lvPhaseBody > tr > td:nth-child(6) { display:none; } /* WR I     */
     #tab-meter #devBody > tr > td:nth-child(2),                /* IP           */
     #tab-meter #devBody > tr > td:nth-child(8) { display:none; }     /* Phasen-Alter */
-    #devBody > tr > td:nth-child(4)  { grid-row:2; }
-    #devBody > tr > td:nth-child(5)  { grid-row:2; }
-    #devBody > tr > td:nth-child(6)  { grid-row:2; }
-    #devBody > tr > td.c-pw          { grid-column:1 / -1; grid-row:3; }
+    #tab-meter #phaseBody > tr > td:nth-child(6),              /* Manipulation (Pille oben sagt es) */
+    #tab-meter #devBody > tr > td.c-st,                        /* Status -> "weg" am Namen */
+    #tab-meter #lvPhaseBody > tr > td:nth-child(4),            /* Netz gesamt  */
+    #tab-meter #lvPhaseBody > tr > td:nth-child(9) { display:none; } /* Backup   */
+
+    /* ---- Kompakt: die drei Werte-Tabellen sind am Telefon wieder echte
+       Tabellen. Nach der Reduktion bleiben drei bis vier schmale Spalten,
+       die passen bei 390 px nebeneinander -- eine Zeile je Phase oder Geraet
+       statt einer Karte mit acht Zeilen. Nur die Manipulation (Auswahlfelder
+       in voller Breite) bleibt Kartenlayout, und ist eingeklappt. ---- */
+    #tab-meter .xscroll > table.cpt { display:table; width:100%; min-width:0; border-collapse:collapse; }
+    #tab-meter table.cpt thead { display:table-header-group; }
+    #tab-meter table.cpt thead tr.grp { display:none; }
+    #tab-meter table.cpt tbody { display:table-row-group; }
+    #tab-meter table.cpt tbody > tr { display:table-row; border:0; border-radius:0; padding:0; margin:0; background:transparent; }
+    #tab-meter table.cpt tbody > tr.sum { background:var(--acc-soft); }
+    #tab-meter table.cpt tbody > tr > td,
+    #tab-meter table.cpt thead th { display:table-cell; padding:5px 4px; font-size:14px; text-align:right;
+                                    border-bottom:1px solid var(--bd); white-space:normal; }
+    #tab-meter table.cpt thead th { font-size:10px; line-height:1.15; position:static; box-shadow:none;
+                                    vertical-align:bottom; text-transform:uppercase; letter-spacing:.03em; }
+    #tab-meter table.cpt tbody > tr > td:first-child,
+    #tab-meter table.cpt thead th:first-child { text-align:left; font-weight:600; font-size:14px; padding-left:0; }
+    #tab-meter table.cpt tbody > tr > td.c-pw { text-align:left; padding-left:8px; }
+    #tab-meter table.cpt td[data-l]::before { display:none; }
+    #tab-meter table.cpt td.big { font-size:15px; }
+    #tab-meter table.cpt td:empty { display:table-cell; }
+    th .d { display:none; }  th .m { display:inline; }
+    /* Kopfzellen derselben Spalten -- wieder mit doppelter ID, sonst gewinnt
+       "table.cpt thead th { display:table-cell }" und die Koepfe bleiben. */
+    #tab-meter #phaseTbl th:nth-child(2), #tab-meter #phaseTbl th:nth-child(3),
+    #tab-meter #phaseTbl th:nth-child(6), #tab-meter #phaseTbl th:nth-child(8),
+    #tab-meter #devTbl th:nth-child(2), #tab-meter #devTbl th:nth-child(3), #tab-meter #devTbl th:nth-child(8),
+    #tab-meter #lvPhaseTbl th:nth-child(3), #tab-meter #lvPhaseTbl th:nth-child(4),
+    #tab-meter #lvPhaseTbl th:nth-child(5), #tab-meter #lvPhaseTbl th:nth-child(6),
+    #tab-meter #lvPhaseTbl th:nth-child(9) { display:none; }
+    #tab-meter #phaseTbl td:first-child, #tab-meter #lvPhaseTbl td:first-child { white-space:nowrap; }
+    #tab-meter #devBody > tr.off > td:first-child { color:var(--mut); }
+    #tab-meter #devBody > tr.off > td:first-child::after { content:" weg"; color:var(--err); font-weight:400; font-size:11px; }
+
+    /* Weniger Luft: Karten, Kacheln, Kopf. Beiwerk-Zeilen weg. */
+    .card { padding:8px 10px; margin-bottom:8px; }
+    h2 { font-size:12px; margin-bottom:6px; }
+    section.tab > .lead { display:none; }
+    #lvInfo, #pInfo { display:none; }
+    .tiles { gap:6px; }
+    .tile { padding:6px 8px; }
+    .tile .val { font-size:18px; }
+    header.hub { gap:4px 12px; margin-bottom:8px; }
+    header.hub .spacer { display:none; }
+    header.hub a.ext { padding:4px 0; }
+    .theme button { min-height:32px; padding:4px 10px; }
+    #manipFold > summary { cursor:pointer; }
+    #manipFold > summary h2 { margin:0; }
+    #manipFold > summary::after { content:" ▸"; color:var(--mut); }
+    #manipFold[open] > summary::after { content:" ▾"; }
+    #manipFold[open] > summary { margin-bottom:8px; }
   }
 </style></head>
 <body>
@@ -401,7 +458,7 @@
 <div class="card">
   <h2>Phasenübersicht</h2>
   <div class="xscroll">
-  <table>
+  <table class="cpt" id="phaseTbl">
     <thead>
       <tr class="grp">
         <th style="width:64px;"></th>
@@ -409,11 +466,13 @@
         <th colspan="2">Korrektur</th>
         <th colspan="2">an Deye gesendet</th>
       </tr>
+      <!-- .d / .m: Beschriftung fuer Rechner / Telefon. Am Telefon faellt die
+           Gruppenzeile weg, dann muss "P [W]" selbst sagen, welches P. -->
       <tr>
         <th></th>
-        <th>U [V]</th><th>I [A]</th><th>P [W]</th>
+        <th>U [V]</th><th>I [A]</th><th><span class="d">P [W]</span><span class="m">gemessen [W]</span></th>
         <th>Sollwert [W]</th><th>Manipulation</th>
-        <th>P [W]</th><th>I [A]</th>
+        <th><span class="d">P [W]</span><span class="m">an Deye [W]</span></th><th>I [A]</th>
       </tr>
     </thead>
     <tbody id="phaseBody"></tbody>
@@ -428,7 +487,8 @@
 </div>
 
 <div class="card">
-  <h2>Phasen gezielt manipulieren</h2>
+  <details id="manipFold" open>
+  <summary><h2>Phasen gezielt manipulieren</h2></summary>
   <p class="warn">
     <b>&#9888; Achtung:</b> Diese Werte gehen direkt in den Regelkreis des
     Wechselrichters. Der Deye <i>glaubt</i> was hier steht und regelt darauf —
@@ -457,12 +517,13 @@
     <button id="btnReset">Alle Phasen auf „aus“</button>
     <span class="hint" id="saveMsg"></span>
   </div>
+</details>
 </div>
 
 <div class="card">
   <h2>Modbus-TCP Zähler / Geräte</h2>
   <div class="xscroll">
-  <table>
+  <table class="cpt" id="devTbl">
     <thead><tr>
       <th style="text-align:left;">Name</th><th style="text-align:left;">IP</th>
       <th>Status</th><th>L1 [W]</th><th>L2 [W]</th><th>L3 [W]</th><th style="text-align:left;padding-left:18px;">Leistung</th><th>Phasen-Alter</th>
@@ -485,7 +546,7 @@
 <div class="card" id="cardLvPhase">
   <h2>Deye-Leistungen je Phase</h2>
   <div class="xscroll">
-  <table>
+  <table class="cpt" id="lvPhaseTbl">
     <thead>
       <tr class="grp">
         <th style="width:64px;"></th>
@@ -495,9 +556,9 @@
       </tr>
       <tr>
         <th></th>
-        <th>CT [W]</th><th>intern [W]</th><th>gesamt [W]</th>
-        <th>U [V]</th><th>I [A]</th><th>P [W]</th>
-        <th>P [W]</th><th>Backup [W]</th>
+        <th><span class="d">CT [W]</span><span class="m">Netz CT [W]</span></th><th>intern [W]</th><th>gesamt [W]</th>
+        <th>U [V]</th><th>I [A]</th><th><span class="d">P [W]</span><span class="m">WR [W]</span></th>
+        <th><span class="d">P [W]</span><span class="m">Last [W]</span></th><th>Backup [W]</th>
       </tr>
     </thead>
     <tbody id="lvPhaseBody"></tbody>
@@ -1010,7 +1071,7 @@ function render(d, live) {
   let dh = "";
   for (const g of d.meters) {
     const p = g.phases ? g.p : null;
-    dh += "<tr>" +
+    dh += "<tr" + (g.conn ? "" : ' class="off"') + ">" +
       "<td>" + esc(g.name || g.mfr) + "</td>" +
       td(esc(g.ip) + ":" + g.slave, "", "IP") +
       td(g.conn ? '<span class="pill ok">ok</span>' : '<span class="pill bad">weg</span>', "c-st") +
@@ -1026,7 +1087,7 @@ function render(d, live) {
    * Tabelle das vollstaendige Bild der Phasenverteilung im Haus. */
   if (live && live.valid) {
     const iv = live.inv, on = live.online && (live.blocks & BLK.out);
-    dh += '<tr' + (on ? "" : ' class="stale"') + ">" +
+    dh += '<tr class="' + (on ? "" : "stale ") + (live.online ? "" : "off") + '">' +
       "<td>Deye (AC-Ausgang)</td>" +
       td("RS485 / RTU", "hint", "IP") +
       td(live.online ? '<span class="pill ok">ok</span>' : '<span class="pill bad">weg</span>', "c-st") +
@@ -2101,5 +2162,12 @@ async function importRegs(input){
     if (document.getElementById("tab-" + n)) show(n, false);
   });
 })();
+
+/* Telefon: die Manipulation ist Bedienung, nicht Anzeige -- eingeklappt
+ * starten, die Pille "Manipulation aus/aktiv" oben sagt den Zustand. */
+if (window.matchMedia && matchMedia("(max-width:640px)").matches) {
+  const f = document.getElementById("manipFold");
+  if (f) f.open = false;
+}
 </script>
 </body></html>

@@ -1,9 +1,8 @@
 # Host tests: `make -C test`
 #
-# No PlatformIO, no framework, no download -- one compiler and a Makefile, so
-# the tests run before anything has been fetched. `pio test` with the native
-# platform would be the idiomatic route, but it wants its own platform package
-# and would build the ESP env's pre-scripts (which bump the build number).
+# No ESP-IDF, no framework, no download -- one compiler and a Makefile, so
+# the tests run before anything has been fetched. Building them through the
+# firmware's CMake would also run its build-number target and bump the counter.
 
 CC      ?= cc
 CFLAGS  ?= -std=gnu11 -g -O1

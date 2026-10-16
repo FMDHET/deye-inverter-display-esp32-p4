@@ -15,17 +15,20 @@ RISC-V-ELF-Core. Abschneiden, und gdb lädt ihn ohne jede Prüfung.
 ```bash
 # 1. Das ELF des abgestuerzten Builds nachbauen (Build-Nummer steht in /ota).
 git worktree add /tmp/b274 <commit>
-#    version.json so setzen, dass das Vor-Skript auf genau diese Nummer zaehlt
+#    version.json so setzen, dass der Zaehler auf genau diese Nummer zaehlt
 #    -- nur dann stimmen die Zeichenkettenlaengen und damit die Adressen.
-cd /tmp/b274 && pio run
+#    Bequemer: die CI legt zu jedem Bau deye_display.elf als Artefakt ab.
+#    Builds bis #287 stammen aus der PlatformIO-Zeit; deren Commits bauen nur
+#    mit `pio run`, das ELF liegt dann unter .pio/build/guition-p4/firmware.elf.
+cd /tmp/b274 && idf.py build
 
 # 2. Kopfzeile abschneiden.
 python3 -c "d=open('dump.bin','rb').read(); open('core.elf','wb').write(d[24:])"
 
 # 3. Laden.
-GDB=~/.platformio/packages/tool-riscv32-esp-elf-gdb/bin/riscv32-esp-elf-gdb
-$GDB -batch -n -ex "set pagination off" -ex "thread 1" -ex "bt 30" \
-     /tmp/b274/.pio/build/guition-p4/firmware.elf core.elf
+#    riscv32-esp-elf-gdb liegt nach `. export.sh` im PATH.
+riscv32-esp-elf-gdb -batch -n -ex "set pagination off" -ex "thread 1" -ex "bt 30" \
+     /tmp/b274/build/deye_display.elf core.elf
 ```
 
 Tasknamen stehen nicht in der gdb-Threadliste, lassen sich aber aus den TCBs

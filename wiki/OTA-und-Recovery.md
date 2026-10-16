@@ -39,7 +39,7 @@ Entscheidend ist, **woran** „gesund" festgemacht wird. Die Begründung dahinte
 Konkret meldet sich die Firmware auf einem von drei Wegen gesund:
 
 * **Nach einer Minute Laufzeit, wenn sie erreichbar ist** — also eine IP vom Router hat oder ihr eigenes Notfall-WLAN aufgespannt hat (das kommt nach 20 Sekunden ohne Router von selbst, ein Router-Ausfall rollt also nichts zurück).
-* **Sobald ein Update hereinkommt.** Wer ein neues `firmware.bin` schickt, beweist damit, dass das Gerät erreichbar ist — genau das, worauf die Bewährung wartet. Deshalb kann man auch direkt nach einem Update das nächste schicken.
+* **Sobald ein Update hereinkommt.** Wer eine neue Firmware schickt, beweist damit, dass das Gerät erreichbar ist — genau das, worauf die Bewährung wartet. Deshalb kann man auch direkt nach einem Update das nächste schicken.
 * **Spätestens nach zehn Minuten**, egal was ist. Ein Gerät, das nur seinen Bildschirm hat, ist über USB immer noch zu retten; es beim nächsten Stromausfall zurückzurollen wäre schlimmer.
 
 Früher wurde das Image schon beim Start bestätigt, noch bevor irgendetwas gelaufen war. Eine Firmware, die zwei Sekunden später abstürzte, galt damit als gesund — und startete in einer Endlosschleife neu, ohne dass der Wachhund je eingriff. Die Minute Bewährung fängt genau das ab.
@@ -70,13 +70,13 @@ curl -s http://$IP/ota
 #  "reset":"SW","heap":29542723,"heap_min":29538820}
 
 # 2. Bauen. Zählt die Build-Nummer einmal hoch und erzeugt beide Dateien.
-pio run -e guition-p4
+idf.py build
 
 # 3. Dateisystem schreiben. Wird sofort eingehängt, kein Neustart nötig.
-curl -H 'Expect:' --data-binary @.pio/build/guition-p4/storage.bin http://$IP/ota/fs
+curl -H 'Expect:' --data-binary @build/storage.bin http://$IP/ota/fs
 
 # 4. Firmware schreiben. Das Gerät startet danach selbst neu.
-curl -H 'Expect:' --data-binary @.pio/build/guition-p4/firmware.bin http://$IP/ota
+curl -H 'Expect:' --data-binary @build/deye_display.bin http://$IP/ota
 
 # 5. Kontrolle nach ~20 s: build und fs_build müssen gleich sein, reset "SW".
 curl -s http://$IP/ota

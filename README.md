@@ -22,7 +22,7 @@ Firmware for a **GUITION JC4880P443C** (ESP32-P4 + ESP32-C6, 4.3″ 480×800 MIP
 * **Publishes** all values over MQTT with Home Assistant auto-discovery (7 sensors + a mode select + a power slider).
 * **Mirrors itself** into a browser: the ESP32-P4 hardware JPEG encoder streams the actual framebuffer as MJPEG (~8 fps) and injects mouse/keyboard back into LVGL — the web page *is* the display.
 * **Flashes itself** over WiFi: `POST /ota` (firmware) and `POST /ota/fs` (filesystem), dual 4 MB slots, plus a `/recovery` page with rollback.
-* Pure **ESP-IDF 5.x** + **LVGL 9**, built with PlatformIO. WiFi runs on the on-module ESP32-C6 via ESP-Hosted. Also on board: SNTP clock, WireGuard VPN client, captive-portal WiFi provisioning, and a Modbus register probe/CSV backup tool at `/deye`.
+* Pure **ESP-IDF 5.5** + **LVGL 9**, built natively with `idf.py`. WiFi runs on the on-module ESP32-C6 via ESP-Hosted. Also on board: SNTP clock, WireGuard VPN client, captive-portal WiFi provisioning, and a Modbus register probe/CSV backup tool at `/deye`.
 
 Documentation is in German — see the [Wiki](../../wiki) for the full reference.
 
@@ -178,7 +178,15 @@ Beide Busse sind unabhängig als Master oder Slave konfigurierbar (Rolle, Slave-
 
 ## Bauen und flashen
 
-Voraussetzung: [PlatformIO](https://platformio.org/) mit der `pioarduino`-Plattform für ESP32 (wird aus `platformio.ini` geladen). Framework ist reines ESP-IDF, keine Arduino-Schicht.
+Voraussetzung: **ESP-IDF v5.5.5**, genau diese Version — `CMakeLists.txt` bricht mit jeder anderen ab. Am bequemsten über die VS-Code-Erweiterung [ESP-IDF](https://marketplace.visualstudio.com/items?itemName=espressif.esp-idf-extension) (Version 5.5.5 auswählen), oder von Hand:
+
+```bash
+git clone -b v5.5.5 --recursive https://github.com/espressif/esp-idf.git ~/esp/v5.5.5/esp-idf
+~/esp/v5.5.5/esp-idf/install.sh esp32p4
+. ~/esp/v5.5.5/esp-idf/export.sh      # in jedem neuen Terminal
+```
+
+Reines ESP-IDF, keine Arduino-Schicht. Die Komponenten (LVGL, Panel- und Touch-Treiber, ESP-Hosted) holt der Component Manager beim ersten Bau, festgehalten in `dependencies.lock`.
 
 ### Tests
 
@@ -193,17 +201,18 @@ in CI laufen sie bei jedem Push.
 ### Über USB (Erstinstallation)
 
 ```bash
-pio run -e guition-p4 -t upload -t flashfs -t monitor
+idf.py -p /dev/cu.usbmodem101 flash monitor --timestamps
 ```
 
-Firmware **und** Dateisystem in einem Aufruf — das ist wichtig: ein Pre-Build-Hook zählt pro `pio run` genau einmal die Build-Nummer hoch und schreibt sie in `main/build_info.h` (Firmware/UI) *und* `data/build.txt` (SPIFFS-Image). Beim Booten vergleicht die Firmware beide Zahlen und meldet einen Versatz im Log und auf dem Bildschirm. Der grüne Haken unten rechts bedeutet: Firmware und Dateisystem passen zusammen.
+`idf.py flash` schreibt Bootloader, Partitionstabelle, Firmware **und** Dateisystem in einem Aufruf — das ist wichtig: ein CMake-Ziel zählt pro Bau genau einmal die Build-Nummer hoch und schreibt sie in `main/build_info.h` (Firmware/UI) *und* `data/build.txt` (SPIFFS-Image). Beim Booten vergleicht die Firmware beide Zahlen und meldet einen Versatz im Log und auf dem Bildschirm. Der grüne Haken unten rechts bedeutet: Firmware und Dateisystem passen zusammen.
 
 ### Über WiFi (danach)
 
 ```bash
 IP=192.168.1.42
-curl --data-binary @.pio/build/guition-p4/firmware.bin  http://$IP/ota
-curl --data-binary @.pio/build/guition-p4/storage.bin   http://$IP/ota/fs
+idf.py build
+curl --data-binary @build/deye_display.bin  http://$IP/ota
+curl --data-binary @build/storage.bin       http://$IP/ota/fs
 curl -X POST http://$IP/ota/reboot
 curl -s http://$IP/ota           # build und fs_build müssen übereinstimmen
 ```

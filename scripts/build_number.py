@@ -1,40 +1,31 @@
-"""PlatformIO pre-build hook: shared build counter.
+"""Gemeinsame Build-Nummer fuer Firmware, Dateisystem und UI.
 
-Single source of truth = version.json at the project root. On every build
-this script bumps the integer "build" counter once and then writes that SAME
-number into three places so firmware, filesystem image and UI can never drift:
+Wird von CMake bei jedem Bau genau einmal aufgerufen (Ziel deye_build_number
+in main/CMakeLists.txt):
 
-  1. main/build_info.h   -> compiled into the firmware (FW) and the UI.
-  2. data/build.txt      -> packed into the SPIFFS "storage" image (FS),
-                            which is flashed together with the app
+    python scripts/build_number.py <projektordner>
+
+Einzige Quelle ist version.json im Projektordner. Das Skript zaehlt dort den
+Zaehler "build" um eins hoch und schreibt dieselbe Zahl an zwei Stellen, damit
+Firmware, Dateisystem-Image und UI nie auseinanderlaufen:
+
+  1. main/build_info.h   -> in die Firmware (FW) und die UI uebersetzt.
+  2. data/build.txt      -> ins SPIFFS-Image "storage" (FS) gepackt, das
+                            "idf.py flash" zusammen mit der App schreibt
                             (spiffs_create_partition_image ... FLASH_IN_PROJECT).
 
-Because all artifacts are generated from one counter in one step and flashed
-in one `pio run -t upload`, FW + FS + UI always carry the same build number.
-At boot the firmware re-reads the FS number and compares it to the compiled
-one, surfacing a mismatch on screen and in the log.
+Beim Start liest die Firmware die FS-Nummer und vergleicht sie mit der
+eingebauten; ein Versatz erscheint im Log und auf dem Bildschirm.
 """
 
-Import("env")  # noqa: F821  (injected by PlatformIO/SCons)
-
+import datetime
 import json
 import os
-import datetime
+import sys
 
-from SCons.Script import COMMAND_LINE_TARGETS
-
-# Targets that DO produce a firmware image and therefore consume a build
-# number. Everything else -- filesystem-only targets, IDE housekeeping
-# (`idedata`, `__idedata`, `envdump`, `__test`, `checkprogsize`), monitor,
-# clean, compiledb -- holds the counter. This used to be a blocklist, and
-# every IntelliSense refresh in VS Code (`idedata`) bumped version.json,
-# rewrote build_info.h with a fresh timestamp and forced a recompile of
-# everything that includes it; the tree was never clean.
-BUMP_TARGETS = {
-    "upload", "program", "buildprog", "build", "uploadfsota",
-}
-
-PROJECT_DIR = env.subst("$PROJECT_DIR")  # noqa: F821
+PROJECT_DIR = os.path.abspath(
+    sys.argv[1] if len(sys.argv) > 1
+    else os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 VERSION_FILE = os.path.join(PROJECT_DIR, "version.json")
 HEADER_FILE = os.path.join(PROJECT_DIR, "main", "build_info.h")
 DATA_DIR = os.path.join(PROJECT_DIR, "data")
@@ -76,14 +67,8 @@ def write_if_changed(path, content):
         f.write(content)
 
 
-_targets = list(COMMAND_LINE_TARGETS)
-# A plain `pio run` (no -t) has no command-line targets and builds firmware,
-# so an empty list means "bump". Otherwise bump only if at least one target
-# is known to build firmware (`-t upload -t flashfs` bumps once, for upload).
-should_bump = (not _targets) or any(t in BUMP_TARGETS for t in _targets)
-
-data = load_version()
-if should_bump:
+def main():
+    data = load_version()
     data["build"] += 1
     # Auto-count the patch within the current MAJOR.MINOR line (1.0.x), and
     # restart it at 0 whenever version.json "version" (major.minor) changes
@@ -95,28 +80,15 @@ if should_bump:
         data["patch"] += 1
     save_version(data)
 
-build = data["build"]
+    build = data["build"]
 
-
-# RELEASE version = MAJOR.MINOR (explicit in version.json "version") + an
-# auto-incrementing PATCH that counts every firmware build within that line
-# (1.0.0, 1.0.1, ...). Bump "version" to "1.1"/"2.0" to start a new line and the
-# patch restarts at 0. DEYE_BUILD_NUMBER is a separate monotonic counter that
-# ties FW + FS + UI together for the match check.
-version = "%s.%d" % (data["version"], data["patch"])   # e.g. "1.0.1"
-version_full = "v%s" % version
-bar = "=" * 56
-
-if not should_bump:
-    # FS/util target only: reuse the artifacts from the last firmware build
-    # so the filesystem image stays locked to the flashed firmware. Do NOT
-    # rewrite the header (would force a needless recompile and a new
-    # timestamp without a new number).
-    print(bar)
-    print("  Deye-Display build #%d   %s   (counter held, no firmware build)"
-          % (build, version_full))
-    print(bar)
-else:
+    # RELEASE version = MAJOR.MINOR (explicit in version.json "version") + an
+    # auto-incrementing PATCH that counts every firmware build within that line
+    # (1.0.0, 1.0.1, ...). Bump "version" to "1.1"/"2.0" to start a new line and
+    # the patch restarts at 0. DEYE_BUILD_NUMBER is a separate monotonic counter
+    # that ties FW + FS + UI together for the match check.
+    version = "%s.%d" % (data["version"], data["patch"])   # e.g. "1.0.1"
+    version_full = "v%s" % version
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     header = (
@@ -132,7 +104,6 @@ else:
         "#define DEYE_BUILD_TIMESTAMP     \"%s\"\n"
         "#define DEYE_BUILD_VERSION_FULL  \"%s\"\n"
     ) % (build, version, timestamp, version_full)
-
     write_if_changed(HEADER_FILE, header)
 
     if not os.path.isdir(DATA_DIR):
@@ -142,6 +113,11 @@ else:
     data_txt = "%d\n%s\n%s\n" % (build, version, timestamp)
     write_if_changed(DATA_FILE, data_txt)
 
+    bar = "=" * 56
     print(bar)
     print("  Deye-Display build #%d   %s   %s" % (build, version_full, timestamp))
     print(bar)
+
+
+if __name__ == "__main__":
+    main()

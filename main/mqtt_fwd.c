@@ -111,7 +111,10 @@ static void publish_discovery(void)
      * is told to forget an entity. The sensors above stay either way, so
      * reporting keeps working. */
     {
-        char sel_topic[120], num_topic[120], payload[560];
+        /* payload: the "Deye Leistung" entity needs up to 567 bytes with the
+         * longest topics the buffers above allow; 560 would cut the JSON short
+         * and HA would ignore the entity. */
+        char sel_topic[120], num_topic[120], payload[640];
         snprintf(sel_topic, sizeof(sel_topic),
                  "homeassistant/select/%s/deye_mode/config", s_devid);
         snprintf(num_topic, sizeof(num_topic),

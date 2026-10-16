@@ -6,7 +6,7 @@ Bevor man rät, holt man sich Informationen. Es gibt sechs Quellen:
 
 | Quelle | Was man sieht |
 | --- | --- |
-| **Serieller Monitor** | `pio device monitor -e guition-p4` — alle Meldungen der Firmware mit Zeitstempel. Bei Abstürzen wird sogar die Fehlerstelle im Code aufgelöst. |
+| **Serieller Monitor** | `idf.py -p <port> monitor --timestamps` — alle Meldungen der Firmware mit Zeitstempel. Bei Abstürzen wird sogar die Fehlerstelle im Code aufgelöst. |
 | **`GET /log`** | dasselbe Log, aber **ohne Kabel**: die letzten 48 kB Meldungen aus einem Ringpuffer im PSRAM. `?tail=2000` für nur das Ende, `?clear=1` zum Leeren danach. Überlebt keinen Neustart — dafür ist der Coredump da. |
 | **`GET /coredump`** | der letzte Absturz als Abbild für `espcoredump.py`. `GET /ota` nennt vorher schon Task, Programmzähler und Grund im Klartext. |
 | **`GET /ota`** | Version, Build-Nummer, welcher Speicherabschnitt läuft, Laufzeit, **Grund des letzten Neustarts**, freier Speicher |
@@ -228,7 +228,7 @@ Firmware auflösen, die damals lief (die Build-Nummer steht im Abbild):
 
 ```bash
 curl -s http://<ip>/coredump -o coredump.bin
-python $IDF_PATH/components/espcoredump/espcoredump.py info_corefile     -t raw -c coredump.bin .pio/build/guition-p4/firmware.elf
+python $IDF_PATH/components/espcoredump/espcoredump.py info_corefile     -t raw -c coredump.bin build/deye_display.elf
 curl -s "http://<ip>/coredump?erase=1"     # Platz für den nächsten
 ```
 
@@ -236,8 +236,9 @@ Am Gerät durchgespielt: Absturz → `Save core dump to flash` (der Dump läuft 
 seinem eigenen Stack, 996 von 1880 Byte benutzt) → Neustart → `Found core dump
 42916 bytes in flash` → Download → GDB löst `main/ota.c:232` samt Registern auf.
 Das Abbild übersteht auch ein Neuflashen der Firmware; nur `?erase=1` räumt es
-weg. Ohne die passende `firmware.elf` ist es nicht auflösbar — wer eine
-Absturzmeldung ernst nimmt, sichert das ELF zum Build.
+weg. Ohne die passende `deye_display.elf` ist es nicht auflösbar — wer eine
+Absturzmeldung ernst nimmt, sichert das ELF zum Build. Die CI legt es zu jedem
+Bau als Artefakt ab.
 
 > [!NOTE]
 > Die Coredump-Partition ist **nach** allen anderen an die Tabelle angehängt, damit kein bestehendes Gerät sein NVS verliert. Eine neue Partitionstabelle kommt aber nur per USB aufs Gerät — ein Display, das ausschließlich über WLAN aktualisiert wurde, hat die Partition nicht und meldet `"coredump":{"present":0}`, auch nach einem Absturz. Einmal `pio run -t upload` über Kabel behebt das dauerhaft.
@@ -245,10 +246,10 @@ Absturzmeldung ernst nimmt, sichert das ELF zum Build.
 ## Bauen und Flashen
 
 **`BUILD MISMATCH: firmware #146 but filesystem #145`**
-Programm und Dateisystem wurden getrennt geflasht und sind aus dem Takt. Lösung: beides in einem Befehl — `pio run -e guition-p4 -t upload -t flashfs`. Über WLAN: beide Dateien schreiben und neu starten.
+Programm und Dateisystem wurden getrennt geflasht und sind aus dem Takt. Lösung: beides in einem Befehl — `idf.py -p <port> flash`. Über WLAN: beide Dateien schreiben und neu starten.
 
 **`Filesystem build unavailable (asset image not flashed?)`**
-Der Dateisystem-Abschnitt ist leer oder unlesbar. Unkritisch, die Firmware läuft weiter. Mit `-t flashfs` beziehungsweise `POST /ota/fs` nachziehen.
+Der Dateisystem-Abschnitt ist leer oder unlesbar. Unkritisch, die Firmware läuft weiter. Mit `idf.py -p <port> flash` beziehungsweise `POST /ota/fs` nachziehen.
 
 **Das Firmware-Update wird abgelehnt.**
 

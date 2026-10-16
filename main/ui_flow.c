@@ -1438,7 +1438,7 @@ void ui_flow_set_fs_build(int fs_build)
         lv_obj_set_style_text_color(s_build_lbl, COL_SUB, 0);
     } else if (fs_build == fw) {
         lv_label_set_text_fmt(s_build_lbl, "%s  " LV_SYMBOL_OK,
-                              DEYE_BUILD_VERSION, fw);
+                              DEYE_BUILD_VERSION);
         lv_obj_set_style_text_color(s_build_lbl, COL_OK, 0);
     } else {
         lv_label_set_text_fmt(s_build_lbl,

@@ -4,7 +4,7 @@
  *
  *   GET  /ota          -> JSON: version, build, fs_build, running/target slot,
  *                         uptime, reset reason, heap and DMA pool figures
- *   POST /ota          -> raw firmware.bin in the body; header is checked, then
+ *   POST /ota          -> raw deye_display.bin in the body; header is checked, then
  *                         written to the inactive OTA slot; device reboots into it
  *   POST /ota/fs       -> raw storage.bin (SPIFFS); remounted live, no reboot
  *   POST /ota/reboot   -> restart
@@ -13,7 +13,7 @@
  *
  * Flash over WiFi straight from the build output (the Expect: header avoids a
  * 1 s stall -- esp_http_server never answers 100-continue):
- *   curl -H 'Expect:' --data-binary @.pio/build/guition-p4/firmware.bin http://<ip>/ota
+ *   curl -H 'Expect:' --data-binary @build/deye_display.bin http://<ip>/ota
  *
  * NOTE: no authentication -- intended for a trusted local/dev network. Add a
  * token check before exposing the device more widely.

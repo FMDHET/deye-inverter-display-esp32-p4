@@ -1,0 +1,10 @@
+{
+    "idf.adapterTargetName": "esp32p4",
+    "idf.flashType": "UART",
+    "idf.monitorBaudRate": "115200",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "files.associations": {
+        "sdkconfig": "properties",
+        "sdkconfig.defaults": "properties"
+    }
+}

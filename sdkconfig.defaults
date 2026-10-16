@@ -140,8 +140,8 @@ CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 # bridge and the device stopped booting -- but that turned out to be a RED
 # HERRING: the same firmware rebuilt with 16 failed identically, and the serial
 # log showed app_main was never reached at all. The real trigger was the ESP-IDF
-# version (5.5.5 asserts in esp_hosted's SDIO init, 5.5.4 boots) -- see the
-# framework pin in platformio.ini.
+# version (5.5.5 asserts in esp_hosted's SDIO init, 5.5.4 boots) -- in the end
+# pinned at its real source, esp_hosted in main/idf_component.yml.
 #
 # So this is NOT a hard ceiling, it is simply the untested-vs-proven line: 24 has
 # never been shown to boot on this board. If the bridge ever needs more sockets,
@@ -188,9 +188,9 @@ CONFIG_ESP_NETIF_BRIDGE_EN=y
 # There is no quoting that survives the CMake -> ninja -> cc1 hand-off, and a
 # symlinked whitespace-free path does not help (CMake resolves the realpath).
 # Turning the remap off costs only cosmetics: __FILE__ in assert/log messages
-# becomes an absolute path instead of a relative one. PlatformIO's own guard
-# still refuses a BUILD_DIR containing spaces -- keep building with
-#   PLATFORMIO_BUILD_DIR=~/pio-build/deye-display pio run -e guition-p4 ...
+# becomes an absolute path instead of a relative one. If the checkout ever
+# sits under a path with spaces again, also move the build directory out:
+#   idf.py -B ~/build/deye-display build
 CONFIG_COMPILER_HIDE_PATHS_MACROS=n
 
 # Coredump in den Flash (Partition "coredump", 256 kB am Ende der Tabelle).

@@ -261,9 +261,7 @@ static esp_err_t live_handler(httpd_req_t *req)
     if (ntp_is_synced()) {
         time_t now = time(NULL);
         struct tm tm; localtime_r(&now, &tm);
-        snprintf(tbuf, sizeof(tbuf), "%04d-%02d-%02d %02d:%02d:%02d",
-                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                 tm.tm_hour, tm.tm_min, tm.tm_sec);
+        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tm);
     }
     lv_display_t *disp = lv_display_get_default();
     int lw = disp ? lv_display_get_horizontal_resolution(disp) : SCR_W;

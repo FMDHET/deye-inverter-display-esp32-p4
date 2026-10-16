@@ -8,7 +8,8 @@ phy_init, data, phy,     0x11000,   0x1000
 ota_0,    app,  ota_0,   0x20000,   0x400000
 ota_1,    app,  ota_1,   0x420000,  0x400000
 # Versioned read-only asset filesystem (build.txt + future UI assets).
-# Image built by scripts/fs_image.py, flashed via `-t flashfs`.
+# Image built from data/ by spiffs_create_partition_image (main/CMakeLists.txt),
+# flashed together with the app by `idf.py flash`.
 storage,  data, spiffs,  0x820000,  0x100000
 # Coredump: APPENDED at the end on purpose. Everything before it keeps its
 # offset, so an existing device does not lose its NVS (WiFi, MQTT, VPN keys) --

@@ -58,7 +58,7 @@ if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)
     <div class="kv"><span>IDF</span><b id="idf">&hellip;</b></div>
   </div>
 
-  <h2>Firmware (firmware.bin)</h2>
+  <h2>Firmware (deye_display.bin)</h2>
   <input type="file" id="fw" accept=".bin">
   <div class="bar" id="fwbar"><div></div></div>
   <button class="primary" onclick="flash('fw','/ota','fwbar')">Firmware flashen</button>
@@ -135,9 +135,9 @@ if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)
     var f = document.getElementById(inputId).files[0];
     if(!f){ setStatus('Bitte zuerst eine Datei waehlen.'); return; }
     var isFw = (url === '/ota');
-    /* /ota/fs nimmt jede Datei, die in die Partition passt -- eine firmware.bin
+    /* /ota/fs nimmt jede Datei, die in die Partition passt -- ein Firmware-Abbild
      * dort loescht das Dateisystem und schreibt Muell. Beim Namen nachfragen. */
-    if ((isFw && /storage|spiffs/i.test(f.name)) || (!isFw && /firmware/i.test(f.name))) {
+    if ((isFw && /storage|spiffs/i.test(f.name)) || (!isFw && /firmware|deye_display/i.test(f.name))) {
       if (!confirm('Der Dateiname „' + f.name + '“ passt nicht zum Ziel (' + (isFw ? 'Firmware' : 'Dateisystem') + '). Trotzdem flashen?')) return;
     }
     var bar = document.getElementById(barId), fill = bar.firstElementChild;

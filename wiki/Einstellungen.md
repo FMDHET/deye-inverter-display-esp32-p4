@@ -99,7 +99,7 @@ Leeres Feld = kein Schutz, genau wie vor dieser Funktion. Gesetzt wird das Passw
 Im Browser fragt danach ein normales Anmeldefenster (der Benutzername ist beliebig, es zählt nur das Passwort), auf der Kommandozeile:
 
 ```bash
-curl -u :meinPasswort -X POST --data-binary @firmware.bin http://<ip>/ota
+curl -u :meinPasswort -X POST --data-binary @build/deye_display.bin http://<ip>/ota
 ```
 
 > [!WARNING]

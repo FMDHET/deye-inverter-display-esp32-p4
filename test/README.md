@@ -5,11 +5,10 @@ make -C test          # bauen und laufen lassen
 make -C test clean
 ```
 
-Kein PlatformIO, kein Test-Framework, kein Download: ein Compiler und ein
+Kein ESP-IDF, kein Test-Framework, kein Download: ein Compiler und ein
 Makefile. Eine Abhängigkeit, die erst geholt werden muss, bevor der erste Test
-läuft, wäre das Gegenteil des Zwecks — und `pio test` mit der `native`-Plattform
-würde zusätzlich die Vor-Skripte der ESP-Umgebung anstoßen und dabei die
-Build-Nummer hochzählen.
+läuft, wäre das Gegenteil des Zwecks — und ein Bau über das CMake der Firmware
+würde zusätzlich deren Build-Nummer-Ziel anstoßen und den Zähler hochzählen.
 
 ## Was hier getestet wird — und was nicht
 

@@ -376,7 +376,7 @@ esp_err_t captive_start(void)
 
     ESP_RETURN_ON_ERROR(httpd_start(&s_httpd, &cfg), TAG, "httpd start");
 
-    /* Order matters: exact routes first, the "/*" catch-all redirect LAST,
+    /* Order matters: exact routes first, the wildcard catch-all redirect LAST,
      * or the wildcard would swallow every request. The mirror owns "/" and
      * "/touch". */
     web_mirror_register(s_httpd);

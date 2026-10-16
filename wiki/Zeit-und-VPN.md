@@ -115,7 +115,7 @@ Vom Tunnel-Netz aus benutzt man einfach die Tunnel-Adresse:
 
 ```bash
 curl -s http://10.6.0.2/ota
-curl --data-binary @firmware.bin http://10.6.0.2/ota
+curl --data-binary @build/deye_display.bin http://10.6.0.2/ota
 ```
 
 Auch das Display im Browser funktioniert so — nur etwas langsamer, weil das Bild durch den Tunnel muss.

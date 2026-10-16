@@ -67,7 +67,7 @@ Beim Deye funktioniert das Schreiben nur mit **FC16**, obwohl oft nur ein einzel
 
 **Firmware** ist das Programm auf so einem Mikrocontroller. „Firmware flashen" heißt: das Programm in den Speicher des Chips schreiben.
 
-**ESP-IDF** ist das Entwicklungspaket von Espressif (dem Hersteller des Chips) — Compiler, Bibliotheken, Werkzeuge. **PlatformIO** ist die Umgebung, die das alles startet.
+**ESP-IDF** ist das Entwicklungspaket von Espressif (dem Hersteller des Chips) — Compiler, Bibliotheken, Werkzeuge. `idf.py` ist das Kommandozeilenwerkzeug von ESP-IDF, das baut, flasht und den Monitor öffnet; die VS-Code-Erweiterung „ESP-IDF" ruft es per Knopfdruck auf.
 
 **LVGL** ist die Bibliothek, die Knöpfe, Kreise und Text auf den Bildschirm malt. Sie kümmert sich auch darum, welcher Knopf getroffen wurde, wenn man auf das Display tippt.
 

@@ -322,7 +322,7 @@ static void wifi_saved_refresh(void)
         bool is_active = (active[0] && strcmp(active, creds[i].ssid) == 0);
 
         char line[40];
-        snprintf(line, sizeof(line), "%s%s", creds[i].ssid, is_active ? "  " LV_SYMBOL_OK : "");
+        snprintf(line, sizeof(line), "%.32s%s", creds[i].ssid, is_active ? "  " LV_SYMBOL_OK : "");
         lv_obj_t *btn = lv_list_add_button(s_wifi_saved_list, LV_SYMBOL_WIFI, line);
         /* Slim rows: small font + tight vertical padding. */
         lv_obj_set_style_text_font(btn, F_SM, 0);
@@ -395,7 +395,7 @@ static void wifi_refresh(void)
             lv_obj_clean(s_wifi_list);
             for (size_t i = 0; i < n; i++) {
                 char line[64];
-                snprintf(line, sizeof(line), "%s  (%d dBm)%s",
+                snprintf(line, sizeof(line), "%.32s  (%d dBm)%s",
                          aps[i].ssid, aps[i].rssi,
                          aps[i].authmode == WIFI_AUTH_OPEN ? "  [open]" : "");
                 lv_obj_t *btn = lv_list_add_button(s_wifi_list,
@@ -781,13 +781,13 @@ static void mb_rebuild_list(void)
         char line[128];
         const char *nm = s_mb_devs[i].name[0] ? s_mb_devs[i].name : NULL;
         if (nm) {
-            snprintf(line, sizeof(line), "%s%s\n%s - %s  %s",
+            snprintf(line, sizeof(line), "%.23s%s\n%.24s - %.24s  %.31s",
                      nm, s_mb_devs[i].enabled ? "" : "  [aus]",
                      modbus_tcp_mfr_name(s_mb_devs[i].mfr),
                      modbus_tcp_role_name(s_mb_devs[i].role),
                      s_mb_devs[i].ip[0] ? s_mb_devs[i].ip : "(keine IP)");
         } else {
-            snprintf(line, sizeof(line), "%s - %s\n%s%s",
+            snprintf(line, sizeof(line), "%.24s - %.24s\n%.31s%s",
                      modbus_tcp_mfr_name(s_mb_devs[i].mfr),
                      modbus_tcp_role_name(s_mb_devs[i].role),
                      s_mb_devs[i].ip[0] ? s_mb_devs[i].ip : "(keine IP)",

@@ -4,9 +4,26 @@
 
 ## Was du installieren musst
 
-**[PlatformIO](https://platformio.org/)** — entweder als Erweiterung in Visual Studio Code (bequemer) oder als Kommandozeilenwerkzeug. PlatformIO holt sich alles Weitere von selbst: den Compiler, die Bibliotheken, die Werkzeuge zum Flashen. Beim ersten Bauen dauert das ein paar Minuten, danach geht es schnell.
+**[ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/v5.5.5/esp32p4/get-started/) in Version 5.5.5** — genau diese, nicht „irgendeine 5er". `CMakeLists.txt` prüft das und bricht mit jeder anderen Version mit einer klaren Meldung ab (warum, steht unten unter „Was festgenagelt ist").
 
-Was dabei automatisch geladen wird:
+Zwei Wege:
+
+* **Visual Studio Code** (bequemer): Erweiterung **ESP-IDF** von Espressif installieren — das Projekt schlägt sie beim Öffnen selbst vor. Im Einrichtungsassistenten Version **v5.5.5** wählen. Danach gibt es unten in der Statusleiste Knöpfe für Bauen, Flashen und Monitor. Die Erweiterungen „PlatformIO IDE" und „pioarduino IDE" werden nicht mehr gebraucht und können deinstalliert werden.
+* **Kommandozeile:**
+
+  ```bash
+  git clone -b v5.5.5 --recursive https://github.com/espressif/esp-idf.git ~/esp/v5.5.5/esp-idf
+  ~/esp/v5.5.5/esp-idf/install.sh esp32p4
+  . ~/esp/v5.5.5/esp-idf/export.sh      # in jedem neuen Terminal
+  ```
+
+  Fehlen danach `cmake` oder `ninja`, holt sie `python ~/esp/v5.5.5/esp-idf/tools/idf_tools.py install cmake ninja`.
+
+> [!NOTE]
+> Auf einem Mac mit mehreren Python-Versionen sucht `export.sh` die Umgebung zu dem `python3`, das gerade im PATH vorne steht. Wurde mit einer anderen Version installiert, meldet es `ESP-IDF Python virtual environment ... not found`. Dann die richtige Umgebung vorgeben:
+> `export IDF_PYTHON_ENV_PATH=~/.espressif/python_env/idf5.5_py3.11_env` (Name so, wie er in `~/.espressif/python_env` steht).
+
+Die Bibliotheken holt der Component Manager von ESP-IDF beim ersten Bauen von selbst (ein paar Minuten, danach geht es schnell):
 
 | Bibliothek | Wofür |
 | --- | --- |
@@ -22,20 +39,19 @@ Das Projekt benutzt **kein Arduino**, sondern direkt das ESP-IDF von Espressif. 
 ## Der eine Befehl
 
 ```bash
-pio run -e guition-p4 -t upload -t flashfs -t monitor
+idf.py -p /dev/cu.usbmodem101 flash monitor --timestamps
 ```
 
 Was die Teile bedeuten:
 
 | Teil | Bedeutung |
 | --- | --- |
-| `pio run` | baue das Programm |
-| `-e guition-p4` | für dieses Gerät (es gibt noch eine alte zweite Variante) |
-| `-t upload` | schreibe das Programm über USB auf den Chip |
-| `-t flashfs` | schreibe auch das kleine Dateisystem dazu |
-| `-t monitor` | zeige danach die Meldungen des Geräts an |
+| `idf.py` | das Werkzeug von ESP-IDF; baut vorher automatisch, wenn sich etwas geändert hat |
+| `-p /dev/cu.usbmodem101` | an diesem USB-Anschluss (unter Windows z. B. `COM5`; ohne `-p` sucht es selbst) |
+| `flash` | schreibe Bootloader, Partitionstabelle, Programm **und** Dateisystem über USB auf den Chip |
+| `monitor --timestamps` | zeige danach die Meldungen des Geräts an, mit Uhrzeit |
 
-**Wichtig: bitte immer alles in einem Befehl.** Warum, steht im nächsten Abschnitt.
+**Wichtig: bitte immer `flash`, nicht `app-flash` oder `storage-flash` allein.** Warum, steht im nächsten Abschnitt.
 
 Wenn es läuft, siehst du im Monitor so etwas:
 
@@ -45,7 +61,9 @@ I deye-display: Firmware build v1.0.57  (#146, ...)
 I deye-display: Filesystem build matches firmware (#146)
 ```
 
-Zum Beenden des Monitors: `Strg + C`.
+Zum Beenden des Monitors: `Strg + ]`.
+
+Nur bauen, ohne Gerät: `idf.py build`. Die Ergebnisse liegen in `build/`: `deye_display.bin` (Programm), `storage.bin` (Dateisystem), `deye_display.elf` (für die Absturzauswertung).
 
 ## Warum die Build-Nummer so ein Thema ist
 
@@ -57,7 +75,7 @@ Die Lösung hier ist eine **einzige Zahl für alles**. In der Datei `version.jso
 { "version": "1.0", "patch": 57, "patch_base": "1.0", "build": 146 }
 ```
 
-Bei jedem Bauen zählt ein kleines Hilfsskript (`scripts/build_number.py`) diese Zahl **genau einmal** hoch und schreibt sie an zwei Stellen:
+Bei jedem Bauen zählt ein kleines Hilfsskript (`scripts/build_number.py`, von CMake als eigenes Ziel aufgerufen) diese Zahl **genau einmal** hoch und schreibt sie an zwei Stellen:
 
 1. in eine Datei, die ins **Programm** kompiliert wird
 2. in eine Datei, die ins **Dateisystem** wandert
@@ -81,17 +99,13 @@ curl -s http://<ip-des-geräts>/ota
 
 Dort müssen `build` und `fs_build` dieselbe Zahl zeigen.
 
-Übrigens: Befehle, die gar kein neues Programm erzeugen (nur Dateisystem schreiben, nur Monitor öffnen, aufräumen), zählen die Zahl **nicht** hoch. Sonst würde das Dateisystem dem Programm davonlaufen.
+Übrigens: Befehle, die nichts bauen (`monitor`, `menuconfig`, `reconfigure`, `fullclean`, die Code-Ansicht in VS Code), zählen die Zahl **nicht** hoch. **Jeder** Bau dagegen zählt — auch `idf.py storage-flash`, weil es das Dateisystem neu packt. Wer nur das Dateisystem schreibt, hat danach eine neuere Nummer darin als in der Firmware auf dem Gerät. Deshalb: immer `idf.py flash`, das schreibt beides aus demselben Bau.
 
-## Warum es eigene Skripte für das Dateisystem gibt
+## Wie das Dateisystem entsteht
 
-Kurz: weil die eingebauten Wege in diesem Fall nicht funktionieren.
+`main/CMakeLists.txt` ruft die eingebaute ESP-IDF-Funktion `spiffs_create_partition_image` auf: sie packt den Ordner `data/` bei jedem Bau zu `build/storage.bin`, und `idf.py flash` schreibt die Datei gleich mit (`FLASH_IN_PROJECT`). Seitengröße, Namenslänge und Kennung kommen aus derselben Konfiguration, mit der die Firmware das Dateisystem später liest — sie können also nicht auseinanderlaufen.
 
-PlatformIO hat eigene Befehle, um ein Dateisystem zu bauen und zu flashen. Bei einem reinen ESP-IDF-Projekt wie diesem versuchen sie dabei aber, das Build-System neu zu konfigurieren, und scheitern.
-
-ESP-IDF hat auch einen eigenen Weg. Der baut das Dateisystem, überlässt das Flashen aber seinem eigenen Befehl — und den ruft PlatformIO nie auf. Ergebnis: das Dateisystem wird gebaut und dann nie geschrieben.
-
-Deshalb macht `scripts/fs_image.py` das selbst: es benutzt genau dasselbe Werkzeug, das PlatformIO auch mitbringt, und bietet einen eigenen Befehl `flashfs`, der die Datei an die richtige Stelle im Speicher schreibt. Und weil es leicht zu vergessen ist, wird das Dateisystem zusätzlich nach jedem Programm-Build automatisch mit erzeugt.
+Zu PlatformIO-Zeiten ging das nicht, weil PlatformIO den Flash-Befehl von ESP-IDF nie aufgerufen hat; dafür gab es das eigene Skript `scripts/fs_image.py` mit dem Befehl `flashfs`. Beide sind mit dem Umstieg weggefallen. Nachgemessen: das neue `storage.bin` ist byte-identisch mit dem, was das alte Skript aus denselben Daten gebaut hat.
 
 ## Wie der Speicher aufgeteilt ist
 
@@ -111,7 +125,7 @@ Der 16-MB-Flash-Speicher ist in Abschnitte („Partitionen") aufgeteilt:
 
 Der Einstellungs-Abschnitt `nvs` liegt bewusst an der Standardstelle. Dadurch überleben gespeicherte WLAN-Passwörter und Konfiguration ein Update.
 
-Aus demselben Grund ist `coredump` **hinten** angehängt worden und nicht irgendwo eingefügt: alle anderen Abschnitte behalten ihre Adresse, ein bestehendes Gerät verliert also nichts. Eine geänderte Partitionstabelle kommt allerdings **nur über USB** aufs Gerät — sie ist nicht Teil eines Firmware-Updates über WLAN. Ein Display, das ausschließlich per WLAN aktualisiert wurde, hat den Abschnitt deshalb nicht und meldet in `/ota` sauber `"coredump":{"present":0}`. Einmal `pio run -e guition-p4 -t upload` über Kabel behebt das dauerhaft.
+Aus demselben Grund ist `coredump` **hinten** angehängt worden und nicht irgendwo eingefügt: alle anderen Abschnitte behalten ihre Adresse, ein bestehendes Gerät verliert also nichts. Eine geänderte Partitionstabelle kommt allerdings **nur über USB** aufs Gerät — sie ist nicht Teil eines Firmware-Updates über WLAN. Ein Display, das ausschließlich per WLAN aktualisiert wurde, hat den Abschnitt deshalb nicht und meldet in `/ota` sauber `"coredump":{"present":0}`. Einmal `idf.py -p <port> flash` über Kabel behebt das dauerhaft.
 
 ## Tests
 
@@ -132,7 +146,7 @@ oder ein Netz braucht; das sind Gerätetests und stehen als Messreihen im
 [Code-Review](Code-Review-2026-09). Details, Aufbau und die Regel für die
 Attrappen: [`test/README.md`](https://github.com/FMDHET/deye-inverter-display-esp32-p4/blob/main/test/README.md).
 
-In [GitHub Actions](https://github.com/FMDHET/deye-inverter-display-esp32-p4/actions) laufen beide Suiten bei jedem Push, dazu ein Firmware-Bau. Der Bau-Job darf fehlschlagen, ohne die CI rot zu machen — `platform` zeigt auf den Git-HEAD von pioarduino, er kann also rot werden, ohne dass sich hier eine Zeile geändert hat. Wer die Plattform festnagelt (`#<tag>` an die URL), darf das Flag entfernen.
+In [GitHub Actions](https://github.com/FMDHET/deye-inverter-display-esp32-p4/actions) laufen die Suiten bei jedem Push, dazu ein Firmware-Bau mit `idf.py build` im offiziellen ESP-IDF-v5.5.5-Container von Espressif. Weil die Version festgenagelt ist, heißt ein roter Bau: hier im Projekt ist etwas kaputt. Der Bau legt `deye_display.bin`, `deye_display.elf`, `storage.bin`, Bootloader und Partitionstabelle als Artefakt ab — das ELF ist genau das, was man zum Auswerten eines Coredumps braucht.
 
 ## Ein paar Einstellungen, die Erklärung brauchen
 
@@ -157,28 +171,15 @@ Ein Build, der sich beim ersten Aufruf holt, was gerade neu ist, ist kein
 Build, den man wiederholen kann. Hier ist deshalb **jede** bewegliche Stelle
 festgelegt — aber jede an ihrer eigenen, richtigen Stelle.
 
-**Die Plattform** (`platformio.ini`):
+**ESP-IDF selbst** (`CMakeLists.txt`):
 
-```ini
-platform = https://github.com/pioarduino/platform-espressif32.git#55.03.311
+```cmake
+set(DEYE_IDF_VERSION "5.5.5")
 ```
 
-Ohne das `#` folgt die Adresse dem Git-HEAD von pioarduino: zwei Checkouts
-derselben Firmware können dann mit verschiedenen ESP-IDF-Versionen gebaut
-werden, und die CI kann rot werden, ohne dass sich hier eine Zeile geändert
-hat. Die Marke `55.03.311` trägt ESP-IDF 5.5.5 und enthält „fix p4 rev3".
+Mit jeder anderen Version bricht der Bau gleich am Anfang ab und sagt, welche er gefunden hat. Zwei Checkouts derselben Firmware können damit nicht mehr mit verschiedenen ESP-IDF-Versionen gebaut werden. Die CI nagelt dieselbe Version ein zweites Mal fest (`esp_idf_version: v5.5.5` in `.github/workflows/ci.yml`). Wer bewusst eine andere Version ausprobieren will, schaltet die Prüfung mit `idf.py -DDEYE_ALLOW_ANY_IDF=1 build` ab — und flasht diesen Bau dann per USB mit angehängtem Monitor, nie blind über WLAN.
 
-**Aber niemals `framework-espidf` allein.** Das ist versucht worden (5.5.4, um
-einen Startabsturz zu umgehen) und bricht den Bau sofort:
-
-```text
-Source `.pio\build\guition-p4\montserrat_medium.ttf.S' not found
-```
-
-Die Bau-Skripte der Plattform passen zu der IDF, die sie mitbringt; tauscht man
-nur das eine Paket darunter aus, finden sie den erzeugten Assembler-Code für
-die eingebettete Schrift nicht mehr. Wer eine andere IDF braucht, nagelt die
-**ganze Plattform** auf eine Ausgabe fest, die diese IDF mitbringt.
+Früher stand diese Festlegung in `platformio.ini` als Plattform-Marke `55.03.311` von pioarduino, die ESP-IDF 5.5.5 mitbrachte. Das Projekt war schon immer reines ESP-IDF; PlatformIO war nur die Hülle darum. Seit Oktober 2026 wird direkt mit `idf.py` gebaut. Die Konfiguration ist dabei unverändert geblieben: `sdkconfig` (früher `sdkconfig.guition-p4`) enthält dieselben Werte, `dependencies.lock` kommt byte-identisch heraus.
 
 **Der Startabsturz** ist an seiner tatsächlichen Ursache festgelegt, nicht an
 der IDF-Version:
@@ -206,20 +207,15 @@ gleich bleibt. Die CI prüft genau das mit `git diff --exit-code --
 dependencies.lock`: schreibt ein Bau die Datei um, sind Manifest und Sperre
 auseinandergelaufen und jemand muss hinsehen.
 
-**Anheben** heißt also: Marke in `platformio.ini` tauschen, einmal komplett neu
-bauen (`rm -rf .pio/build`), aufs Gerät flashen, prüfen — und die geänderte
-`dependencies.lock` mit committen.
-
-> [!NOTE]
-> Der allererste Bau nach einem `rm -rf .pio/build` ist einmal mit
-> `ninja: fatal: chdir to '.../TryCompile-XXXXXX'` abgebrochen und lief beim
-> zweiten Aufruf ohne Änderung durch. Ein Ausrutscher beim Erzeugen des
-> Build-Systems, kein Problem der Festlegung — einfach noch einmal starten.
+**Anheben** heißt also: neue ESP-IDF-Version installieren, `DEYE_IDF_VERSION`
+in `CMakeLists.txt` und `esp_idf_version` in der CI gemeinsam tauschen, einmal
+komplett neu bauen (`idf.py fullclean build`), per USB aufs Gerät flashen,
+prüfen — und die geänderte `sdkconfig` und `dependencies.lock` mit committen.
 
 ## Die erste Installation, Schritt für Schritt
 
 1. Modul mit dem USB-C-Kabel an den Rechner.
-2. `pio run -e guition-p4 -t upload -t flashfs -t monitor`
+2. `idf.py -p /dev/cu.usbmodem101 flash monitor --timestamps` (Anschluss anpassen)
 3. Im Monitor prüfen: Startmeldung da? Build-Nummern gleich?
 4. Auf dem Bildschirm erscheint das Energiebild — alle Werte auf `--`, weil noch keine Geräte eingerichtet sind. Das ist richtig so.
 5. Das Gerät spannt ein WLAN namens `DeyeDisplay-XXXXXX` auf. Damit weiter zu [WLAN und Captive Portal](WLAN-und-Captive-Portal).

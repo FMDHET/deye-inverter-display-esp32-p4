@@ -351,6 +351,21 @@
 <section class="tab" id="tab-meter">
   <p class="lead">Was der Eltako-Z&auml;hler misst &mdash; und was die SDM630-Emulation dem Deye davon erz&auml;hlt.</p>
 <div class="card">
+  <h2>Was der Deye daraus macht &mdash; seine eigenen Messwerte</h2>
+  <div class="formrow" style="margin:0 0 12px;">
+    <span id="lvState" class="pill">Wechselrichter &hellip;</span>
+    <span class="hint" id="lvInfo" style="margin-left:auto;"></span>
+  </div>
+  <div class="tiles" id="lvTiles">
+    <div class="tile" id="tInv">  <div class="lbl">WR-Ausgang</div>    <div class="val">–</div><div class="foot"></div></div>
+    <div class="tile" id="tLoad"> <div class="lbl">Last</div>          <div class="val">–</div><div class="foot"></div></div>
+    <div class="tile" id="tGrid"> <div class="lbl">Netz (Deye-CT)</div><div class="val">–</div><div class="foot"></div></div>
+    <div class="tile" id="tBat">  <div class="lbl">Batterie</div>      <div class="val">–</div><div class="foot"></div></div>
+  </div>
+  <p class="hint" style="margin:12px 0 0;" id="lvDelta"></p>
+</div>
+
+<div class="card">
   <div class="formrow" style="margin:0;">
     <span id="pStale" class="pill">Zählerwert …</span>
     <span id="pSlave" class="pill">Emulation …</span>
@@ -443,21 +458,6 @@
     braucht echte Phasenwerte &ndash; fehlen sie, teilt sie die Summe zu
     gleichen Teilen auf.
   </p>
-</div>
-
-<div class="card">
-  <h2>Was der Deye daraus macht &mdash; seine eigenen Messwerte</h2>
-  <div class="formrow" style="margin:0 0 12px;">
-    <span id="lvState" class="pill">Wechselrichter &hellip;</span>
-    <span class="hint" id="lvInfo" style="margin-left:auto;"></span>
-  </div>
-  <div class="tiles" id="lvTiles">
-    <div class="tile" id="tInv">  <div class="lbl">WR-Ausgang</div>    <div class="val">–</div><div class="foot"></div></div>
-    <div class="tile" id="tLoad"> <div class="lbl">Last</div>          <div class="val">–</div><div class="foot"></div></div>
-    <div class="tile" id="tGrid"> <div class="lbl">Netz (Deye-CT)</div><div class="val">–</div><div class="foot"></div></div>
-    <div class="tile" id="tBat">  <div class="lbl">Batterie</div>      <div class="val">–</div><div class="foot"></div></div>
-  </div>
-  <p class="hint" style="margin:12px 0 0;" id="lvDelta"></p>
 </div>
 
 <div class="card" id="cardLvPhase">

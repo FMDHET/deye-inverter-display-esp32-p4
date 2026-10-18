@@ -75,8 +75,10 @@ esp_err_t nvs_store_set_mb_enabled(bool enabled);
 /* Modbus device list, stored/loaded as an opaque blob (array of structs). */
 esp_err_t nvs_store_get_mb_devices(void *buf, size_t *len);  /* *len in/out */
 esp_err_t nvs_store_set_mb_devices(const void *buf, size_t len);
-/* Reads the previous-layout ("devs4", 42B) blob, for one-time migration. */
-esp_err_t nvs_store_get_mb_devices_legacy(void *buf, size_t *len);
+/* Reads a previous-layout device blob ("devs5" 66 B, "devs4" 42 B records) for
+ * the one-time migration. The old keys are left in place, so a rollback to an
+ * older firmware still finds its device list. */
+esp_err_t nvs_store_get_mb_devices_legacy(const char *key, void *buf, size_t *len);
 
 /* Modbus-RTU config blob (mb_rtu_cfg_t). */
 esp_err_t nvs_store_get_mb_rtu(void *buf, size_t len);

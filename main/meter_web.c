@@ -108,13 +108,13 @@ static esp_err_t values_handler(httpd_req_t *req)
                  "%s{\"idx\":%d,\"name\":\"%s\",\"ip\":\"%s\",\"slave\":%u,"
                  "\"mfr\":\"%s\",\"role\":\"%s\",\"rc\":%u,\"grid\":%d,\"conn\":%d,"
                  "\"phases\":%d,\"age\":%u,\"ptot\":%.0f,"
-                 "\"pv\":%.0f,\"w\":%.0f,\"soc\":%.0f",
+                 "\"pv\":%.0f,\"w\":%.0f,\"soc\":%.0f,\"inv\":%d",
                  i ? "," : "", i, name, ip, dl[i].slave,
                  modbus_tcp_mfr_name(dl[i].mfr), modbus_tcp_role_name(dl[i].role),
                  dl[i].role, dl[i].role == MB_ROLE_GRID ? 1 : 0, dl[i].connected ? 1 : 0,
                  has ? 1 : 0, (unsigned)(has ? ph.age_ms : 0),
                  has ? ph.p_total : dl[i].w,
-                 dl[i].pv_w, dl[i].w, dl[i].soc);
+                 dl[i].pv_w, dl[i].w, dl[i].soc, dl[i].invert ? 1 : 0);
         if (has)
             o = jcat(s_json, JSON_CAP, o,
                      ",\"v\":[%.1f,%.1f,%.1f],\"i\":[%.2f,%.2f,%.2f],"

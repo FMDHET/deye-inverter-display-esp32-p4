@@ -113,39 +113,58 @@ void modbus_tcp_set_rtu_deye(float w, float soc, bool valid)
     if (valid) s_rtu_deye_ms = (uint32_t)(esp_timer_get_time() / 1000);
 }
 
-/* Previous ("devs4") record size: mb_dev_cfg_t without the trailing name[24].
- * Its bytes match the current struct's first 42 bytes. */
+/* Previous record sizes. Each layout is a byte-exact prefix of the next one:
+ * devs4 = up to timeout_ms, devs5 = + name[24], devs6 (current) = + invert. */
 #define MB_CFG_V4_SIZE 42
+#define MB_CFG_V5_SIZE 66
+
+int modbus_tcp_cfg_decode(const void *blob, size_t len, mb_dev_cfg_t *out, int max)
+{
+    size_t rec;
+    if      (len % sizeof(mb_dev_cfg_t) == 0) rec = sizeof(mb_dev_cfg_t);
+    else if (len % MB_CFG_V5_SIZE == 0)       rec = MB_CFG_V5_SIZE;
+    else if (len % MB_CFG_V4_SIZE == 0)       rec = MB_CFG_V4_SIZE;
+    else return -1;
+    int n = (int)(len / rec);
+    if (n > max) n = max;
+    for (int i = 0; i < n; i++) {
+        memset(&out[i], 0, sizeof(out[i]));
+        memcpy(&out[i], (const uint8_t *)blob + (size_t)i * rec, rec);
+    }
+    return n;
+}
 
 /* Load the device list from NVS into a caller-owned buffer (NO shared state):
  * the result is committed into s_devs under the lock by reconfigure_apply(), so
  * the parallel workers always snapshot a consistent list. Returns the count. */
 static int load_cfg_into(mb_dev_cfg_t *devs)
 {
-    size_t len = sizeof(mb_dev_cfg_t) * MB_MAX_DEVICES;
-    memset(devs, 0, len);
+    memset(devs, 0, sizeof(mb_dev_cfg_t) * MB_MAX_DEVICES);
+    uint8_t raw[MB_MAX_DEVICES * sizeof(mb_dev_cfg_t)];
+    size_t len = sizeof(raw);
     int cnt = 0;
 
-    if (nvs_store_get_mb_devices(devs, &len) == ESP_OK) {
-        cnt = (int)(len / sizeof(mb_dev_cfg_t));
-        if (cnt > MB_MAX_DEVICES) cnt = MB_MAX_DEVICES;
+    if (nvs_store_get_mb_devices(raw, &len) == ESP_OK) {
+        cnt = modbus_tcp_cfg_decode(raw, len, devs, MB_MAX_DEVICES);
+        if (cnt < 0) {
+            ESP_LOGE(TAG, "device list: %u bytes fit no known layout -- ignored",
+                     (unsigned)len);
+            cnt = 0;
+        }
     } else {
-        /* One-time migration from the previous layout so the user keeps their
-         * devices. Old records are 42 bytes; copy them in, name stays empty. */
-        uint8_t old[MB_MAX_DEVICES * MB_CFG_V4_SIZE];
-        size_t olen = sizeof(old);
-        if (nvs_store_get_mb_devices_legacy(old, &olen) == ESP_OK) {
-            int n = (int)(olen / MB_CFG_V4_SIZE);
-            if (n > MB_MAX_DEVICES) n = MB_MAX_DEVICES;
-            for (int i = 0; i < n; i++) {
-                memcpy(&devs[i], old + i * MB_CFG_V4_SIZE, MB_CFG_V4_SIZE);
-                devs[i].name[0] = '\0';
-            }
+        /* One-time migration from an older layout so the user keeps their
+         * devices; newer fields stay zero (no name, sign not inverted). The old
+         * key is not erased: a rollback finds the list it left behind. */
+        static const char *const keys[] = { "devs5", "devs4" };
+        for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
+            len = sizeof(raw);
+            if (nvs_store_get_mb_devices_legacy(keys[k], raw, &len) != ESP_OK) continue;
+            int n = modbus_tcp_cfg_decode(raw, len, devs, MB_MAX_DEVICES);
+            if (n <= 0) continue;
             cnt = n;
-            if (n > 0) {
-                nvs_store_set_mb_devices(devs, (size_t)n * sizeof(mb_dev_cfg_t));
-                ESP_LOGW(TAG, "migrated %d device(s) from old NVS layout", n);
-            }
+            nvs_store_set_mb_devices(devs, (size_t)n * sizeof(mb_dev_cfg_t));
+            ESP_LOGW(TAG, "migrated %d device(s) from NVS layout %s", n, keys[k]);
+            break;
         }
     }
 
@@ -177,9 +196,12 @@ static int load_cfg_into(mb_dev_cfg_t *devs)
     return cnt;
 }
 
-/* Compile-time guard: the current struct appends name[24] to the 42-byte
- * devs4 layout -> 66. */
-_Static_assert(sizeof(mb_dev_cfg_t) == MB_CFG_V4_SIZE + 24, "mb_dev_cfg_t layout");
+/* Compile-time guard: devs6 appends invert + a reserved byte to the 66-byte
+ * devs5 layout -> 68. modbus_tcp_cfg_decode() tells the layouts apart by
+ * length alone, which only works while no multiple of one record size up to
+ * MB_MAX_DEVICES records equals a multiple of another. */
+_Static_assert(sizeof(mb_dev_cfg_t) == MB_CFG_V5_SIZE + 2, "mb_dev_cfg_t layout");
+_Static_assert(offsetof(mb_dev_cfg_t, name) == MB_CFG_V4_SIZE, "devs4 prefix");
 
 /* --------------------------- socket + framing -------------------------- */
 
@@ -572,6 +594,7 @@ static int poll_device(int s, const mb_dev_cfg_t *d, int idx, agg_t *a,
             ESP_LOGW(TAG, "dev%d: implausible Fronius meter %.0f W -- discarded", idx, w);
             return -1;
         }
+        if (d->invert) w = -w;              /* meter wired the other way round */
         if (d->role == MB_ROLE_GRID) { a->netz = w; a->netz_v = true; *o_w = w; }
         else                         { a->pv += w; a->pv_v = true; *o_pv = w; }
         return 0;
@@ -587,6 +610,12 @@ static int poll_device(int s, const mb_dev_cfg_t *d, int idx, agg_t *a,
             ESP_LOGW(TAG, "dev%d: implausible Eltako %.0f W -- discarded", idx, w);
             return -1;
         }
+        /* Meter wired the other way round (in/out swapped): flip the sign here,
+         * before anything reads it, so display, balance and the SDM630 served
+         * to the Deye all see + = import. The phase powers below likewise; the
+         * currents are unsigned on the DSZ and stay as they are. */
+        const float sgn = d->invert ? -1.0f : 1.0f;
+        w *= sgn;
 
         /* Per-phase block (U/I/P L1..L3) for the /meter page and for forwarding
          * the REAL phase split to the Deye. A second read on the control-
@@ -601,7 +630,7 @@ static int poll_device(int s, const mb_dev_cfg_t *d, int idx, agg_t *a,
             for (int k = 0; k < 3; k++) {
                 sn.v[k] = (float)words_to_i32(ph[k * 2],     ph[k * 2 + 1])     / 100.0f;
                 sn.i[k] = (float)words_to_i32(ph[6 + k * 2], ph[6 + k * 2 + 1]) / 100.0f;
-                sn.p[k] = (float)words_to_i32(ph[12 + k * 2], ph[12 + k * 2 + 1]);
+                sn.p[k] = sgn * (float)words_to_i32(ph[12 + k * 2], ph[12 + k * 2 + 1]);
                 if (!plausible_w(sn.p[k]) || !isfinite(sn.v[k]) || !isfinite(sn.i[k]))
                     ok = false;
             }
@@ -714,6 +743,7 @@ static void reconfigure_apply(void)
         s_live[i].slave = s_devs[i].slave;
         s_live[i].mfr   = s_devs[i].mfr;
         s_live[i].role  = s_devs[i].role;
+        s_live[i].invert = s_devs[i].invert != 0;
     }
     s_live_count = cnt;
     /* Drop stale energy + mark grid INVALID so the RTU emulation stops driving
@@ -1137,12 +1167,13 @@ int modbus_tcp_get_device_live(mb_dev_live_t *out, int max)
 
 int modbus_tcp_get_devices(mb_dev_cfg_t *out, int max)
 {
-    size_t len = sizeof(s_devs);
+    uint8_t raw[MB_MAX_DEVICES * sizeof(mb_dev_cfg_t)];
+    size_t len = sizeof(raw);
     mb_dev_cfg_t tmp[MB_MAX_DEVICES];
-    memset(tmp, 0, sizeof(tmp));
     int n = 0;
-    if (nvs_store_get_mb_devices(tmp, &len) == ESP_OK) {
-        n = (int)(len / sizeof(mb_dev_cfg_t));
+    if (nvs_store_get_mb_devices(raw, &len) == ESP_OK) {
+        n = modbus_tcp_cfg_decode(raw, len, tmp, MB_MAX_DEVICES);
+        if (n < 0) n = 0;
     }
     if (n > max) n = max;
     for (int i = 0; i < n; i++) out[i] = tmp[i];

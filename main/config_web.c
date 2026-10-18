@@ -234,6 +234,22 @@ static esp_err_t import_handler(httpd_req_t *req)
             skipped++;
             continue;
         }
+        /* The device list is the one blob whose record layout has grown: a
+         * backup from an older firmware carries shorter records, which written
+         * through as-is would be read back misaligned. Bring it to the current
+         * layout first (new fields zero). */
+        if (b->set_var == nvs_store_set_mb_devices) {
+            mb_dev_cfg_t devs[MB_MAX_DEVICES];
+            int n = modbus_tcp_cfg_decode(raw, len, devs, MB_MAX_DEVICES);
+            if (n <= 0) {
+                ESP_LOGW(TAG, "%s: %u bytes fit no device layout -- skipped",
+                         b->key, (unsigned)len);
+                skipped++;
+                continue;
+            }
+            len = (size_t)n * sizeof(mb_dev_cfg_t);
+            memcpy(raw, devs, len);
+        }
         esp_err_t e = b->set_var ? b->set_var(raw, len) : b->set_fixed(raw, len);
         if (e == ESP_OK) applied++;
         else { ESP_LOGE(TAG, "%s: write failed (%s)", b->key, esp_err_to_name(e)); skipped++; }

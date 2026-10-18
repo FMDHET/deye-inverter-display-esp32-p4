@@ -277,7 +277,7 @@ Bei aktivierter Discovery legt das Gerät in Home Assistant selbst an: 7 Sensore
 | --- | --- |
 | **WLAN** | Status, Netzsuche, bis zu 10 gespeicherte Netze mit Einzel-Löschen, Bildschirmtastatur mit Umlauten |
 | **Display** | Helligkeit (LEDC-PWM), Kontrast (Software-Overlay), Standby (aus / 30 s / 1 / 2 / 5 / 10 min), Ausrichtung |
-| **Mod TCP** | Geräteliste: Name, Hersteller, Rolle, IP, Port, Slave-ID, Poll-Intervall, Timeout — je Gerät einzeln |
+| **Mod TCP** | Geräteliste: Name, Hersteller, Rolle, IP, Port, Slave-ID, Poll-Intervall, Timeout, Vorzeichen umkehren (verkehrt angeschlossener Zähler) — je Gerät einzeln |
 | **Mod RTU** | Pro Bus: Rolle, Slave-ID, Baudrate; Selbsttest mit Laufzeitmessung |
 | **MQTT** | Broker, Port, Zugangsdaten, Basistopic, Retain / Discovery / Last Will |
 | **Zeit** | SNTP an/aus, Server, Zeitzone (13 Zonen mit POSIX-Regeln inkl. Sommerzeit) |

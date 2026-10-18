@@ -289,17 +289,17 @@ esp_err_t nvs_store_get_mb_devices(void *buf, size_t *len)
     nvs_handle_t h;
     esp_err_t e = nvs_open(NS_MB, NVS_READONLY, &h);
     if (e != ESP_OK) return e;
-    e = nvs_get_blob(h, "devs5", buf, len);   /* devs5: +name */
+    e = nvs_get_blob(h, "devs6", buf, len);   /* devs6: +invert */
     nvs_close(h);
     return e;
 }
 
-esp_err_t nvs_store_get_mb_devices_legacy(void *buf, size_t *len)
+esp_err_t nvs_store_get_mb_devices_legacy(const char *key, void *buf, size_t *len)
 {
     nvs_handle_t h;
     esp_err_t e = nvs_open(NS_MB, NVS_READONLY, &h);
     if (e != ESP_OK) return e;
-    e = nvs_get_blob(h, "devs4", buf, len);   /* prev layout (42B, +timeout_ms) */
+    e = nvs_get_blob(h, key, buf, len);       /* devs5 (66B, +name), devs4 (42B) */
     nvs_close(h);
     return e;
 }
@@ -309,7 +309,7 @@ esp_err_t nvs_store_set_mb_devices(const void *buf, size_t len)
     nvs_handle_t h;
     esp_err_t e = nvs_open(NS_MB, NVS_READWRITE, &h);
     if (e != ESP_OK) return e;
-    e = nvs_set_blob(h, "devs5", buf, len);   /* devs5: +name */
+    e = nvs_set_blob(h, "devs6", buf, len);   /* devs6: +invert */
     if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h);
     return e;

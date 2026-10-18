@@ -53,6 +53,9 @@ typedef struct {
     uint16_t timeout_ms;  /* connect/liveness timeout (0 -> default 500); reads
                              get a >=2s floor for slow dataloggers */
     char     name[24];    /* user label shown in the UI (APPENDED -> devs5) */
+    uint8_t  invert;      /* 0/1: meter wired the other way round -- negate its
+                             power (total + phases) on read (APPENDED -> devs6) */
+    uint8_t  _rsv;        /* keeps the record size even                       */
 } mb_dev_cfg_t;
 
 /* Roles whose reading reaches the inverter rather than just the screen: the
@@ -142,11 +145,20 @@ typedef struct {
     uint8_t slave;       /* Modbus slave/unit id */
     uint8_t mfr;         /* mb_mfr_t  */
     uint8_t role;        /* mb_role_t */
+    bool    invert;      /* power sign flipped on read (mb_dev_cfg_t.invert) */
     bool    connected;
     float   pv_w;        /* PV contribution                 */
     float   w;           /* battery or grid power           */
     float   soc;         /* battery SoC %                   */
 } mb_dev_live_t;
+
+/* Decode a device-list blob of ANY stored layout (devs4 42 B, devs5 66 B,
+ * current) into `out`; the record size is recognised from the length (no
+ * length up to MB_MAX_DEVICES records is ambiguous). Fields the old layout did
+ * not have come out zeroed. Returns the record count, -1 if the length fits no
+ * layout. Used by the NVS load and by the settings import, so an old backup
+ * file restores into the current layout instead of being misread. */
+int         modbus_tcp_cfg_decode(const void *blob, size_t len, mb_dev_cfg_t *out, int max);
 
 /* Device-list access for the settings UI. */
 int         modbus_tcp_get_devices(mb_dev_cfg_t *out, int max);   /* -> count */

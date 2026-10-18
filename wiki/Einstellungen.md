@@ -32,6 +32,7 @@ Hier steht die Liste der Geräte, die über das Netzwerk abgefragt werden. „+ 
 | **Slave-ID** | Die Gerätenummer. Mehrere Geräte dürfen dieselbe IP mit verschiedenen IDs haben — bei Wechselrichtern hinter einem gemeinsamen Datenlogger ist das der Normalfall. |
 | **Poll (ms)** | Wie oft gefragt wird. 200 bis 60000, Standard 2000 (also alle zwei Sekunden). |
 | **Timeout (ms)** | Wie lange auf Antwort gewartet wird, bevor der Versuch als gescheitert gilt. 100 bis 10000, Standard 500. Bei langsamen Datenloggern hochsetzen. |
+| **Vorzeichen umkehren** | Für einen Zähler, der andersherum angeschlossen ist (Ein- und Ausgang vertauscht). Dreht die gemessene Leistung um, gesamt und je Phase, bevor irgendetwas sie verwendet: Anzeige, Hausbilanz, MQTT und der Zähler, den der Deye zu hören bekommt. Gilt für Eltako- und Fronius-Zähler. Die Energiezählerstände im Zähler selbst bleiben vertauscht, die liest das Gerät nicht. In der Liste steht danach „[umgekehrt]" hinter dem Gerät, in `/api/meter` `"inv":1`. |
 
 Oben steht eine laufende Zeile mit Verbindungszählern und aktuellen Werten — praktisch, um sofort zu sehen, ob ein neu angelegtes Gerät antwortet.
 

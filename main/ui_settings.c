@@ -81,6 +81,7 @@ static lv_obj_t       *s_mb_dialog;
 static lv_obj_t       *s_mb_mfr_dd;
 static lv_obj_t       *s_mb_role_dd;
 static lv_obj_t       *s_mb_en;
+static lv_obj_t       *s_mb_inv;
 static lv_obj_t       *s_mb_name;
 static lv_obj_t       *s_mb_ip;
 static lv_obj_t       *s_mb_port;
@@ -778,20 +779,21 @@ static void mb_rebuild_list(void)
     lv_obj_clean(s_mb_list);
     s_mb_devn = modbus_tcp_get_devices(s_mb_devs, MB_MAX_DEVICES);
     for (int i = 0; i < s_mb_devn; i++) {
-        char line[128];
+        char line[144];
         const char *nm = s_mb_devs[i].name[0] ? s_mb_devs[i].name : NULL;
+        const char *inv = s_mb_devs[i].invert ? "  [umgekehrt]" : "";
         if (nm) {
-            snprintf(line, sizeof(line), "%.23s%s\n%.24s - %.24s  %.31s",
-                     nm, s_mb_devs[i].enabled ? "" : "  [aus]",
+            snprintf(line, sizeof(line), "%.23s%s%s\n%.24s - %.24s  %.31s",
+                     nm, s_mb_devs[i].enabled ? "" : "  [aus]", inv,
                      modbus_tcp_mfr_name(s_mb_devs[i].mfr),
                      modbus_tcp_role_name(s_mb_devs[i].role),
                      s_mb_devs[i].ip[0] ? s_mb_devs[i].ip : "(keine IP)");
         } else {
-            snprintf(line, sizeof(line), "%.24s - %.24s\n%.31s%s",
+            snprintf(line, sizeof(line), "%.24s - %.24s\n%.31s%s%s",
                      modbus_tcp_mfr_name(s_mb_devs[i].mfr),
                      modbus_tcp_role_name(s_mb_devs[i].role),
                      s_mb_devs[i].ip[0] ? s_mb_devs[i].ip : "(keine IP)",
-                     s_mb_devs[i].enabled ? "" : "  [aus]");
+                     s_mb_devs[i].enabled ? "" : "  [aus]", inv);
         }
         lv_obj_t *b = lv_list_add_button(s_mb_list, LV_SYMBOL_EDIT, line);
         lv_obj_add_event_cb(b, dev_item_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
@@ -859,6 +861,7 @@ static void dev_save_cb(lv_event_t *e)
     c.timeout_ms = (uint16_t)field_num(s_mb_tmo, MB_MIN_TIMEOUT_MS, MB_MAX_TIMEOUT_MS, 0);
     c.mfr     = (uint8_t)lv_dropdown_get_selected(s_mb_mfr_dd);   /* role: above */
     c.enabled = lv_obj_has_state(s_mb_en, LV_STATE_CHECKED) ? 1 : 0;
+    c.invert  = lv_obj_has_state(s_mb_inv, LV_STATE_CHECKED) ? 1 : 0;
 
     if (s_mb_edit_idx >= 0 && s_mb_edit_idx < s_mb_devn) {
         s_mb_devs[s_mb_edit_idx] = c;
@@ -1056,6 +1059,15 @@ static void open_dev_dialog(int idx)
     lv_textarea_set_max_length(s_mb_tmo, 5);
     lv_textarea_set_accepted_chars(s_mb_tmo, "0123456789");
     lv_obj_align(s_mb_tmo, LV_ALIGN_TOP_LEFT, 642, 230);
+
+    /* Sign inversion for a meter wired the other way round, in the row of the
+     * delete button (right of it, above the keyboard). */
+    lv_obj_t *il = lv_label_create(s_mb_dialog);
+    lv_label_set_text(il, "Vorzeichen umkehren"); lv_obj_set_style_text_color(il, COL_SUB, 0);
+    lv_obj_align(il, LV_ALIGN_TOP_LEFT, 398, 292);
+    s_mb_inv = lv_switch_create(s_mb_dialog);
+    lv_obj_align(s_mb_inv, LV_ALIGN_TOP_LEFT, 600, 288);
+    if (c.invert) lv_obj_add_state(s_mb_inv, LV_STATE_CHECKED);
 
     /* Delete (only when editing): placed below the IP row (y=280, clear of y≈274). */
     if (idx >= 0) {

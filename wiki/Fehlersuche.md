@@ -241,7 +241,7 @@ Absturzmeldung ernst nimmt, sichert das ELF zum Build. Die CI legt es zu jedem
 Bau als Artefakt ab.
 
 > [!NOTE]
-> Die Coredump-Partition ist **nach** allen anderen an die Tabelle angehängt, damit kein bestehendes Gerät sein NVS verliert. Eine neue Partitionstabelle kommt aber nur per USB aufs Gerät — ein Display, das ausschließlich über WLAN aktualisiert wurde, hat die Partition nicht und meldet `"coredump":{"present":0}`, auch nach einem Absturz. Einmal `pio run -t upload` über Kabel behebt das dauerhaft.
+> Die Coredump-Partition ist **nach** allen anderen an die Tabelle angehängt, damit kein bestehendes Gerät sein NVS verliert. Eine neue Partitionstabelle kommt aber nur per USB aufs Gerät — ein Display, das ausschließlich über WLAN aktualisiert wurde, hat die Partition nicht und meldet `"coredump":{"present":0}`, auch nach einem Absturz. Einmal `idf.py -p <port> flash` über Kabel behebt das dauerhaft.
 
 ## Bauen und Flashen
 

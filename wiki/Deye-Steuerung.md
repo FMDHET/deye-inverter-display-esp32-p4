@@ -144,7 +144,7 @@ I modbus_tcp: SLS guard: export 19100 W OK -- restore → 20000 W
 
 ## Was der Wechselrichter selbst misst
 
-Der RTU-Master liest neben Ladezustand und Akkuleistung, die das Energiemodell braucht, im selben 2-Sekunden-Takt vier weitere Registerblöcke und legt sie fertig skaliert ab. Der Tab „Zähler & Deye" auf `http://<ip-des-geräts>/deye` zeigt sie unter **„Was der Deye daraus macht"**, `GET /api/deye/live` liefert dasselbe als JSON.
+Der RTU-Master liest neben Ladezustand und Akkuleistung, die das Energiemodell braucht, im selben 2-Sekunden-Takt vier weitere Registerblöcke und legt sie fertig skaliert ab. Der Tab „Zähler & Deye" auf `http://<ip-des-geräts>/deye` zeigt sie unter **„Was der Deye daraus macht"**: oben drei Kacheln — **WR-Ausgang**, **Batterie** und **[Wirkungsgrad](#wirkungsgrad)** —, darunter der Vergleich mit dem gesendeten Zählerwert und die Werte je Phase. `GET /api/deye/live` liefert dasselbe als JSON.
 
 | Block | Register | Inhalt |
 | --- | --- | --- |
@@ -175,6 +175,59 @@ Damit lässt sich in einem Blick prüfen, ob eine Phasenmanipulation überhaupt 
 
 > [!NOTE]
 > Der Wechselrichter meldet seine Ausgangsleistung (Register 633…636) **entgegengesetzt** zu seinem eigenen Akkuregister: beim Laden stehen dort −2803 W, obwohl er AC-seitig zieht. Die Firmware dreht das Vorzeichen einmal beim Auslesen, damit für alle Werte dieselbe Regel gilt. Die Last- und UPS-Register (640…655) bleiben roh — hängt nichts am Backup-Port, spiegeln sie den AC-Fluss und liegen dadurch gegenläufig zum Ausgang.
+
+## Wirkungsgrad
+
+Wie viel von dem, was aus dem Akku kommt, kommt am AC-Ausgang wirklich an? Und wie viel vom Netzstrom landet beim Laden tatsächlich im Akku? Das zeigt die Kachel **Wirkungsgrad** im Tab „Zähler & Deye".
+
+| Zeile | Bedeutung |
+| --- | --- |
+| große Zahl | der aktuelle Wert, darunter die Richtung: `Batt→AC` beim Entladen, `Batt+PV→AC` wenn die Sonne mitspeist, `AC→Batt` beim Laden |
+| Entladen Ø | Energie aus dem Akku (plus PV) → Energie am AC-Ausgang, in kWh, und wie lange schon gezählt wird |
+| Laden Ø | Energie AC-seitig hinein → Energie im Akku |
+| Langzeit Ø | beide Richtungen über die ganze Betriebszeit; am Rechner zusätzlich die kWh und das Startdatum |
+
+Gerechnet wird mit dem, was der Deye selbst misst — Akkuleistung (Register 590), PV-Leistung (672…675) und AC-Ausgang (636):
+
+```text
+Entladen:  Wirkungsgrad = AC-Ausgang / (Akku + PV)
+Laden:     Wirkungsgrad = (Akku − PV) / AC-Eingang        (jeweils als Betrag)
+```
+
+**Warum PV mitzählt:** scheint die Sonne, speisen Akku und Module den Wechselrichter gemeinsam. Nur die Summe steht seinem AC-Ausgang gegenüber. Nachts ist es reiner Akku. Läuft der Akku, während der Wechselrichter nichts abgibt (er versorgt nur sich selbst), zählt das als Verlust beim Entladen — genau das ist die Frage „was kommt aus dem Akku, und was davon kommt an". Laden nur aus PV (Gleichstrom zu Gleichstrom) ist keine Umwandlung durch den Wechselrichter und wird nicht gezählt.
+
+**Gezählt wird nur bei ruhiger Leistung.** Ändert sich die Leistung, hinkt das Akkuregister dem AC-Register mehrere Sekunden hinterher. Gesehen wurden −8229 W am Akku neben 841 W am AC-Ausgang, drei Runden lang — rechnerisch 978 %. Eine Runde zählt deshalb nur, wenn
+
+* beide Seiten höchstens 150 W (oder 5 %) von der vorigen Runde abweichen, **und**
+* nicht mehr herauskommt als hineingeht (plus 2 % Messtoleranz).
+
+Die erste Bedingung allein ließe ein eingefrorenes, unstimmiges Wertepaar durch; die zweite allein würde nur die zu hohen Werte wegschneiden und den Schnitt nach unten ziehen. Unter 50 W steht in der Kachel `–`: dort ist der Wert nur Rauschen.
+
+**Wann was zurückgesetzt wird:**
+
+| Ereignis | Entladen Ø | Laden Ø | Langzeit |
+| --- | --- | --- | --- |
+| Knopf „Wirkungsgrad zurücksetzen" oder `POST /api/deye/eff/reset` | ja | ja | nein |
+| Akku 60 Minuten ununterbrochen auf 100 % | ja, einmal pro Vollphase; dahinter steht dann „seit voll" | nein | nein |
+| Neustart oder Update | ja | ja | nein |
+
+Der Rücksetzer bei vollem Akku sorgt dafür, dass „Entladen Ø" immer die Entladung seit der letzten Vollladung beschreibt. Fällt der Ladezustand zwischendurch unter 100 %, beginnt die Stunde von vorn.
+
+**Der Langzeitwert** liegt im NVS (Namensraum `modbus`, Schlüssel `deye_eff`). Er wird höchstens alle 15 Minuten geschrieben und zusätzlich bei jedem geordneten Neustart — auch vor einem Update. Ein Stromausfall kostet also höchstens die letzten 15 Minuten. Einen Weg zum Zurücksetzen gibt es absichtlich nicht.
+
+Gemessen an diesem Gerät: rund **94,5 % beim Laden** mit 17 kW, **93–94 % beim Entladen** mit 2 kW.
+
+In `GET /api/deye/live` steht das alles unter `eff`:
+
+| Feld | Bedeutung |
+| --- | --- |
+| `ok` | `1`, wenn die letzte Runde gezählt wurde — nur dann ist ein Momentanwert sinnvoll |
+| `dis_dc`, `dis_ac` | Entladen: Wh hinein (Akku + PV) und Wh am AC-Ausgang |
+| `chg_ac`, `chg_dc` | Laden: Wh AC-seitig hinein und Wh im Akku |
+| `dis_since`, `since` | Sekunden, seit Entladen bzw. Laden gezählt wird |
+| `dis_full` | `1`, wenn die Entlade-Statistik zuletzt durch einen vollen Akku neu begonnen hat |
+| `full` | Sekunden, die der Akku gerade ununterbrochen auf 100 % steht (`0` = nicht voll) |
+| `lt` | Langzeitwerte: `dis_dc`, `dis_ac`, `chg_ac`, `chg_dc` in Wh, `start` als Unix-Zeit (`0`, solange die Uhr beim ersten Zählen noch nicht stand) |
 
 ## Register selbst untersuchen
 

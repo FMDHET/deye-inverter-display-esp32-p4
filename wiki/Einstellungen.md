@@ -93,6 +93,7 @@ Diese Grenze bremst die Zwangsentladung, damit dein Hausanschluss nicht überlas
 | Sollwert und Phasenmanipulation (`/api/meter/manip`) | `GET /ota` (Version, Speicher, Neustartgrund) |
 | Fernbedienung über den Web-Spiegel (`/touch`, `/key`, `/paste`) | das Spiegelbild selbst |
 | Log (`/log`) und Sicherung (`/config`) | |
+| Wirkungsgrad-Statistik zurücksetzen (`/api/deye/eff/reset`) | |
 
 Leeres Feld = kein Schutz, genau wie vor dieser Funktion. Gesetzt wird das Passwort **nur hier am Gerät** — vor dem Display zu stehen ist der einzige Nachweis, den das Netzwerk nicht fälschen kann. Der Haken auf der Tastatur speichert.
 

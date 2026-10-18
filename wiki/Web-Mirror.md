@@ -63,7 +63,7 @@ Unter `http://<ip-des-geräts>/deye` liegt ein Werkzeug, mit dem man direkt in d
 **Ein Register schreiben** — für Versuche mit einzelnen Adressen.
 
 > [!TIP]
-> Die laufend interessanten Messwerte muss man nicht von Hand suchen: der Tab „Zähler & Deye" zeigt sie unter „Was der Deye daraus macht" fertig aufbereitet — PV, AC-Ausgang, Last, Netz und Batterie, je Phase. Siehe [Deye-Steuerung](Deye-Steuerung#was-der-wechselrichter-selbst-misst).
+> Die laufend interessanten Messwerte muss man nicht von Hand suchen: der Tab „Zähler & Deye" zeigt sie unter „Was der Deye daraus macht" fertig aufbereitet — AC-Ausgang, Batterie und Wirkungsgrad als Kacheln, Netz, Ausgang und Last je Phase. Siehe [Deye-Steuerung](Deye-Steuerung#was-der-wechselrichter-selbst-misst).
 
 **Sichern und Zurückschreiben** — ein Adressbereich wird komplett ausgelesen und als CSV-Datei gespeichert, die man in Excel öffnen kann (Spalten `addr;value;hex;signed;name;interp`). Dieselbe Datei lässt sich wieder einspielen; geschrieben wird dabei immer die Spalte `signed`, negative Werte werden korrekt umgerechnet.
 
@@ -98,10 +98,11 @@ Zu lesen als: 4 Geräte eingerichtet, 4 verbunden, 3,4 Millionen Abfragen seit d
  "pv":{"total":0,"p":[0,0,0,0],"v":[0,0,0,0],"i":[0,0,0,0]},
  "inv":{"total":-1139,"freq":49.95,"p":[-98,-149,-892], …},
  "load":{"total":1144,"ups_total":81, …},
- "grid":{"ct_total":5,"ct":[2,1,2],"inner_total":-1058, …}}
+ "grid":{"ct_total":5,"ct":[2,1,2],"inner_total":-1058, …},
+ "eff":{"ok":1,"dis_dc":149.0,"dis_ac":138.0, …,"lt":{…}}}
 ```
 
-`blocks` ist die Bitmaske der Registerblöcke, die in der letzten Runde geantwortet haben (1 = Batterie, 2 = Netz, 4 = Ausgang/Last, 8 = PV). Fällt einer aus, bleiben seine Werte als letzter Stand stehen — die Seite dimmt sie dann. Bedient wird die Anfrage aus dem Poll-Cache, es entsteht also **kein** RS485-Verkehr pro Abfrage: beliebig viele offene Browser kosten den Bus nichts.
+`blocks` ist die Bitmaske der Registerblöcke, die in der letzten Runde geantwortet haben (1 = Batterie, 2 = Netz, 4 = Ausgang/Last, 8 = PV). Fällt einer aus, bleiben seine Werte als letzter Stand stehen — die Seite dimmt sie dann. Bedient wird die Anfrage aus dem Poll-Cache, es entsteht also **kein** RS485-Verkehr pro Abfrage: beliebig viele offene Browser kosten den Bus nichts. `eff` enthält die Energiesummen für den Wirkungsgrad, Felder und Rechnung unter [Deye-Steuerung](Deye-Steuerung#wirkungsgrad). `POST /api/deye/eff/reset` setzt die Kurzzeitwerte darin zurück, den Langzeitwert nicht.
 
 `GET /ota` — Version, Build-Nummer, Speicherabschnitt, Laufzeit, Grund des letzten Neustarts, freier Speicher, siehe [OTA und Recovery](OTA-und-Recovery).
 
@@ -117,6 +118,7 @@ Alle setzen den Header `Access-Control-Allow-Origin: *`. Das heißt: man kann si
 | `POST` | `/paste` | 80 |
 | `GET` | `/api/live`, `/api/devices` | 80 |
 | `GET` | `/deye`, `/deye/read`, `/deye/write`, `/api/deye/live` | 80 |
+| `POST` | `/api/deye/eff/reset` — Wirkungsgrad-Statistik zurücksetzen | 80 |
 | `GET` | `/meter` — Umleitung auf `/deye#meter` | 80 |
 | `GET` | `/api/meter`, `/api/meter/manip` | 80 |
 | `GET` | `/ota`, `/recovery` | 80 |

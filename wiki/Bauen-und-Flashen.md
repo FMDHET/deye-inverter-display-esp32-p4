@@ -2,6 +2,9 @@
 
 „Bauen" heißt: aus dem Quellcode ein Programm machen. „Flashen" heißt: dieses Programm in den Speicher des Chips schreiben. Beides macht ein einziger Befehl.
 
+> [!TIP]
+> Nur flashen, nicht selbst bauen? Unter [Releases](https://github.com/FMDHET/deye-inverter-display-esp32-p4/releases/latest) liegen die fertigen Dateien mit Prüfsummen, dazu die Befehle für USB und WLAN. Dafür reicht `esptool` (USB) bzw. `curl` (WLAN), ESP-IDF braucht es nicht.
+
 ## Was du installieren musst
 
 **[ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/v5.5.5/esp32p4/get-started/) in Version 5.5.5** — genau diese, nicht „irgendeine 5er". `CMakeLists.txt` prüft das und bricht mit jeder anderen Version mit einer klaren Meldung ab (warum, steht unten unter „Was festgenagelt ist").

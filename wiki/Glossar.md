@@ -14,6 +14,8 @@ Diese Seite erklärt die Begriffe, die auf den anderen Seiten immer wieder vorko
 
 **SoC** steht für *State of Charge*, also Ladezustand. `91 %` bedeutet: die Batterie ist zu 91 Prozent voll.
 
+**Wirkungsgrad**: wie viel Prozent der Energie bei einer Umwandlung übrig bleiben. Gibt der Akku 1000 Wh ab und kommen am Ausgang des Wechselrichters 940 Wh an, sind das 94 %. Der Rest wird im Gerät zu Wärme. Wie das Display ihn misst: [Deye-Steuerung](Deye-Steuerung#wirkungsgrad).
+
 **Netzübergabepunkt**: die Stelle, an der dein Haus am öffentlichen Stromnetz hängt. Dort sitzt der Zähler des Netzbetreibers. Alles, was du nicht selbst verbrauchst, geht hier raus; alles, was du zusätzlich brauchst, kommt hier rein.
 
 **Bezug und Einspeisung**: *Bezug* = Strom kommt aus dem Netz ins Haus. *Einspeisung* = Strom geht aus dem Haus ins Netz. In diesem Projekt gilt durchgehend: **positive Zahl = Bezug, negative Zahl = Einspeisung**. `−350 W` heißt also: 350 Watt gehen gerade ins Netz raus.

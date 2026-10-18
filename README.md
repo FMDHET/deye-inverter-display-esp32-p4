@@ -19,6 +19,7 @@ Firmware for a **GUITION JC4880P443C** (ESP32-P4 + ESP32-C6, 4.3″ 480×800 MIP
 * **Bridges** Modbus-TCP to RTU in the other direction: a server on port 502 forwards LAN requests onto the RS485 buses, so any Modbus master can read and write the Deye's registers without its own adapter. Multiple concurrent clients, both buses routable by unit id.
 * **Emulates** an Eastron SDM630 energy meter on the Deye's meter port and reports *(real grid power − setpoint)*, so the inverter regulates the real grid connection point to a setpoint you pick on screen. Emulation is gated on a **fresh** meter reading — a frozen value once caused a 15 kW export runaway.
 * **Controls** the Deye battery: Normal / forced charge / forced discharge, from the touch UI or from Home Assistant, with an SLS (main-fuse) export guard that throttles discharge power.
+* **Measures** the Deye's own conversion efficiency (battery→AC and AC→battery) from its registers: a live value, short-term averages with kWh, and a long-term average kept in NVS.
 * **Publishes** all values over MQTT with Home Assistant auto-discovery (7 sensors + a mode select + a power slider).
 * **Mirrors itself** into a browser: the ESP32-P4 hardware JPEG encoder streams the actual framebuffer as MJPEG (~8 fps) and injects mouse/keyboard back into LVGL — the web page *is* the display.
 * **Flashes itself** over WiFi: `POST /ota` (firmware) and `POST /ota/fs` (filesystem), dual 4 MB slots, plus a `/recovery` page with rollback.
@@ -57,7 +58,7 @@ Documentation is in German — see the [Wiki](../../wiki) for the full reference
 | **Anzeigen** | Fünf Kreis-Gauges mit animierten Flusslinien, Uhr, WLAN-Status, Build-Nummer. Antippen öffnet Detail-Popups (Einzel-Wechselrichter, Akku-Modus, Laufzeit/Neustart). |
 | **Regeln** | Eastron-SDM630-Emulation am Zähler-Port des Deye plus direkte Register-Schreibzugriffe für Zwangsladen/-entladen. |
 | **Weitergeben** | MQTT mit Home-Assistant-Auto-Discovery, inklusive steuerbarer Entities. Dazu die Modbus-Brücke: Port 502 reicht Anfragen aus dem LAN auf die RS485-Busse durch. |
-| **Fernwarten** | Web-Mirror (1:1-Bild plus Touch im Browser), OTA-Update über WiFi, Recovery-Seite, WireGuard-Tunnel. |
+| **Fernwarten** | Web-Mirror (1:1-Bild plus Touch im Browser), Werkbank mit den Messwerten und dem Wirkungsgrad des Deye, OTA-Update über WiFi, Recovery-Seite, WireGuard-Tunnel. |
 
 Unterstützte Geräteprofile am Modbus-TCP:
 
@@ -188,6 +189,9 @@ git clone -b v5.5.5 --recursive https://github.com/espressif/esp-idf.git ~/esp/v
 
 Reines ESP-IDF, keine Arduino-Schicht. Die Komponenten (LVGL, Panel- und Touch-Treiber, ESP-Hosted) holt der Component Manager beim ersten Bau, festgehalten in `dependencies.lock`.
 
+> [!TIP]
+> Wer nur flashen will, braucht keine Entwicklungsumgebung: fertige Images mit Prüfsummen und Flash-Befehlen liegen unter [Releases](../../releases/latest).
+
 ### Tests
 
 ```bash
@@ -211,11 +215,12 @@ idf.py -p /dev/cu.usbmodem101 flash monitor --timestamps
 ```bash
 IP=192.168.1.42
 idf.py build
-curl --data-binary @build/deye_display.bin  http://$IP/ota
-curl --data-binary @build/storage.bin       http://$IP/ota/fs
-curl -X POST http://$IP/ota/reboot
-curl -s http://$IP/ota           # build und fs_build müssen übereinstimmen
+curl -H 'Expect:' --data-binary @build/storage.bin      http://$IP/ota/fs   # sofort aktiv
+curl -H 'Expect:' --data-binary @build/deye_display.bin http://$IP/ota      # startet selbst neu
+curl -s http://$IP/ota           # nach ~20 s: build und fs_build müssen übereinstimmen
 ```
+
+Erst das Dateisystem, dann die Firmware: nach der Firmware startet das Gerät von selbst neu, ein Upload danach ginge ins Leere.
 
 Es gibt zwei 4-MB-App-Slots; geflasht wird immer in den inaktiven. Während des Schreibens friert die UI ein und die Hintergrundbeleuchtung geht aus — sonst flackert das Panel sichtbar. Geht etwas schief, hilft `http://<ip>/recovery`: Firmware oder Dateisystem per Datei-Upload flashen, auf den vorigen Slot zurückrollen oder neu starten.
 
@@ -230,13 +235,14 @@ Zwei HTTP-Server: `:80` für Seiten und Steuerung, `:81` nur für den MJPEG-Stro
 | Endpunkt | Was es tut |
 | --- | --- |
 | `GET /` | **Web-Mirror**: das echte Panelbild als MJPEG (~8 fps, Hardware-JPEG-Encoder, Qualität 80) plus Maus- und Tastatureingabe zurück in LVGL. Inklusive Copy/Paste in Textfelder. |
-| `GET /deye` | **Werkbank** mit drei Tabs: „Zähler & Deye" (Phasenkette vom Eltako bis zum Wechselrichter, Phasenmanipulation, Gerätetabelle, Deye-Messwerte), „Modbus-Register" (beliebige Holding-Register lesen (FC03), einzeln schreiben (FC16), Adressbereich als CSV exportieren und importieren) und „System & Update". |
+| `GET /deye` | **Werkbank** mit drei Tabs: „Zähler & Deye" (Deye-Messwerte mit Wirkungsgrad, Phasenkette vom Eltako bis zum Wechselrichter, Phasenmanipulation, Gerätetabelle), „Modbus-Register" (beliebige Holding-Register lesen (FC03), einzeln schreiben (FC16), Adressbereich als CSV exportieren und importieren) und „System & Update". |
 | `GET /meter` | Umleitung auf `/deye#meter` |
 | `GET /api/live` | Energiewerte, MQTT-/NTP-Status, Zeit als JSON |
 | `GET /api/devices` | Pro-Gerät-Livewerte als JSON |
 | `GET /api/meter` | Zählerkette in einem Poll: gemessene und gesendete Phasenwerte, Sollwert, Manipulation, alle Modbus-TCP-Geräte |
 | `GET /api/meter/manip` | Phasenmanipulation und Netz-Sollwert setzen |
-| `GET /api/deye/live` | Was der Wechselrichter selbst misst: PV, AC-Ausgang, Last, Netz und Batterie — fertig skaliert aus dem Poll-Cache, ohne RS485-Verkehr pro Anfrage |
+| `GET /api/deye/live` | Was der Wechselrichter selbst misst: PV, AC-Ausgang, Last, Netz und Batterie, dazu die Energiesummen für den Wirkungsgrad (`eff`) — fertig skaliert aus dem Poll-Cache, ohne RS485-Verkehr pro Anfrage |
+| `POST /api/deye/eff/reset` | Wirkungsgrad-Statistik (Entladen und Laden) zurücksetzen; der Langzeitwert bleibt |
 | `GET /ota` | laufende Version, Build, Slot, IDF-Version, MAC, Laufzeit, Grund des letzten Neustarts, freier Speicher |
 | `POST /ota` · `POST /ota/fs` | Firmware- bzw. Dateisystem-Image schreiben |
 | `POST /ota/reboot` · `POST /ota/rollback` | Neustart bzw. Slot-Rückrollung |
@@ -244,7 +250,7 @@ Zwei HTTP-Server: `:80` für Seiten und Steuerung, `:81` nur für den MJPEG-Stro
 | `GET /scan` · `POST /connect` | WLAN-Suche und -Verbindung (Captive Portal) |
 
 > [!CAUTION]
-> Keiner dieser Endpunkte ist authentifiziert. Das Gerät gehört in ein vertrauenswürdiges Netz — nicht ins offene Internet. Für Fernzugriff ist der eingebaute WireGuard-Client gedacht.
+> Ab Werk ist keiner dieser Endpunkte geschützt. Am Gerät lässt sich ein Passwort für alles setzen, was etwas **ändert** ([Wiki → Einstellungen](../../wiki/Einstellungen)) — das ist ein Schutz gegen Versehen im Heimnetz, keine Verschlüsselung. Das Gerät gehört in ein vertrauenswürdiges Netz, nicht ins offene Internet. Für Fernzugriff ist der eingebaute WireGuard-Client gedacht.
 
 ---
 

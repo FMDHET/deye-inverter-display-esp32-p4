@@ -110,6 +110,7 @@ Alles läuft über `nvs_store.c`, damit es genau eine Stelle gibt, an der man na
 | MQTT, Uhr, VPN | je ein Datenblock |
 | Netz-Sollwert | Zahl |
 | Hauptschalter-Nennstrom | Zahl |
+| Langzeit-Wirkungsgrad des Deye (Energiesummen, Startdatum) | Datenblock, höchstens alle 15 min und vor jedem Neustart geschrieben |
 
 ### Wie man Datenblöcke erweitert, ohne alles zu zerstören
 

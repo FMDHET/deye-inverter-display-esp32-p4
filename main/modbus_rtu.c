@@ -5,10 +5,12 @@
 
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include <stddef.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -71,6 +73,20 @@ static mb_rtu_selftest_result_t s_selftest_result = { .state = MB_RTU_SELFTEST_I
  * page never sees half of one round next to half of the previous one. */
 static mb_deye_live_t        s_live;
 static uint32_t              s_live_ms;      /* ms of the last successful round */
+static int64_t               s_eff_us;       /* last round integrated into e_*  */
+static int64_t               s_eff_t0_us;    /* start of the charge sums (0 = boot) */
+static int64_t               s_eff_dis_t0_us;/* start of the discharge sums        */
+static bool                  s_eff_dis_full; /* ...and it was a full battery       */
+static bool                  s_eff_reset;    /* reset arrived during a poll round */
+static int64_t               s_full_since_us;/* SoC at 100 % since (0 = it is not) */
+static bool                  s_full_done;    /* this full period already reset   */
+static int64_t               s_lt_saved_us;  /* last NVS write of the lt sums     */
+static mb_deye_eff_lt_t      s_lt_saved;     /* what that write contained         */
+static float                 s_eff_prev_bat, s_eff_prev_ac;  /* previous round */
+#define EFF_GAP_MAX_US       (10 * 1000000LL)
+#define EFF_STEADY_W         150.0f
+#define EFF_FULL_HOLD_US     (60LL * 60 * 1000000)   /* 100 % this long -> restart */
+#define EFF_LT_SAVE_US       (15LL * 60 * 1000000)   /* NVS write at most this often */
 
 /* On-demand Deye register access for the /deye web page. The HTTP handler fills
  * a request and the Deye-master bus task serves it between its regular polls
@@ -568,6 +584,45 @@ static inline float ru16(uint16_t v, float scale) { return (float)v * scale; }
  * that fails keeps its previous values (`blocks` says which ones are current),
  * and a failed battery read skips the rest of the round: three more 400 ms
  * timeouts would stall this task for over a second for nothing. */
+/* Persist the long-term sums. At most every EFF_LT_SAVE_US from the poll loop
+ * (a power cut loses at most that much), and forced from the shutdown handler
+ * so a reboot or OTA loses nothing. Unchanged sums are not rewritten. */
+static void eff_lt_save(bool force)
+{
+    mb_deye_eff_lt_t lt;
+    portENTER_CRITICAL(&s_mux);
+    lt = s_live.lt;
+    portEXIT_CRITICAL(&s_mux);
+
+    int64_t now = esp_timer_get_time();
+    if (memcmp(&lt, &s_lt_saved, sizeof(lt)) == 0) return;
+    if (!force && now - s_lt_saved_us < EFF_LT_SAVE_US) return;
+    if (nvs_store_set_deye_eff(&lt, sizeof(lt)) == ESP_OK) {
+        s_lt_saved    = lt;
+        s_lt_saved_us = now;
+    }
+}
+
+static void eff_lt_shutdown(void) { eff_lt_save(true); }
+
+/* A stored record that is not a set of finite, non-negative energies is
+ * damage, not history -- start over rather than show nonsense forever. */
+static void eff_lt_load(void)
+{
+    mb_deye_eff_lt_t lt = { 0 };
+    if (nvs_store_get_deye_eff(&lt, sizeof(lt)) != ESP_OK) return;
+    const double v[4] = { lt.dis_dc, lt.dis_ac, lt.chg_ac, lt.chg_dc };
+    for (int i = 0; i < 4; i++)
+        if (!isfinite(v[i]) || v[i] < 0.0) {
+            ESP_LOGW(TAG, "long-term efficiency record damaged, starting over");
+            return;
+        }
+    s_live.lt  = lt;
+    s_lt_saved = lt;
+    ESP_LOGI(TAG, "long-term efficiency: %.1f -> %.1f kWh out, %.1f -> %.1f kWh in",
+             lt.dis_dc / 1000, lt.dis_ac / 1000, lt.chg_ac / 1000, lt.chg_dc / 1000);
+}
+
 static void poll_deye(int idx, int port, uint8_t slave)
 {
     mb_deye_live_t l;
@@ -672,8 +727,95 @@ static void poll_deye(int idx, int port, uint8_t slave)
 #undef RG
     }
 
+    /* ---- conversion energy (see mb_deye_live_t) ----
+     * Only rounds with all three blocks fresh count, and a gap of more than
+     * EFF_GAP_MAX_US (bus outage, backoff) is skipped instead of being filled
+     * with whatever the last round said. Which bucket a round goes into is
+     * decided by the BATTERY, because that is the question: what comes out of
+     * the battery, and what of it arrives on the AC side.
+     *   discharging: in = bat + PV, out = AC delivered (0 if it draws instead;
+     *                then the battery only feeds standby, which is loss too)
+     *   charging from AC: in = AC drawn, out = what reaches the battery
+     *                beyond PV. PV-only charging is a DC-DC path, not the
+     *                inverter's conversion, and is left out.
+     *
+     * The battery register lags the AC one by several seconds whenever the
+     * power changes (seen: -8229 W at the battery next to 841 W on the AC side,
+     * held for three rounds), so a single round can claim 98 % or 900 %. A
+     * round only counts when it is STEADY -- both sides within EFF_STEADY_W
+     * (or 5 %) of the previous round -- and PLAUSIBLE: no more out than in,
+     * plus 2 % measurement slack. The steadiness test alone would let a frozen
+     * inconsistent pair through, the plausibility test alone would clip only
+     * the high readings and pull the average down. Skipped rounds just drop
+     * out of both sums, which leaves the ratio intact. */
+    const uint8_t need = MB_DEYE_BLK_BAT | MB_DEYE_BLK_OUT | MB_DEYE_BLK_PV;
+    int64_t now_us = esp_timer_get_time();
+    l.eff_ok = false;
+
+    /* A battery held at 100 % for EFF_FULL_HOLD_US restarts the discharge
+     * pair, once per full period: the next discharge is then measured from a
+     * defined start. A dip below 100 % re-arms it. */
+    bool full_reset = false;
+    portENTER_CRITICAL(&s_mux);
+    if (l.bat_soc >= 100.0f) {
+        if (!s_full_since_us) s_full_since_us = now_us;
+        if (!s_full_done && now_us - s_full_since_us >= EFF_FULL_HOLD_US) {
+            l.e_dis_dc = l.e_dis_ac = 0.0;
+            s_eff_dis_t0_us = now_us;
+            s_eff_dis_full  = true;
+            s_full_done     = true;
+            full_reset      = true;
+        }
+    } else {
+        s_full_since_us = 0;
+        s_full_done     = false;
+    }
+    portEXIT_CRITICAL(&s_mux);
+    if (full_reset) ESP_LOGI(TAG, "battery full for 60 min -> discharge efficiency restarted");
+    if ((l.blocks & need) == need) {
+        float dc = l.bat_p + l.pv_total;   /* + = DC side feeds the inverter */
+        float ac = -l.inv_total;           /* + = inverter delivers on AC   */
+        int64_t gap = now_us - s_eff_us;
+        bool steady = s_eff_us
+            && fabsf(l.bat_p - s_eff_prev_bat) <= fmaxf(EFF_STEADY_W, 0.05f * fabsf(l.bat_p))
+            && fabsf(ac - s_eff_prev_ac)       <= fmaxf(EFF_STEADY_W, 0.05f * fabsf(ac));
+        if (steady && gap > 0 && gap < EFF_GAP_MAX_US) {
+            double h = (double)gap / 3.6e9;
+            if (l.bat_p > 0.0f && ac <= dc * 1.02f + 20.0f) {
+                l.e_dis_dc  += dc * h;
+                l.e_dis_ac  += (ac > 0.0f ? ac : 0.0f) * h;
+                l.lt.dis_dc += dc * h;
+                l.lt.dis_ac += (ac > 0.0f ? ac : 0.0f) * h;
+                l.eff_ok = true;
+            } else if (l.bat_p < 0.0f && ac < 0.0f && dc < 0.0f
+                       && -dc <= -ac * 1.02f + 20.0f) {
+                l.e_chg_ac  += -ac * h;
+                l.e_chg_dc  += -dc * h;
+                l.lt.chg_ac += -ac * h;
+                l.lt.chg_dc += -dc * h;
+                l.eff_ok = true;
+            }
+            /* Date the long-term sums once the clock is known (NTP). */
+            if (l.eff_ok && !l.lt.start) {
+                time_t t = time(NULL);
+                if (t > 1700000000) l.lt.start = (int64_t)t;
+            }
+        }
+        s_eff_us       = now_us;
+        s_eff_prev_bat = l.bat_p;
+        s_eff_prev_ac  = ac;
+    } else {
+        s_eff_us = 0;
+    }
+
     l.valid = true;
     portENTER_CRITICAL(&s_mux);
+    /* `l` was copied from s_live at the top of this round; a reset that came
+     * in since then must not be undone by writing the old sums back. */
+    if (s_eff_reset) {
+        l.e_dis_dc = l.e_dis_ac = l.e_chg_ac = l.e_chg_dc = 0.0;
+        s_eff_reset = false;
+    }
     s_live    = l;
     s_live_ms = (uint32_t)(esp_timer_get_time() / 1000);
     portEXIT_CRITICAL(&s_mux);
@@ -781,6 +923,7 @@ static void do_master(int idx, int port, const mb_rtu_bus_cfg_t *c)
     if (esp_timer_get_time() >= s_next_poll_us[idx]) {
         s_next_poll_us[idx] = esp_timer_get_time() + DEYE_POLL_MS * 1000;
         poll_deye(idx, port, c->slave_id);
+        eff_lt_save(false);
     }
 
     /* Break the poll interval early for a self-test or a queued /deye or
@@ -985,6 +1128,22 @@ void modbus_rtu_get_deye_live(mb_deye_live_t *out)
     portENTER_CRITICAL(&s_mux);
     *out = s_live;
     out->age_ms = s_live_ms ? (uint32_t)(now - s_live_ms) : 0;
+    int64_t us  = esp_timer_get_time();
+    out->eff_s        = (uint32_t)((us - s_eff_t0_us) / 1000000);
+    out->eff_dis_s    = (uint32_t)((us - s_eff_dis_t0_us) / 1000000);
+    out->eff_dis_full = s_eff_dis_full;
+    out->full_s       = s_full_since_us ? (uint32_t)((us - s_full_since_us) / 1000000) : 0;
+    portEXIT_CRITICAL(&s_mux);
+}
+
+void modbus_rtu_reset_deye_eff(void)
+{
+    portENTER_CRITICAL(&s_mux);
+    s_live.e_dis_dc = s_live.e_dis_ac = s_live.e_chg_ac = s_live.e_chg_dc = 0.0;
+    s_eff_t0_us     = esp_timer_get_time();
+    s_eff_dis_t0_us = s_eff_t0_us;
+    s_eff_dis_full  = false;
+    s_eff_reset     = true;
     portEXIT_CRITICAL(&s_mux);
 }
 
@@ -1171,6 +1330,9 @@ esp_err_t modbus_rtu_start(void)
     if (s_grid_sp != 0)
         ESP_LOGW(TAG, "grid setpoint from NVS: %d W (meter reports real - setpoint)", s_grid_sp);
     load_manip();
+    eff_lt_load();
+    s_lt_saved_us = esp_timer_get_time();
+    esp_register_shutdown_handler(eff_lt_shutdown);
     if (!s_deye_req_mtx) s_deye_req_mtx = xSemaphoreCreateMutex();
     for (int i = 0; i < MB_RTU_BUSES; i++) {
         if (!s_txn[i].lock) s_txn[i].lock = xSemaphoreCreateMutex();

@@ -138,6 +138,7 @@
   .tile .lbl  { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
   .tile .val  { font-size:20px; font-variant-numeric:tabular-nums; margin-top:2px; }
   .tile .foot { color:var(--mut); font-size:11px; margin-top:2px; min-height:1.25em; }
+  .tile .mini { margin-top:6px; font-size:11px; padding:2px 8px; }
   .stale { opacity:.45; }
   /* Breite Tabellen (bis zu zehn Spalten) passen auf kein Handy. Statt zu
    * quetschen scrollt jede in sich -- die Seite selbst bleibt an der
@@ -395,6 +396,8 @@
     .tiles { gap:6px; }
     .tile { padding:6px 8px; }
     .tile .val { font-size:18px; }
+    .tile .mini { min-height:34px; font-size:12px; }
+    #tEff { grid-column:1 / -1; }   /* volle Breite: die Statistikzeilen brechen sonst dreimal um */
     header.hub { gap:4px 12px; margin-bottom:8px; }
     header.hub .spacer { display:none; }
     header.hub a.ext { padding:4px 0; }
@@ -438,9 +441,9 @@
   </div>
   <div class="tiles" id="lvTiles">
     <div class="tile" id="tInv">  <div class="lbl">WR-Ausgang</div>    <div class="val">–</div><div class="foot"></div></div>
-    <div class="tile" id="tLoad"> <div class="lbl">Last</div>          <div class="val">–</div><div class="foot"></div></div>
-    <div class="tile" id="tGrid"> <div class="lbl">Netz (Deye-CT)</div><div class="val">–</div><div class="foot"></div></div>
     <div class="tile" id="tBat">  <div class="lbl">Batterie</div>      <div class="val">–</div><div class="foot"></div></div>
+    <div class="tile" id="tEff">  <div class="lbl">Wirkungsgrad</div>  <div class="val">–</div><div class="foot"></div>
+      <button type="button" class="mini" id="btnEffReset">Wirkungsgrad zurücksetzen</button></div>
   </div>
   <p class="hint" style="margin:12px 0 0;" id="lvDelta"></p>
 </div>
@@ -1117,6 +1120,73 @@ function tile(id, fresh, val, klass, foot) {
   e.querySelector(".foot").innerHTML = foot || "";
 }
 
+/* Wirkungsgrad fuer die Kachel WR-Ausgang. Die DC-Seite ist Batterie PLUS PV:
+ * scheint die Sonne, speist beides den Wechselrichter, und nur die Summe
+ * steht seinem AC-Ausgang gegenueber. Vorzeichen wie in /api/deye/live:
+ * bat.p + = entlaedt, inv.total - = liefert AC.
+ *   jetzt  -- aus dieser Runde; unter 50 W ist das Rauschen, also "–"
+ *   Ø      -- Energie seit Neustart, von der Firmware aufsummiert */
+function effPct(out, inp) { return inp > 0 ? fmt(100 * out / inp, 1) + " %" : "–"; }
+function kWh(wh)          { return fmt(wh / 1000, 2); }
+
+/* "seit 2 h 13 min" -- wie lange die Statistik schon sammelt. */
+function fmtSince(sec) {
+  const d = Math.floor(sec / 86400), h = Math.floor(sec / 3600) % 24, m = Math.floor(sec / 60) % 60;
+  return d ? d + " T " + h + " h" : (h ? h + " h " + m + " min" : m + " min");
+}
+
+/* Momentanwert fuer die Kachel Wirkungsgrad: { val, dir }, val "–" wenn
+ * gerade nichts Sinnvolles zu messen ist. */
+function effNow(l) {
+  const e = l.eff;
+  const fresh = (l.blocks & (BLK.bat | BLK.out | BLK.pv)) === (BLK.bat | BLK.out | BLK.pv);
+  const dc = l.bat.p + l.pv.total, ac = -l.inv.total;
+  /* Momentanwert nur, wenn die Firmware die Runde gezaehlt hat (e.ok): das
+   * Batterieregister hinkt dem AC-Register bei jeder Laststufe Sekunden
+   * hinterher, und dann stehen da 98 % oder 900 %. */
+  if (fresh && (!e || e.ok)) {
+    if (l.bat.p > 0 && dc >= 50)
+      return { val: effPct(Math.max(ac, 0), dc),
+               dir: "Batt" + (l.pv.total > 0.5 ? "+PV" : "") + "→AC" };
+    if (l.bat.p < 0 && ac <= -50 && dc < 0)
+      return { val: effPct(-dc, -ac), dir: "AC→Batt" };
+  }
+  return { val: "–", dir: "gerade nicht messbar" };
+}
+
+/* Statistik unter dem Momentanwert, eine Zeile je Richtung. */
+function effStats(e) {
+  if (!e) return "";   /* aeltere Firmware ohne Energiezaehler */
+  /* Eine Richtung erst ab 10 Wh: ein paar Runden Rauschen beim Umschalten
+   * ergaeben sonst "Ø 0.0 %". Was die Zahlen sind, steht nur am Rechner.
+   * Entladen zaehlt seit dem letzten vollen Akku (Firmware setzt nach 60 min
+   * auf 100 % zurueck) oder dem Knopf, Laden seit Neustart oder Knopf. */
+  let s = "";
+  if (e.dis_dc >= 10)
+    s += "<br>Entladen Ø " + effPct(e.dis_ac, e.dis_dc) + " · "
+       + kWh(e.dis_dc) + " → " + kWh(e.dis_ac) + " kWh · "
+       + fmtSince(e.dis_since || 0) + (e.dis_full ? " seit voll" : "");
+  if (e.chg_ac >= 10)
+    s += "<br>Laden Ø " + effPct(e.chg_dc, e.chg_ac) + " · "
+       + kWh(e.chg_ac) + " → " + kWh(e.chg_dc) + " kWh · " + fmtSince(e.since || 0);
+
+  const lt = e.lt;
+  if (lt && (lt.dis_dc >= 10 || lt.chg_ac >= 10)) {
+    const p = [];
+    if (lt.dis_dc >= 10) p.push("entl. " + effPct(lt.dis_ac, lt.dis_dc));
+    if (lt.chg_ac >= 10) p.push("laden " + effPct(lt.chg_dc, lt.chg_ac));
+    s += "<br>Langzeit Ø " + p.join(" · ");
+    s += '<span class="det"><br>Langzeit'
+       + (lt.start ? " seit " + new Date(lt.start * 1000).toLocaleDateString("de-DE") : "")
+       + ": entladen " + kWh(lt.dis_dc) + " → " + kWh(lt.dis_ac) + " kWh, geladen "
+       + kWh(lt.chg_ac) + " → " + kWh(lt.chg_dc) + " kWh</span>";
+  }
+  if (e.full > 0 && e.full < 3600)
+    s += '<span class="det"><br>Akku seit ' + fmtSince(e.full)
+       + " voll – Entladen-Ø startet nach 60 min neu</span>";
+  return s;
+}
+
 function renderLive(l, served, why) {
   const st = $("lvState");
   if (!l) {
@@ -1149,12 +1219,9 @@ function renderLive(l, served, why) {
   tile("tInv", has(BLK.out), fmtW(inv.total), cls(inv.total),
        '<span class="det">' + fmt(inv.freq, 2) + " Hz am Ausgang</span>");
 
-  tile("tLoad", has(BLK.out), fmtW(ld.total), "",
-       "davon Backup/UPS " + fmt(ld.ups_total) + " W");
+  const en = effNow(l);
+  tile("tEff", has(BLK.bat) && has(BLK.out), en.val, "", en.dir + effStats(l.eff));
 
-  tile("tGrid", has(BLK.grid), fmtW(gr.ct_total), cls(gr.ct_total),
-       '<span class="det">' + "intern " + fmt(gr.inner_total) + " W · gesamt " + fmt(gr.total) + " W · "
-       + fmt(gr.freq, 2) + " Hz</span>");
 
   tile("tBat", has(BLK.bat), fmtW(ba.p), cls(ba.p),
        fmt(ba.soc) + " % · " + (ba.p > 0.5 ? "entlädt" : (ba.p < -0.5 ? "lädt" : "Ruhe"))
@@ -1286,6 +1353,16 @@ function formParams() {
 
 buildManipRows();
 $("btnSave").addEventListener("click", () => { if (formValid()) send(formParams()); });
+/* Wirkungsgrad-Statistik von vorn. Nachfragen, weil am Telefon schnell
+ * daneben getippt ist und die Summen dann weg sind. */
+$("btnEffReset").addEventListener("click", () => {
+  if (!confirm("Wirkungsgrad-Statistik (Entladen und Laden) auf null setzen?\n"
+               + "Der Langzeit-Wert bleibt erhalten.")) return;
+  fetch("/api/deye/eff/reset", { method: "POST", signal: sig(4000) })
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); })
+    .catch(err => alert("Zurücksetzen fehlgeschlagen: " + err.message));
+});
+
 $("btnOff").addEventListener("click", () => {
   $("mEn").checked = false;
   send("en=0", "Manipulation abgeschaltet");

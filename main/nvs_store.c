@@ -331,6 +331,22 @@ esp_err_t nvs_store_set_mb_rtu(const void *buf, size_t len)
     return e;
 }
 
+esp_err_t nvs_store_get_deye_eff(void *buf, size_t len)
+{
+    return get_blob_prefix(NS_MB, "deye_eff", buf, len);
+}
+
+esp_err_t nvs_store_set_deye_eff(const void *buf, size_t len)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS_MB, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_blob(h, "deye_eff", buf, len);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+
 /* Per-phase manipulation of the values served to the Deye (mb_manip_cfg_t).
  * Its own key so it can be wiped without touching the bus config, and so an
  * older firmware simply ignores it (= manipulation off). */

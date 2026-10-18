@@ -82,6 +82,10 @@ esp_err_t nvs_store_get_mb_devices_legacy(void *buf, size_t *len);
 esp_err_t nvs_store_get_mb_rtu(void *buf, size_t len);
 esp_err_t nvs_store_set_mb_rtu(const void *buf, size_t len);
 
+/* Long-term Deye conversion energy (mb_deye_eff_lt_t). */
+esp_err_t nvs_store_get_deye_eff(void *buf, size_t len);
+esp_err_t nvs_store_set_deye_eff(const void *buf, size_t len);
+
 /* Per-phase manipulation blob (mb_manip_cfg_t). Absent -> manipulation off. */
 esp_err_t nvs_store_get_mb_manip(void *buf, size_t len);
 esp_err_t nvs_store_set_mb_manip(const void *buf, size_t len);

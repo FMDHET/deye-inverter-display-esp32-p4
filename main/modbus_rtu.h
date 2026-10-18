@@ -183,6 +183,14 @@ const char *modbus_rtu_phase_mode_name(uint8_t mode);
 #define MB_DEYE_BLK_PV    0x08   /* 672..683  PV strings                    */
 #define MB_DEYE_BLK_ALL   0x0F
 
+/* Long-term conversion energy (Wh), see mb_deye_live_t. Stored as an NVS blob,
+ * so fields are only ever appended. `start` is the unix time of the first
+ * counted round, 0 while the clock was not set yet. */
+typedef struct {
+    double  dis_dc, dis_ac, chg_ac, chg_dc;
+    int64_t start;
+} mb_deye_eff_lt_t;
+
 typedef struct {
     bool     valid;        /* at least one block has ever been read        */
     bool     online;       /* the last poll round answered                 */
@@ -217,9 +225,36 @@ typedef struct {
 
     /* PV strings (672..683). pv_total is the sum of the four string powers. */
     float pv_p[4], pv_v[4], pv_i[4], pv_total;
+
+    /* Conversion energy in Wh, integrated by poll_deye over the rounds in
+     * which battery, output and PV all answered and the power was steady. The
+     * DC side is the battery PLUS PV: with the sun up the inverter is fed from
+     * both, and only the sum balances against its AC output.
+     *     e_dis_dc -> e_dis_ac   battery discharges: DC in, AC out
+     *     e_chg_ac -> e_chg_dc   battery charges from the AC side
+     * e_dis_ac / e_dis_dc is the discharge efficiency, e_chg_dc / e_chg_ac the
+     * charge one. Double, because a float stops resolving 2 s steps of a few
+     * Wh once the sum reaches the MWh range.
+     *
+     * The short-term sums start at boot and on modbus_rtu_reset_deye_eff();
+     * the discharge pair ALSO restarts once the battery has sat at 100 % SoC
+     * for an hour, so it always describes the discharge since the last full
+     * charge. `lt` runs alongside, lives in NVS and is never reset. */
+    double   e_dis_dc, e_dis_ac, e_chg_ac, e_chg_dc;
+    uint32_t eff_s;          /* seconds the charge pair covers               */
+    uint32_t eff_dis_s;      /* seconds the discharge pair covers            */
+    bool     eff_dis_full;   /* discharge pair was restarted by a full battery */
+    uint32_t full_s;         /* how long the SoC has sat at 100 % (0 = not)  */
+    bool     eff_ok;         /* this round was steady and plausible, so it
+                              * counted -- only then is a momentary
+                              * efficiency worth showing                      */
+    mb_deye_eff_lt_t lt;
 } mb_deye_live_t;
 
 void        modbus_rtu_get_deye_live(mb_deye_live_t *out);
+/* Zero the short-term conversion-energy sums (user action from the /deye
+ * page). The long-term sums are deliberately not reachable from here. */
+void        modbus_rtu_reset_deye_eff(void);
 
 /* On-demand Deye holding-register access for the /deye web page, served by the
  * Deye-master bus task between polls (no UART contention). Read up to 64 regs

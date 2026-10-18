@@ -90,7 +90,7 @@ static esp_err_t write_handler(httpd_req_t *req)
 
 /* esp_http_server dispatches from a single task, so handlers never run
  * concurrently -- a static buffer keeps ~1.5 kB off the (6 kB) server stack. */
-#define LIVE_CAP 1600
+#define LIVE_CAP 2048
 static char s_live_json[LIVE_CAP];
 
 /* Append, saturating at cap-1. snprintf returns what it WOULD have written, so
@@ -154,6 +154,15 @@ static esp_err_t live_handler(httpd_req_t *req)
              l.grid_ct_total, l.grid_ct_p[0], l.grid_ct_p[1], l.grid_ct_p[2],
              l.grid_total, l.grid_p[0], l.grid_p[1], l.grid_p[2],
              l.grid_inner_total, l.grid_inner_p[0], l.grid_inner_p[1], l.grid_inner_p[2]);
+    o = jcat(s_live_json, LIVE_CAP, o,
+             "\"eff\":{\"ok\":%d,\"since\":%u,\"dis_since\":%u,\"dis_full\":%d,\"full\":%u,"
+             "\"dis_dc\":%.1f,\"dis_ac\":%.1f,\"chg_ac\":%.1f,\"chg_dc\":%.1f,"
+             "\"lt\":{\"dis_dc\":%.0f,\"dis_ac\":%.0f,\"chg_ac\":%.0f,\"chg_dc\":%.0f,"
+             "\"start\":%lld}},",
+             l.eff_ok ? 1 : 0, (unsigned)l.eff_s, (unsigned)l.eff_dis_s,
+             l.eff_dis_full ? 1 : 0, (unsigned)l.full_s,
+             l.e_dis_dc, l.e_dis_ac, l.e_chg_ac, l.e_chg_dc,
+             l.lt.dis_dc, l.lt.dis_ac, l.lt.chg_ac, l.lt.chg_dc, (long long)l.lt.start);
     /* Battery mode: what is in force, how long it still has, and whether its
      * register writes actually verified -- a forced mode whose writes failed
      * used to look exactly like one that worked. */
@@ -173,6 +182,16 @@ static esp_err_t live_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, s_live_json);
 }
 
+/* POST /api/deye/eff/reset -> start the efficiency statistic from zero. */
+static esp_err_t eff_reset_handler(httpd_req_t *req)
+{
+    if (!web_auth_ok(req)) return ESP_OK;
+    modbus_rtu_reset_deye_eff();
+    ESP_LOGI(TAG, "efficiency statistic reset");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":1}");
+}
+
 void deye_web_register(httpd_handle_t server)
 {
     httpd_uri_t page  = { .uri = "/deye",       .method = HTTP_GET, .handler = page_handler };
@@ -183,5 +202,7 @@ void deye_web_register(httpd_handle_t server)
     httpd_register_uri_handler(server, &rd);
     httpd_register_uri_handler(server, &wr);
     httpd_register_uri_handler(server, &live);
+    httpd_uri_t effr  = { .uri = "/api/deye/eff/reset", .method = HTTP_POST, .handler = eff_reset_handler };
+    httpd_register_uri_handler(server, &effr);
     ESP_LOGI(TAG, "/deye routes registered");
 }

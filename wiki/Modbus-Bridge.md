@@ -52,6 +52,7 @@ Menü **„Mod RTU"**, unterer Abschnitt **„TCP-Bridge"**:
 
 Jede Modbus-Anfrage trägt eine Geräteadresse mit, die „Unit-ID". Daran entscheidet die Brücke, wohin sie weiterreicht:
 
+0. Ist der [Fronius-Zähler](Fronius-Zaehler) eingeschaltet, beantwortet das Display Anfragen an **dessen** Unit-ID (Standard 2) selbst — vor allen anderen Regeln. Sie erreichen den Bus nie.
 1. Passt die Unit-ID zur **Slave-ID eines gebrückten Busses**, geht sie dorthin. So sind beide Leitungen gleichzeitig ansprechbar.
 2. Ist nur **ein** Bus gebrückt, geht **jede** Unit-ID an ihn. Damit erreichst du auch weitere Geräte, die an derselben Leitung hängen.
 3. Sonst kommt eine Fehlermeldung zurück.

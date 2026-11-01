@@ -7,6 +7,8 @@
 #include "display.h"
 #include "ui_flow.h"
 #include "webauth.h"
+#include "fronius_storage.h"
+#include "https_get.h"
 
 #include <stdarg.h>
 #include <stdlib.h>
@@ -22,6 +24,7 @@
 #include "esp_core_dump.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -310,7 +313,7 @@ static esp_err_t ota_info_handler(httpd_req_t *req)
 }
 
 /* POST /ota -> raw firmware image in the body; flash inactive slot + reboot. */
-static esp_err_t ota_post_handler(httpd_req_t *req)
+static esp_err_t ota_post_upload(httpd_req_t *req)
 {
     if (!web_auth_ok(req)) return ESP_OK;     /* 401 already sent */
 
@@ -367,8 +370,13 @@ static esp_err_t ota_post_handler(httpd_req_t *req)
 
     ota_freeze_ui();                    /* no display flicker during the flash */
 
-    /* The exact size: only the sectors actually needed get erased, which is
-     * also a shorter blackout than wiping the whole 4 MB slot. */
+    /* The exact size: only the sectors actually needed get erased, all of
+     * them before the first byte is read. Tried on 2026-10-21 and taken back:
+     * OTA_WITH_SEQUENTIAL_WRITES (one sector erase between network reads)
+     * wedged the upload connection twice (no data for 36 s after 243 kB and
+     * 1.4 MB) -- each erase parks CPU 0 while packets are arriving. One long
+     * erase before the transfer leaves the connection alone; what starved the
+     * watchdog then was HTTPS work next to it (see with_https_paused). */
     esp_ota_handle_t handle = 0;
     esp_err_t err = esp_ota_begin(part, req->content_len, &handle);
     if (err != ESP_OK) {
@@ -479,7 +487,7 @@ static esp_err_t fs_fail(httpd_req_t *req, uint8_t *buf, const char *msg)
  * unmounted for the write and mounted again afterwards, so the new assets are
  * live immediately -- no reboot needed. Keeps the FS build number in sync with
  * the firmware over WiFi. */
-static esp_err_t ota_fs_handler(httpd_req_t *req)
+static esp_err_t ota_fs_upload(httpd_req_t *req)
 {
     if (!web_auth_ok(req)) return ESP_OK;     /* 401 already sent */
 
@@ -558,6 +566,49 @@ static esp_err_t ota_fs_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, msg);
 }
 
+/* Both uploads run with two guards, found from the core dumps of four
+ * task-watchdog resets mid-upload on 2026-10-21 (builds 341, 345, 348):
+ *
+ *  - The energy manager's HTTPS fetches are on hold (https_pause): a TLS
+ *    handshake is seconds of ECC arithmetic on CPU 0, stretched further by
+ *    every flash operation that parks CPU 0, and with priority inheritance
+ *    it kept the idle task off CPU 0 (build 345). A fetch already running
+ *    gets up to 25 s to finish; if it does not, the upload goes ahead anyway
+ *    -- refusing it would leave no way to install a fix.
+ *  - The task watchdog gets 60 s instead of 5 s for the duration. Erasing the
+ *    2.2 MB slot parks CPU 0 for every 64 kB block; right after a boot the
+ *    tasks pinned there (Modbus workers, ...) fill each gap, and the idle task
+ *    on CPU 0 did not run for 5 s although nothing was stuck (build 348,
+ *    energy manager idle, httpd inside the erase). 60 s still catches a real
+ *    hang during an upload.
+ *
+ * The firmware upload restarts the device when it succeeds; every other
+ * outcome comes back here and both guards are lifted. */
+#define OTA_TWDT_MS 60000
+static void twdt_timeout(uint32_t ms)
+{
+    esp_task_wdt_config_t c = {
+        .timeout_ms     = ms,
+        .idle_core_mask = (1u << CONFIG_FREERTOS_NUMBER_OF_CORES) - 1u,
+        .trigger_panic  = true,
+    };
+    esp_err_t e = esp_task_wdt_reconfigure(&c);
+    if (e != ESP_OK) ESP_LOGW(TAG, "task watchdog -> %u ms: %s", (unsigned)ms, esp_err_to_name(e));
+}
+
+static esp_err_t with_https_paused(httpd_req_t *req, esp_err_t (*upload)(httpd_req_t *))
+{
+    bool paused = https_pause(25000);
+    if (!paused) ESP_LOGW(TAG, "HTTPS fetch still running -- uploading anyway");
+    twdt_timeout(OTA_TWDT_MS);
+    esp_err_t r = upload(req);
+    twdt_timeout(CONFIG_ESP_TASK_WDT_TIMEOUT_S * 1000u);
+    if (paused) https_resume();
+    return r;
+}
+static esp_err_t ota_post_handler(httpd_req_t *req) { return with_https_paused(req, ota_post_upload); }
+static esp_err_t ota_fs_handler(httpd_req_t *req)   { return with_https_paused(req, ota_fs_upload); }
+
 /* POST /ota/reboot -> just restart. */
 static esp_err_t ota_reboot_handler(httpd_req_t *req)
 {
@@ -576,6 +627,15 @@ static esp_err_t ota_reboot_handler(httpd_req_t *req)
 static esp_err_t ota_rollback_handler(httpd_req_t *req)
 {
     if (!web_auth_ok(req)) return ESP_OK;     /* 401 already sent */
+
+    /* Firmware from before the BYD's forced modes puts back the block bits
+     * but not InWRte: a forced charge/discharge would stay in the Fronius. */
+    if (!fronius_storage_rollback_safe()) {
+        ESP_LOGW(TAG, "rollback refused: BYD forced mode not yet put back");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                            "BYD-Zwangsbetrieb erst beenden (Fronius-Karte), dann erneut versuchen");
+        return ESP_FAIL;
+    }
 
     const esp_partition_t *other = esp_ota_get_next_update_partition(NULL);
     if (!other) {

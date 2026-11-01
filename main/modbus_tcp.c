@@ -1,9 +1,12 @@
 #include "modbus_tcp.h"
+#include "sunspec_mppt.h"
 #include "nvs_store.h"
 #include "ui_flow.h"
 #include "lvgl_port.h"
 #include "deye_ctrl.h"
 #include "sls_guard.h"
+#include "energy_ctr.h"
+#include "byd_energy.h"
 
 #include <string.h>
 #include <errno.h>
@@ -14,6 +17,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
 
@@ -43,6 +47,9 @@ static const char *TAG = "modbus";
  *   12/14/16 = P L1..L3 (scale 1, watts, + = import) */
 #define ELTAKO_PH_ADDR   0x0000
 #define ELTAKO_PH_COUNT  18
+/* Energy counters: 72/73 = total import, 74/75 = total export, int32 x0.01 kWh. */
+#define ELTAKO_EN_ADDR   0x0048
+#define ELTAKO_EN_COUNT  4
 
 static modbus_tcp_status_t s_st;
 static portMUX_TYPE        s_mux    = portMUX_INITIALIZER_UNLOCKED;
@@ -82,6 +89,7 @@ typedef struct {
     uint16_t soc_off;     /* storage model 124 data offset (0 = none)     */
     uint16_t mppt_off;    /* MPPT model 160 data offset (0 = none)        */
     uint16_t mppt_len;
+    uint16_t mppt_pv;     /* modules that are PV (sunspec_mppt.h), bit i  */
     uint16_t meter_off;   /* meter model 201-204 data offset (0 = none)   */
 } ss_cache_t;
 static ss_cache_t s_ss[MB_MAX_DEVICES];
@@ -93,6 +101,14 @@ static ss_cache_t s_ss[MB_MAX_DEVICES];
 static mb_phases_t s_ph[MB_MAX_DEVICES];
 static uint32_t    s_ph_ms[MB_MAX_DEVICES];
 static int         s_ph_grid_idx = -1;   /* slot of the GRID meter, -1 = none */
+
+/* Per-device energy counters (Eltako), raw in 0.01 kWh (energy_ctr.h).
+ * `try_ms` = last attempt, paces the reads to MB_ENERGY_POLL_MS. */
+typedef struct {
+    energy_ctr_t imp, exp;
+    uint32_t     try_ms;
+} en_slot_t;
+static en_slot_t s_en[MB_MAX_DEVICES];
 
 /* Deye supplied by the RTU master (modbus_rtu.c), if present. Carries a
  * timestamp so a value stops "ghosting" once the master stops refreshing it
@@ -399,7 +415,33 @@ static void sunspec_discover(int s, uint8_t u, ss_cache_t *c)
     uint16_t soc_off = sunspec_model(s, u, c->base, 124, &len);
     if (soc_off && len >= 21) c->soc_off = soc_off;        /* storage / hybrid */
     uint16_t mppt_off = sunspec_model(s, u, c->base, 160, &len);
-    if (mppt_off && len >= 8) { c->mppt_off = mppt_off; c->mppt_len = len; }
+    if (mppt_off && len >= 8) {
+        c->mppt_off = mppt_off; c->mppt_len = len;
+        /* Which modules are PV: a hybrid reports its battery DC port here
+         * too (sunspec_mppt.h). Read the module names once. */
+        uint16_t fixed[8];
+        c->mppt_pv = 0xFFFF;
+        if (!mb_read(s, u, MB_FC03, mppt_off, 8, fixed)) {
+            uint16_t n = fixed[6];
+            uint16_t blk = n ? (uint16_t)((len - 8) / n) : 0;
+            if (n && n <= SUNSPEC_MPPT_MAX && blk >= 12) {
+                char ids[SUNSPEC_MPPT_MAX][17];     /* one worker task per device: no static */
+                bool ok = true;
+                for (uint16_t i = 0; i < n && ok; i++) {
+                    uint16_t r[8];
+                    ok = !mb_read(s, u, MB_FC03, (uint16_t)(mppt_off + 8 + i * blk + 1), 8, r);
+                    for (int k = 0; k < 8 && ok; k++) { ids[i][2 * k] = (char)(r[k] >> 8); ids[i][2 * k + 1] = (char)r[k]; }
+                    ids[i][16] = 0;
+                }
+                if (ok) {
+                    c->mppt_pv = sunspec_mppt_pv_mask((const char (*)[17])ids, n, c->soc_off != 0);
+                    for (uint16_t i = 0; i < n; i++)
+                        ESP_LOGI(TAG, "unit %u MPPT %u '%s': %s", u, i + 1, ids[i],
+                                 (c->mppt_pv >> i) & 1 ? "PV" : "Batterie");
+                }
+            }
+        }
+    }
     for (uint16_t id = 201; id <= 204 && !c->meter_off; id++) {
         uint16_t off = sunspec_model(s, u, c->base, id, &len);
         if (off) c->meter_off = off;
@@ -490,7 +532,8 @@ static int ss_soc(int s, uint8_t u, const ss_cache_t *c, float *out)
     return 0;
 }
 
-/* Solar DC power (W): sum of all MPPT model-160 string modules (DCW × SF). */
+/* Solar DC power (W): sum of the PV modules of MPPT model 160 (DCW × SF);
+ * a hybrid's battery port is left out (c->mppt_pv). */
 static int ss_pv_dc(int s, uint8_t u, const ss_cache_t *c, float *out)
 {
     if (!c->mppt_off) return -1;
@@ -504,10 +547,13 @@ static int ss_pv_dc(int s, uint8_t u, const ss_cache_t *c, float *out)
     if (blk < 12) return -1;
     float sum = 0;
     for (uint16_t i = 0; i < N; i++) {
+        if (!((c->mppt_pv >> i) & 1)) continue;          /* a battery port, not PV */
         uint16_t moff = off + 8 + i * blk;
         uint16_t dcw;
         if (mb_read(s, u, MB_FC03, moff + 11, 1, &dcw)) return -1;  /* DCW @ block+11 */
-        sum += (float)(int16_t)dcw;
+        /* DCW is unsigned in SunSpec (0xFFFF = not implemented). As int16 a
+         * string above 3276.7 W at scale -1 turned negative. */
+        if (dcw != 0xFFFF) sum += (float)dcw;
     }
     *out = apply_sf(sum, dcw_sf);
     return 0;
@@ -522,8 +568,48 @@ typedef struct {
     float deyeW, deyeSoc; bool deye_v;       /* Deye via Modbus (SoC + reg590) */
     float deye_ac; bool deye_ac_v;           /* Deye AC power via Eltako meter  */
     float bydW,  bydSoc;  bool byd_v;
+    bool  bydW_v;                            /* bydW measured this round, not
+                                              * just the SoC (byd_energy)    */
     float deye_mppt, deye_ct, deye_load; bool deye_present;
 } agg_t;
+
+/* Energy counters of an Eltako meter, at most every MB_ENERGY_POLL_MS. A third
+ * read on the grid meter's socket, so like the phase block it never fails the
+ * poll: on error the counters simply keep their last value and age. A reading
+ * that runs backwards or jumps is dropped (energy_ctr.h). */
+static void eltako_energy(int s, const mb_dev_cfg_t *d, int idx)
+{
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    portENTER_CRITICAL(&s_mux);
+    uint32_t last = s_en[idx].try_ms;
+    bool due = !last || (uint32_t)(now - last) >= MB_ENERGY_POLL_MS;
+    if (due) s_en[idx].try_ms = now ? now : 1;
+    portEXIT_CRITICAL(&s_mux);
+    if (!due) return;
+
+    uint16_t r[ELTAKO_EN_COUNT];
+    if (mb_read(s, d->slave, MB_FC04, ELTAKO_EN_ADDR, ELTAKO_EN_COUNT, r)) return;
+    int32_t imp = words_to_i32(r[0], r[1]);
+    int32_t exp = words_to_i32(r[2], r[3]);
+    if (imp < 0 || exp < 0) {
+        ESP_LOGW(TAG, "dev%d: implausible Eltako counters %ld/%ld -- discarded",
+                 idx, (long)imp, (long)exp);
+        return;
+    }
+    /* Wired the other way round: what the meter counts as import is export. */
+    uint32_t ui = (uint32_t)(d->invert ? exp : imp);
+    uint32_t ue = (uint32_t)(d->invert ? imp : exp);
+
+    portENTER_CRITICAL(&s_mux);
+    uint32_t pi = s_en[idx].imp.val, pe = s_en[idx].exp.val;
+    bool oki = energy_ctr_feed(&s_en[idx].imp, ui, now, 100.0);
+    bool oke = energy_ctr_feed(&s_en[idx].exp, ue, now, 100.0);
+    portEXIT_CRITICAL(&s_mux);
+    if (!oki || !oke)
+        ESP_LOGW(TAG, "dev%d: Eltako counters jumped %lu/%lu -> %lu/%lu -- discarded",
+                 idx, (unsigned long)pi, (unsigned long)pe,
+                 (unsigned long)ui, (unsigned long)ue);
+}
 
 static int poll_device(int s, const mb_dev_cfg_t *d, int idx, agg_t *a,
                        float *o_pv, float *o_w, float *o_soc)
@@ -538,7 +624,8 @@ static int poll_device(int s, const mb_dev_cfg_t *d, int idx, agg_t *a,
         if (d->role == MB_ROLE_INVERTER || d->role == MB_ROLE_BATTERY) {
             /* A unit that carries storage model 124 is a HYBRID (has the BYD
              * battery). On it: AC(103) = solarDC(160) + battery_discharge, so
-             *   PV   = solar DC  (pure PV, no battery)
+             *   PV   = solar DC  (the PV modules of 160 only -- the battery
+             *          port reports there as well, see sunspec_mppt.h)
              *   BYD  = AC - solar DC   (+discharge / -charge)
              * A plain string inverter has no 124: PV = AC, no battery. */
             float soc = 0, dc = 0, ac = 0;
@@ -554,7 +641,7 @@ static int poll_device(int s, const mb_dev_cfg_t *d, int idx, agg_t *a,
                     ESP_LOGW(TAG, "dev%d: implausible hybrid batt %.0f W -- discarded", idx, bw);
                     return -1;
                 }
-                a->bydW = bw; a->byd_v = true; *o_w = bw;
+                a->bydW = bw; a->byd_v = true; a->bydW_v = true; *o_w = bw;
                 if (d->role == MB_ROLE_INVERTER && plausible_w(dc)) {
                     if (dc < 0) dc = 0;
                     a->pv += dc; a->pv_v = true; *o_pv = dc;   /* PV = solar DC */
@@ -643,6 +730,7 @@ static int poll_device(int s, const mb_dev_cfg_t *d, int idx, agg_t *a,
                 ESP_LOGW(TAG, "dev%d: implausible Eltako phase block -- discarded", idx);
             }
         }
+        eltako_energy(s, d, idx);
         if (d->role == MB_ROLE_GRID) {
             a->netz = w; a->netz_v = true; *o_w = w;
         } else if (d->role == MB_ROLE_DEYE_METER) {
@@ -734,6 +822,7 @@ static void reconfigure_apply(void)
     memset(s_ss,      0, sizeof(s_ss));            /* re-discover SunSpec layout */
     memset(s_ph,      0, sizeof(s_ph));            /* phase snapshots are stale  */
     memset(s_ph_ms,   0, sizeof(s_ph_ms));
+    memset(s_en,      0, sizeof(s_en));            /* slots may hold other meters */
     s_ph_grid_idx    = grid_idx;
     s_have_grid_role = has_grid;   /* diagnostic only, see the warning below */
     for (int i = 0; i < cnt; i++) {
@@ -744,6 +833,7 @@ static void reconfigure_apply(void)
         s_live[i].mfr   = s_devs[i].mfr;
         s_live[i].role  = s_devs[i].role;
         s_live[i].invert = s_devs[i].invert != 0;
+        s_live[i].enabled = s_devs[i].enabled != 0;
     }
     s_live_count = cnt;
     /* Drop stale energy + mark grid INVALID so the RTU emulation stops driving
@@ -771,12 +861,64 @@ static bool same_ipport(const mb_dev_cfg_t *a, const char *ip, int port)
 /* One worker per device slot: active only when it owns its IP (lowest enabled
  * index with that IP). It polls every enabled device sharing the IP on its own
  * interval, over a single socket (gateways like the ZGW allow one connection). */
+/* The worker sockets, one per owning slot, and the lock that lets another
+ * module run transactions on them (modbus_tcp_borrow). A Fronius datalogger
+ * is one device: the battery control (fronius_storage.c) used to open a
+ * second connection per batch next to the poll's, and in a pinch the
+ * connect failed for lack of a free socket on our side. */
+static int               s_sk[MB_MAX_DEVICES] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+static char              s_sk_ip[MB_MAX_DEVICES][32];
+static int               s_sk_port[MB_MAX_DEVICES];
+static SemaphoreHandle_t s_io_mx[MB_MAX_DEVICES];
+static int               s_lent = -1;      /* slot whose socket is lent out */
+_Static_assert(MB_MAX_DEVICES == 8, "s_sk initialiser");
+
+int modbus_tcp_borrow(const char *ip, uint16_t port, uint32_t wait_ms)
+{
+    if (!ip || !ip[0] || !s_io_mx[0]) return -1;
+    mb_dev_cfg_t devs[MB_MAX_DEVICES];
+    int cnt;
+    portENTER_CRITICAL(&s_mux);
+    memcpy(devs, s_devs, sizeof(devs));
+    cnt = s_dev_count;
+    portEXIT_CRITICAL(&s_mux);
+    /* The owner is the worker that polls this address: the lowest enabled
+     * slot with it (see worker_task). */
+    int slot = -1;
+    for (int j = 0; j < cnt && slot < 0; j++)
+        if (devs[j].enabled && same_ipport(&devs[j], ip, port)) slot = j;
+    if (slot < 0) return -1;
+    if (xSemaphoreTake(s_io_mx[slot], pdMS_TO_TICKS(wait_ms)) != pdTRUE) return -1;
+    if (s_sk[slot] >= 0 && (strcmp(s_sk_ip[slot], ip) != 0 || s_sk_port[slot] != port)) {
+        close(s_sk[slot]); s_sk[slot] = -1;
+    }
+    if (s_sk[slot] < 0) {
+        int tmo   = devs[slot].timeout_ms ? devs[slot].timeout_ms : MB_DEFAULT_TIMEOUT_MS;
+        int io_ms = tmo < 2000 ? 2000 : tmo;
+        s_sk[slot] = connect_timeout(ip, port, tmo, io_ms);
+        strncpy(s_sk_ip[slot], ip, sizeof(s_sk_ip[slot]) - 1); s_sk_ip[slot][sizeof(s_sk_ip[slot]) - 1] = '\0';
+        s_sk_port[slot] = port;
+    }
+    if (s_sk[slot] < 0) { xSemaphoreGive(s_io_mx[slot]); return -1; }
+    s_lent = slot;
+    return s_sk[slot];
+}
+
+void modbus_tcp_give_back(int sk, bool broken)
+{
+    int slot = s_lent;
+    if (slot < 0 || s_sk[slot] != sk) return;
+    s_lent = -1;
+    /* After a timeout a late answer may still be on its way: the next poll
+     * would read it. Start over with a fresh connection. */
+    if (broken) { close(s_sk[slot]); s_sk[slot] = -1; }
+    xSemaphoreGive(s_io_mx[slot]);
+}
+
 static void worker_task(void *arg)
 {
     int  slot     = (int)(intptr_t)arg;
     int  cur_prio = MB_PRIO_BG;
-    int  sk       = -1;            /* PERSISTENT socket -- reused across polls.   */
-    char sk_ip[32] = ""; int sk_port = 0;  /* what `sk` is connected to.          */
 
     for (;;) {
         mb_dev_cfg_t devs[MB_MAX_DEVICES];
@@ -795,11 +937,15 @@ static void worker_task(void *arg)
             for (int j = 0; j < slot; j++)
                 if (same_ipport(&devs[j], ip, port)) { idle = true; break; }
 
+        /* The socket is shared with modbus_tcp_borrow(): every touch of it
+         * happens under this slot's lock, the naps outside it. */
+        xSemaphoreTake(s_io_mx[slot], portMAX_DELAY);
+
         /* Drop the held socket if we're going idle or the target IP changed. */
-        if (sk >= 0 && (idle || strcmp(sk_ip, ip) != 0 || sk_port != port)) {
-            close(sk); sk = -1;
+        if (s_sk[slot] >= 0 && (idle || strcmp(s_sk_ip[slot], ip) != 0 || s_sk_port[slot] != port)) {
+            close(s_sk[slot]); s_sk[slot] = -1;
         }
-        if (idle) { vTaskDelay(pdMS_TO_TICKS(500)); continue; }
+        if (idle) { xSemaphoreGive(s_io_mx[slot]); vTaskDelay(pdMS_TO_TICKS(500)); continue; }
 
         /* Priority 1/2: a worker serving a grid / Deye-meter device runs higher. */
         bool critical = false;
@@ -828,25 +974,25 @@ static void worker_task(void *arg)
             }
         }
         int nap = fastest < 250 ? fastest : 250;   /* re-check due devices ~>=4x/s */
-        if (ndue == 0) { vTaskDelay(pdMS_TO_TICKS(nap > 0 ? nap : 50)); continue; }
+        if (ndue == 0) { xSemaphoreGive(s_io_mx[slot]); vTaskDelay(pdMS_TO_TICKS(nap > 0 ? nap : 50)); continue; }
 
         /* Connect only when we don't already hold a socket. Keeping it open is
          * essential: Fronius dataloggers are flaky with connect/close churn and
          * gateways (ZGW) allow only one connection. */
-        if (sk < 0) {
+        if (s_sk[slot] < 0) {
             int tmo   = devs[slot].timeout_ms ? devs[slot].timeout_ms : MB_DEFAULT_TIMEOUT_MS;
             int io_ms = tmo < 2000 ? 2000 : tmo;
-            sk = connect_timeout(ip, port, tmo, io_ms);     /* I/O -- no lock held */
-            strncpy(sk_ip, ip, sizeof(sk_ip) - 1); sk_ip[sizeof(sk_ip) - 1] = '\0';
-            sk_port = port;
+            s_sk[slot] = connect_timeout(ip, port, tmo, io_ms);     /* I/O -- no spinlock held */
+            strncpy(s_sk_ip[slot], ip, sizeof(s_sk_ip[slot]) - 1); s_sk_ip[slot][sizeof(s_sk_ip[slot]) - 1] = '\0';
+            s_sk_port[slot] = port;
         }
 
-        bool trouble = (sk < 0);    /* connect failed -> back off, don't storm */
+        bool trouble = (s_sk[slot] < 0);    /* connect failed -> back off, don't storm */
         for (int k = 0; k < ndue; k++) {
             int j = due[k];
             portENTER_CRITICAL(&s_mux); s_last_ms[j] = now; portEXIT_CRITICAL(&s_mux);
 
-            if (sk < 0) {
+            if (s_sk[slot] < 0) {
                 portENTER_CRITICAL(&s_mux);
                 s_st.err_count++; s_live[j].connected = false;
                 portEXIT_CRITICAL(&s_mux);
@@ -855,7 +1001,7 @@ static void worker_task(void *arg)
 
             agg_t c = {0};
             float pv = 0, w = 0, soc = 0;
-            int r = poll_device(sk, &devs[j], j, &c, &pv, &w, &soc);   /* I/O -- no lock */
+            int r = poll_device(s_sk[slot], &devs[j], j, &c, &pv, &w, &soc);   /* I/O -- no spinlock */
             uint32_t fnow = now_ms();
 
             portENTER_CRITICAL(&s_mux);
@@ -879,11 +1025,19 @@ static void worker_task(void *arg)
             }
             portEXIT_CRITICAL(&s_mux);
 
+            /* BYD charged/discharged energy (byd_energy.h). A gap of up to
+             * three poll intervals is still bridged, a longer one skipped. */
+            if (r == 0 && c.bydW_v) {
+                uint32_t iv  = devs[j].poll_ms ? devs[j].poll_ms : MB_DEFAULT_POLL_MS;
+                uint32_t gap = iv * MB_DEV_STALE_FACTOR;
+                byd_energy_sample(j, c.bydW, fnow, gap < 30000 ? 30000 : gap);
+            }
+
             if (r != 0) {
                 ESP_LOGW(TAG, "read failed %s id%u (%s/%s) -- reconnecting", ip,
                          devs[j].slave, modbus_tcp_mfr_name(devs[j].mfr),
                          modbus_tcp_role_name(devs[j].role));
-                close(sk); sk = -1;
+                close(s_sk[slot]); s_sk[slot] = -1;
                 trouble = true;
                 /* Carry on with the rest of this IP instead of abandoning the
                  * round. A single dead unit used to starve everyone sharing its
@@ -892,17 +1046,19 @@ static void worker_task(void *arg)
                  * The socket is always dropped first and rebuilt here -- after a
                  * timeout it may be desynced, and reusing it could hand device B
                  * the late answer meant for device A. If the reconnect fails,
-                 * the `sk < 0` branch above marks the remaining devices as
+                 * the `s_sk[slot] < 0` branch above marks the remaining devices as
                  * failed without further I/O, and the round backs off. */
                 if (k + 1 < ndue) {
                     int tmo   = devs[slot].timeout_ms ? devs[slot].timeout_ms : MB_DEFAULT_TIMEOUT_MS;
                     int io_ms = tmo < 2000 ? 2000 : tmo;
-                    sk = connect_timeout(ip, port, tmo, io_ms);
-                    strncpy(sk_ip, ip, sizeof(sk_ip) - 1); sk_ip[sizeof(sk_ip) - 1] = '\0';
-                    sk_port = port;
+                    s_sk[slot] = connect_timeout(ip, port, tmo, io_ms);
+                    strncpy(s_sk_ip[slot], ip, sizeof(s_sk_ip[slot]) - 1); s_sk_ip[slot][sizeof(s_sk_ip[slot]) - 1] = '\0';
+                    s_sk_port[slot] = port;
                 }
             }
         }
+
+        xSemaphoreGive(s_io_mx[slot]);
 
         /* Back off hard after a failed connect/read so a non-responding inverter
          * (e.g. a Fronius datalogger still holding its old slot after a reboot)
@@ -1090,6 +1246,10 @@ const char *modbus_tcp_role_name(uint8_t role)
 
 esp_err_t modbus_tcp_start(void)
 {
+    byd_energy_init();     /* stored sums first: the workers feed them */
+    for (int i = 0; i < MB_MAX_DEVICES; i++)
+        if (!s_io_mx[i] && !(s_io_mx[i] = xSemaphoreCreateMutex())) return ESP_FAIL;
+
     /* One worker per device slot (each polls its own IP concurrently) + one
      * aggregator that builds the energy model and drives the UI. */
     for (int i = 0; i < MB_MAX_DEVICES; i++) {
@@ -1127,6 +1287,23 @@ bool modbus_tcp_get_phases(int idx, mb_phases_t *out)
     if (out->valid) out->age_ms = (uint32_t)(now - s_ph_ms[idx]);
     portEXIT_CRITICAL(&s_mux);
     return out->valid;
+}
+
+bool modbus_tcp_get_energy(int idx, mb_energy_t *out)
+{
+    if (!out || idx < 0 || idx >= MB_MAX_DEVICES) return false;
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    portENTER_CRITICAL(&s_mux);
+    en_slot_t e = s_en[idx];
+    portEXIT_CRITICAL(&s_mux);
+    memset(out, 0, sizeof(*out));
+    if (!e.imp.valid || !e.exp.valid) return false;
+    uint32_t ai = (uint32_t)(now - e.imp.ms), ae = (uint32_t)(now - e.exp.ms);
+    out->valid      = true;
+    out->age_ms     = ai > ae ? ai : ae;                       /* the older one */
+    out->import_kwh = e.imp.val / 100.0;
+    out->export_kwh = e.exp.val / 100.0;
+    return true;
 }
 
 bool modbus_tcp_grid_phases_fresh(float p[3], uint32_t max_age_ms)

@@ -177,6 +177,59 @@ static void test_init_erases_a_damaged_partition(void)
     CHECK_I(nvs_store_get_sls_a(), 35);       /* settings are gone, as expected */
 }
 
+/* The efficiency curve is statistics in the partition that holds every
+ * credential. It must give way when space runs out, not the settings. */
+static void test_the_curve_gives_way_when_nvs_runs_full(void)
+{
+    reset();
+    uint8_t blob[716];
+    memset(blob, 0x11, sizeof(blob));
+
+    fake_nvs_available_entries = 140;           /* under the 128 + 23 needed */
+    CHECK_I(nvs_store_set_deye_effc(blob, sizeof(blob)), ESP_ERR_NVS_NOT_ENOUGH_SPACE);
+    CHECK_I(fake_nvs_size("modbus", "deye_effc"), -1);   /* nothing written */
+
+    fake_nvs_available_entries = 200;
+    CHECK_I(nvs_store_set_deye_effc(blob, sizeof(blob)), ESP_OK);
+    uint8_t back[716];
+    memset(back, 0, sizeof(back));
+    CHECK_I(nvs_store_get_deye_effc(back, sizeof(back)), ESP_OK);
+    CHECK(memcmp(back, blob, sizeof(blob)) == 0);
+    CHECK_I(nvs_store_free_entries(), 200);
+}
+
+/* The section order ends up in a JSON string and in the page: only the
+ * page's own alphabet may go in, whatever a request or a backup file says. */
+static void test_section_order(void)
+{
+    reset();
+    char buf[NVS_SEC_ORDER_MAX];
+    nvs_store_get_sec_order(buf, sizeof(buf));
+    CHECK(buf[0] == '\0');                               /* nothing stored */
+
+    CHECK_I(nvs_store_set_sec_order("curve,live,sweep"), ESP_OK);
+    nvs_store_get_sec_order(buf, sizeof(buf));
+    CHECK(strcmp(buf, "curve,live,sweep") == 0);
+
+    CHECK(nvs_store_set_sec_order("live\",\"x") != ESP_OK);  /* would break the JSON */
+    CHECK(nvs_store_set_sec_order("Live") != ESP_OK);
+    CHECK(nvs_store_set_sec_order("a b") != ESP_OK);
+    char longer[NVS_SEC_ORDER_MAX + 1];
+    memset(longer, 'a', NVS_SEC_ORDER_MAX); longer[NVS_SEC_ORDER_MAX] = '\0';
+    CHECK(nvs_store_set_sec_order(longer) != ESP_OK);
+    nvs_store_get_sec_order(buf, sizeof(buf));
+    CHECK(strcmp(buf, "curve,live,sweep") == 0);         /* refusals changed nothing */
+
+    CHECK_I(nvs_store_set_sec_order(""), ESP_OK);        /* empty erases */
+    CHECK_I(fake_nvs_size("disp", "sec_order"), -1);
+    CHECK_I(nvs_store_set_sec_order(""), ESP_OK);        /* ...also when already gone */
+
+    /* A record that is not of that alphabet (older or damaged) reads as "". */
+    fake_nvs_put("disp", "sec_order", "x<y", 4);
+    nvs_store_get_sec_order(buf, sizeof(buf));
+    CHECK(buf[0] == '\0');
+}
+
 int main(void)
 {
     RUN(test_round_trip);
@@ -188,5 +241,7 @@ int main(void)
     RUN(test_ap_password_falls_back_to_the_documented_default);
     RUN(test_web_password_is_empty_until_set);
     RUN(test_init_erases_a_damaged_partition);
+    RUN(test_the_curve_gives_way_when_nvs_runs_full);
+    RUN(test_section_order);
     return t_report("nvs_store");
 }

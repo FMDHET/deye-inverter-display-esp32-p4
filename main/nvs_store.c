@@ -239,6 +239,41 @@ esp_err_t nvs_store_set_contrast(uint8_t pct)   { return set_u8(NS_DISP, K_CONTR
 uint8_t   nvs_store_get_orientation(void)       { return get_u8(NS_DISP, K_ORIENT, 0); }
 esp_err_t nvs_store_set_orientation(uint8_t deg){ return set_u8(NS_DISP, K_ORIENT, deg); }
 
+/* Section order of the /deye workbench: the page's own section names,
+ * comma-separated. Only that alphabet goes in -- it ends up in a JSON string
+ * and in the page, so nothing that needs escaping can ever be stored. */
+#define K_SEC_ORDER "sec_order"
+
+bool nvs_store_sec_order_ok(const char *s)
+{
+    if (!s) return false;
+    size_t n = strlen(s);
+    if (n >= NVS_SEC_ORDER_MAX) return false;
+    for (size_t i = 0; i < n; i++)
+        if (!((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= '0' && s[i] <= '9') || s[i] == ','))
+            return false;
+    return true;
+}
+
+esp_err_t nvs_store_get_sec_order(char *buf, size_t len)
+{
+    if (!buf || !len) return ESP_ERR_INVALID_ARG;
+    buf[0] = '\0';
+    esp_err_t e = get_str(NS_DISP, K_SEC_ORDER, buf, len);
+    if (e != ESP_OK || !nvs_store_sec_order_ok(buf)) buf[0] = '\0';
+    return e;
+}
+
+esp_err_t nvs_store_set_sec_order(const char *s)
+{
+    if (!nvs_store_sec_order_ok(s)) return ESP_ERR_INVALID_ARG;
+    if (!s[0]) {                                   /* empty = back to built-in */
+        esp_err_t e = erase_key(NS_DISP, K_SEC_ORDER);
+        return e == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : e;
+    }
+    return set_str(NS_DISP, K_SEC_ORDER, s);
+}
+
 #define K_SLEEP "sleep"
 
 static uint16_t get_u16(const char *ns, const char *key, uint16_t defval)
@@ -331,6 +366,22 @@ esp_err_t nvs_store_set_mb_rtu(const void *buf, size_t len)
     return e;
 }
 
+esp_err_t nvs_store_get_byd_energy(void *buf, size_t len)
+{
+    return get_blob_prefix(NS_MB, "byd_e", buf, len);
+}
+
+esp_err_t nvs_store_set_byd_energy(const void *buf, size_t len)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS_MB, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_blob(h, "byd_e", buf, len);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+
 esp_err_t nvs_store_get_deye_eff(void *buf, size_t len)
 {
     return get_blob_prefix(NS_MB, "deye_eff", buf, len);
@@ -342,6 +393,106 @@ esp_err_t nvs_store_set_deye_eff(const void *buf, size_t len)
     esp_err_t e = nvs_open(NS_MB, NVS_READWRITE, &h);
     if (e != ESP_OK) return e;
     e = nvs_set_blob(h, "deye_eff", buf, len);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+
+/* The efficiency curve is ~0.5 kB of state in a 24 kB partition that also
+ * holds WiFi, MQTT and VPN credentials. NVS writes a changed blob next to the
+ * old one before dropping it, so a rewrite needs its own size in free entries
+ * on top of what it occupies. Below EFFC_RESERVE free entries the curve is not
+ * written at all: losing a quarter hour of statistics is cheap, a setting
+ * that cannot be saved is not. */
+#define EFFC_RESERVE_ENTRIES 128   /* 4 kB headroom beyond the reserved page */
+
+esp_err_t nvs_store_get_deye_effc(void *buf, size_t len)
+{
+    return get_blob_prefix(NS_MB, "deye_effc", buf, len);
+}
+
+esp_err_t nvs_store_set_deye_effc(const void *buf, size_t len)
+{
+    nvs_stats_t st;
+    if (nvs_get_stats(NULL, &st) == ESP_OK &&
+        st.available_entries < EFFC_RESERVE_ENTRIES + (len + 31) / 32)
+        return ESP_ERR_NVS_NOT_ENOUGH_SPACE;
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS_MB, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_blob(h, "deye_effc", buf, len);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+
+size_t nvs_store_free_entries(void)
+{
+    nvs_stats_t st;
+    return nvs_get_stats(NULL, &st) == ESP_OK ? st.available_entries : 0;
+}
+
+/* Energy manager settings (em_cfg_t): location, PV planes, capacities, the
+ * Tibber token. Its own namespace, so it can be wiped on its own. */
+#define NS_EM "em"
+
+esp_err_t nvs_store_get_em_cfg(void *buf, size_t len)
+{
+    return get_blob_prefix(NS_EM, "cfg", buf, len);
+}
+
+esp_err_t nvs_store_set_em_cfg(const void *buf, size_t len)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS_EM, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_blob(h, "cfg", buf, len);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+
+/* State of the energy manager's learning parts, same namespace: the PV
+ * forecast's per-plane calibration ("pvcal") and the household load profile
+ * ("load"). State, not configuration: not part of the settings backup. */
+static esp_err_t em_blob_set(const char *key, const void *buf, size_t len)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS_EM, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_blob(h, key, buf, len);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+esp_err_t nvs_store_get_pv_cal(void *buf, size_t len)        { return get_blob_prefix(NS_EM, "pvcal", buf, len); }
+esp_err_t nvs_store_set_pv_cal(const void *buf, size_t len)  { return em_blob_set("pvcal", buf, len); }
+esp_err_t nvs_store_get_load_prof(void *buf, size_t len)     { return get_blob_prefix(NS_EM, "load", buf, len); }
+esp_err_t nvs_store_get_fs_state(void *buf, size_t len)      { return get_blob_prefix(NS_EM, "fsblk", buf, len); }
+esp_err_t nvs_store_set_fs_state(const void *buf, size_t len){ return em_blob_set("fsblk", buf, len); }
+esp_err_t nvs_store_get_dlock(void *buf, size_t len)         { return get_blob_prefix(NS_EM, "dlock", buf, len); }
+esp_err_t nvs_store_set_dlock(const void *buf, size_t len)   { return em_blob_set("dlock", buf, len); }
+esp_err_t nvs_store_set_load_prof(const void *buf, size_t len)
+{
+    /* Same rule as the efficiency curve: statistics never crowd out settings. */
+    nvs_stats_t st;
+    if (nvs_get_stats(NULL, &st) == ESP_OK &&
+        st.available_entries < EFFC_RESERVE_ENTRIES + (len + 31) / 32)
+        return ESP_ERR_NVS_NOT_ENOUGH_SPACE;
+    return em_blob_set("load", buf, len);
+}
+
+esp_err_t nvs_store_get_frm_energy(void *buf, size_t len)
+{
+    return get_blob_prefix(NS_MB, "frm_e", buf, len);
+}
+
+esp_err_t nvs_store_set_frm_energy(const void *buf, size_t len)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS_MB, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_blob(h, "frm_e", buf, len);
     if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h);
     return e;

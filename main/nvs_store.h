@@ -49,6 +49,15 @@ esp_err_t nvs_store_set_brightness(uint8_t pct);
 uint8_t   nvs_store_get_contrast(void);
 esp_err_t nvs_store_set_contrast(uint8_t pct);
 
+/* Standard section order of the /deye workbench ("live,curve,..."), for every
+ * browser that has not sorted on its own. Only [a-z0-9,], shorter than
+ * NVS_SEC_ORDER_MAX; anything else is refused (ESP_ERR_INVALID_ARG). An empty
+ * string erases it, a missing or invalid record reads as "". */
+#define NVS_SEC_ORDER_MAX 128
+bool      nvs_store_sec_order_ok(const char *s);
+esp_err_t nvs_store_get_sec_order(char *buf, size_t len);
+esp_err_t nvs_store_set_sec_order(const char *s);
+
 /* Display standby: turn the backlight off after this many seconds of no
  * touch (0 = never). */
 uint16_t  nvs_store_get_sleep_secs(void);
@@ -84,9 +93,42 @@ esp_err_t nvs_store_get_mb_devices_legacy(const char *key, void *buf, size_t *le
 esp_err_t nvs_store_get_mb_rtu(void *buf, size_t len);
 esp_err_t nvs_store_set_mb_rtu(const void *buf, size_t len);
 
+/* BYD charged/discharged energy integrated on the display (byd_energy.c). */
+esp_err_t nvs_store_get_byd_energy(void *buf, size_t len);
+esp_err_t nvs_store_set_byd_energy(const void *buf, size_t len);
+
 /* Long-term Deye conversion energy (mb_deye_eff_lt_t). */
 esp_err_t nvs_store_get_deye_eff(void *buf, size_t len);
 esp_err_t nvs_store_set_deye_eff(const void *buf, size_t len);
+/* Efficiency by power (mb_eff_curve_t). The write is refused with
+ * ESP_ERR_NVS_NOT_ENOUGH_SPACE while the partition is nearly full, so the
+ * statistic can never crowd out a setting. */
+esp_err_t nvs_store_get_deye_effc(void *buf, size_t len);
+esp_err_t nvs_store_set_deye_effc(const void *buf, size_t len);
+/* NVS entries (32 bytes each) still available for data, 0 if unknown. */
+size_t    nvs_store_free_entries(void);
+/* Energy manager settings (em_cfg_t, see em_cfg.h). Configuration: part of
+ * the settings backup. */
+esp_err_t nvs_store_get_em_cfg(void *buf, size_t len);
+esp_err_t nvs_store_set_em_cfg(const void *buf, size_t len);
+/* Energy manager state (not in the settings backup): PV forecast
+ * calibration and the household load profile. The load profile write is
+ * refused while NVS is nearly full, like the efficiency curve. */
+esp_err_t nvs_store_get_pv_cal(void *buf, size_t len);
+esp_err_t nvs_store_set_pv_cal(const void *buf, size_t len);
+esp_err_t nvs_store_get_load_prof(void *buf, size_t len);
+/* Fronius storage block state (fronius_storage.c): whether a discharge
+ * block of ours is in the inverter, and the values to restore. */
+esp_err_t nvs_store_get_fs_state(void *buf, size_t len);
+esp_err_t nvs_store_set_fs_state(const void *buf, size_t len);
+/* The operator's lock of the Deye battery (deye_lock.c), "em/dlock". */
+esp_err_t nvs_store_get_dlock(void *buf, size_t len);
+esp_err_t nvs_store_set_dlock(const void *buf, size_t len);
+esp_err_t nvs_store_set_load_prof(const void *buf, size_t len);
+/* Energy counters of the Fronius producer meter (fronius_meter.c). State, not
+ * configuration: not part of the settings backup. */
+esp_err_t nvs_store_get_frm_energy(void *buf, size_t len);
+esp_err_t nvs_store_set_frm_energy(const void *buf, size_t len);
 
 /* Per-phase manipulation blob (mb_manip_cfg_t). Absent -> manipulation off. */
 esp_err_t nvs_store_get_mb_manip(void *buf, size_t len);

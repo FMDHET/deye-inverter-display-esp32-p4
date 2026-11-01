@@ -291,3 +291,14 @@ Wenn ein Reiter leer erscheint und ein Druck auf „Speichern" die Konfiguration
 
 **Absturz kurz nach dem Start der Zweidrahtleitung.**
 Die Akku-Schreibtask wurde vor der Zweidrahtleitung gestartet und findet deren Zugriffssperre nicht.
+
+## Task-Watchdog beim Firmware-Upload (behoben in Build 349)
+
+Am 2026-10-21 brachen vier Uploads mit „Task watchdog got triggered … IDLE0 (CPU 0)“ ab, das Gerät startete neu, der Ziel-Slot war danach leer. Die Core-Dumps (in `deye-display-backups/coredumps/`) zeigen zwei Ursachen:
+
+* **TLS neben dem Flash:** Ein HTTPS-Abruf des Energiemanagers (ECC-Rechnung auf CPU 0) lief neben dem Schreiben. Jede Flash-Operation hält CPU 0 an, der Handshake zieht sich über Sekunden, und über Prioritätsvererbung kam der Idle-Task auf CPU 0 nicht mehr dran. Seit Build 347 ruhen HTTPS-Abrufe während eines Uploads.
+* **Löschen des Slots direkt nach dem Start:** Beim Löschen der 2,2 MB steht CPU 0 je 64-kB-Block. Kurz nach einem Neustart füllen die dort angehefteten Tasks (Modbus usw.) jede Lücke. Seit Build 349 hat der Task-Watchdog während eines Uploads 60 s statt 5 s.
+
+Probiert und zurückgenommen: das Löschen Sektor für Sektor beim Schreiben (`OTA_WITH_SEQUENTIAL_WRITES`). Damit blieb die Upload-Verbindung zweimal hängen.
+
+Geprüft mit zwei Uploads direkt nach dem Start, während die Abrufe liefen: genau die Lage, in der es vorher abstürzte.

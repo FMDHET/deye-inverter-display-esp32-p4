@@ -99,6 +99,16 @@ typedef struct {
 } modbus_tcp_status_t;
 
 esp_err_t modbus_tcp_start(void);
+
+/* Run Modbus transactions on the poll's own connection to ip:port instead of
+ * opening a second one (fronius_storage.c). Returns the socket, held for the
+ * caller until modbus_tcp_give_back() -- the poll of that address waits
+ * meanwhile, so keep the batch short. Connects if the poll has no socket
+ * right now. -1: no enabled device at that address, no connection, or the
+ * lock was not free within wait_ms. One borrower at a time. broken = a
+ * transaction failed: the socket is closed, the poll reconnects. */
+int       modbus_tcp_borrow(const char *ip, uint16_t port, uint32_t wait_ms);
+void      modbus_tcp_give_back(int sk, bool broken);
 void      modbus_tcp_reconfigure(void);
 void      modbus_tcp_get_status(modbus_tcp_status_t *out);
 
@@ -138,6 +148,26 @@ bool      modbus_tcp_get_phases(int idx, mb_phases_t *out);
  * MUST NOT use the values -- fall back to splitting the total evenly. */
 bool      modbus_tcp_grid_phases_fresh(float p[3], uint32_t max_age_ms);
 
+/* ---------------- energy counters (Eltako only) ----------------
+ * Total imported / exported active energy of an Eltako DSZ15/DSZ16 (input
+ * registers 30073/30075 = address 72/74, int32 in 0.01 kWh). Read every
+ * MB_ENERGY_POLL_MS rather than on every poll: the counters move by a few Wh
+ * between two reads, and every extra read sits on the grid meter's socket.
+ * Import/export are swapped for a meter flagged `invert`, so both mean the
+ * same direction as the (flipped) power: import = + = towards the house. */
+#define MB_ENERGY_POLL_MS 10000
+
+typedef struct {
+    bool     valid;        /* counters read OK at least once since (re)config */
+    uint32_t age_ms;       /* ms since that read (0 when !valid)              */
+    double   import_kwh;   /* total imported active energy (kWh)              */
+    double   export_kwh;   /* total exported active energy (kWh)              */
+} mb_energy_t;
+
+/* Energy counters by device slot. False for an unknown slot or a device that
+ * carries no counters (anything but Eltako) or has not delivered them yet. */
+bool      modbus_tcp_get_energy(int idx, mb_energy_t *out);
+
 /* Per-device live values (for drill-down popups, e.g. individual inverters). */
 typedef struct {
     char    ip[32];
@@ -146,6 +176,7 @@ typedef struct {
     uint8_t mfr;         /* mb_mfr_t  */
     uint8_t role;        /* mb_role_t */
     bool    invert;      /* power sign flipped on read (mb_dev_cfg_t.invert) */
+    bool    enabled;     /* polled at all (mb_dev_cfg_t.enabled) */
     bool    connected;
     float   pv_w;        /* PV contribution                 */
     float   w;           /* battery or grid power           */

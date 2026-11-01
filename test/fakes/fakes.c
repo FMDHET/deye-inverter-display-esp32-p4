@@ -15,6 +15,10 @@
 #include "esp_timer.h"
 #include "driver/uart.h"
 #include "fakes.h"
+#include "keep_ram.h"
+
+/* The LP RAM keep object (keep_ram.c on the device). */
+keep_ram_t g_keep_ram;
 
 /* -------------------------------- time --------------------------------- */
 
@@ -157,6 +161,62 @@ esp_err_t nvs_store_set_mb_rtu(const void *buf, size_t len)
     if (len > sizeof(s_rtu)) return ESP_ERR_INVALID_SIZE;
     memcpy(s_rtu, buf, len); s_rtu_len = len; return ESP_OK;
 }
+
+/* Long-term efficiency sums and the efficiency curve: state blobs, kept
+ * here so a test can check what would survive a restart. */
+static uint8_t s_eff[64];    static size_t s_eff_len;
+static uint8_t s_effc[2048]; static size_t s_effc_len;
+
+esp_err_t nvs_store_get_deye_eff(void *buf, size_t len)
+{
+    if (s_eff_len == 0) return ESP_ERR_NOT_FOUND;
+    memcpy(buf, s_eff, len < s_eff_len ? len : s_eff_len);
+    return ESP_OK;
+}
+esp_err_t nvs_store_set_deye_eff(const void *buf, size_t len)
+{
+    if (fake_nvs_fail) return ESP_FAIL;
+    if (len > sizeof(s_eff)) return ESP_ERR_INVALID_SIZE;
+    memcpy(s_eff, buf, len); s_eff_len = len; return ESP_OK;
+}
+esp_err_t nvs_store_get_deye_effc(void *buf, size_t len)
+{
+    if (s_effc_len == 0) return ESP_ERR_NOT_FOUND;
+    memcpy(buf, s_effc, len < s_effc_len ? len : s_effc_len);
+    return ESP_OK;
+}
+esp_err_t nvs_store_set_deye_effc(const void *buf, size_t len)
+{
+    if (fake_nvs_fail) return ESP_FAIL;
+    if (len > sizeof(s_effc)) return ESP_ERR_INVALID_SIZE;
+    memcpy(s_effc, buf, len); s_effc_len = len; return ESP_OK;
+}
+void fake_nvs_reset_eff(void) { s_eff_len = 0; s_effc_len = 0; }
+
+/* Energy manager state blobs (pv calibration, load profile, settings). */
+static uint8_t s_pvcal[1024]; static size_t s_pvcal_len;
+static uint8_t s_load[2048];  static size_t s_load_len;
+static uint8_t s_emcfg[512];  static size_t s_emcfg_len;
+#define FAKE_BLOB(name, arr, n)                                                  \
+    esp_err_t nvs_store_get_##name(void *buf, size_t len)                         \
+    {                                                                            \
+        if (n == 0) return ESP_ERR_NOT_FOUND;                                    \
+        memcpy(buf, arr, len < n ? len : n); return ESP_OK;                      \
+    }                                                                            \
+    esp_err_t nvs_store_set_##name(const void *buf, size_t len)                   \
+    {                                                                            \
+        if (fake_nvs_fail) return ESP_FAIL;                                      \
+        if (len > sizeof(arr)) return ESP_ERR_INVALID_SIZE;                      \
+        memcpy(arr, buf, len); n = len; return ESP_OK;                           \
+    }
+FAKE_BLOB(pv_cal, s_pvcal, s_pvcal_len)
+FAKE_BLOB(load_prof, s_load, s_load_len)
+FAKE_BLOB(em_cfg, s_emcfg, s_emcfg_len)
+static uint8_t s_fsst[128];   static size_t s_fsst_len;
+FAKE_BLOB(fs_state, s_fsst, s_fsst_len)
+static uint8_t s_dlock[64];   static size_t s_dlock_len;
+FAKE_BLOB(dlock, s_dlock, s_dlock_len)
+void fake_nvs_reset_em(void) { s_pvcal_len = s_load_len = s_emcfg_len = s_fsst_len = s_dlock_len = 0; }
 
 esp_err_t nvs_store_get_mb_manip(void *buf, size_t len)
 {

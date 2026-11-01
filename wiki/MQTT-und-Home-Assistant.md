@@ -45,6 +45,8 @@ Was du brauchst: einen Broker im Netz. Meistens ist das **Mosquitto**, oft schon
 | Topic | Richtung | Inhalt |
 | --- | --- | --- |
 | `<basis>/state` | Gerät → Broker | alle Messwerte als JSON |
+| `<basis>/meter/<rolle>` | Gerät → Broker | Zählerstände eines Eltako-Zählers (siehe unten) |
+| `<basis>/battery/<akku>` | Gerät → Broker | geladene und entladene Energie je Akku (siehe unten) |
 | `<basis>/availability` | Gerät → Broker | `online` oder `offline` |
 | `<basis>/deye/mode/set` | Broker → Gerät | `Normal`, `Laden` oder `Entladen` |
 | `<basis>/deye/power/set` | Broker → Gerät | Leistung in Watt (1000 bis 20000) |
@@ -69,6 +71,43 @@ Der Inhalt von `state`:
 
 Vorzeichen: `grid_w` positiv heißt Bezug aus dem Netz, negativ heißt Einspeisung. Bei den Akkus heißt positiv entladen, negativ laden. Hier lädt der Deye also mit 3547 Watt und ist zu 91 Prozent voll.
 
+### Zählerstände der Eltako-Zähler
+
+Ein Eltako-Zähler (DSZ15DZ, DSZ16DZ) zählt nicht nur die Leistung, sondern auch die Energie, die insgesamt durch ihn geflossen ist, getrennt nach Richtung. Das Gerät liest beide Zählerstände alle 10 Sekunden (Register 30073 und 30075) und schickt sie in ein eigenes Topic je Zählerrolle:
+
+| Rolle des Zählers | Topic |
+| --- | --- |
+| Netz-Zähler | `<basis>/meter/grid` |
+| Erzeugungs-Zähler | `<basis>/meter/pv_meter` |
+| Deye-AC-Zähler | `<basis>/meter/deye_ac` |
+
+```json
+{ "import_kwh": 185.64, "export_kwh": 1087.52 }
+```
+
+`import_kwh` ist die bezogene Energie (Richtung Haus), `export_kwh` die eingespeiste. Bei einem Zähler mit **Vorzeichen umkehren** sind die beiden vertauscht, damit die Richtung zur Leistung passt. Gibt es mehrere Eltako-Zähler mit derselben Rolle, wird der erste in der Geräteliste gemeldet.
+
+Ein Zählerstand darf nur steigen, und nur so schnell, wie es physikalisch geht. Ein Wert, der rückwärts läuft oder springt, wird verworfen; kommt er dreimal hintereinander, gilt er als echt (Zähler getauscht). Antwortet der Zähler eine Minute lang nicht, schickt das Gerät nichts mehr, statt den alten Stand zu wiederholen.
+
+Auf der Werkbank-API stehen dieselben Werte in `/api/meter` als `imp_kwh` und `exp_kwh`.
+
+### Geladene und entladene Energie der Akkus
+
+Für das Energie-Dashboard braucht Home Assistant je Akku zwei Zählerstände: wie viel Energie insgesamt hineingeladen und wie viel herausgeholt wurde. Das Gerät schickt sie alle 10 Sekunden, ein Topic je Akku:
+
+| Akku | Topic | Woher die Werte kommen |
+| --- | --- | --- |
+| Deye | `<basis>/battery/deye` | aus den eigenen Zählern des Deye (Register 516/517 und 518/519, 0,1 kWh), alle 30 s über den RS485-Master gelesen |
+| BYD | `<basis>/battery/byd` | vom Display aufsummiert, siehe unten |
+
+```json
+{ "charge_kwh": 2900.600, "discharge_kwh": 2748.800 }
+```
+
+**Der BYD hat keine eigenen Zähler.** Der Fronius Symo Hybrid meldet für seinen Batterieeingang keine Energie (SunSpec-Modell 160 kennzeichnet den Wert als nicht vorhanden, die Solar-API liefert nur Ladezustand, Spannung und Temperatur). Deshalb summiert das Display die BYD-Leistung selbst auf, und zwar dieselbe, die auch in der Energiebilanz steht (Wechselstromseite minus Solarleistung des Hybrid). Die Wandlungsverluste des Wechselrichters stecken damit mit drin. Die Summen liegen im NVS: Sie werden alle 15 Minuten und bei jedem geordneten Neustart (auch beim Update) gespeichert. Nach einem Stromausfall fehlt höchstens die letzte Viertelstunde; rückwärts läuft der Zähler nie. Zählerstände von null an beginnen mit diesem Build.
+
+Wie bei den Eltako-Zählern wird ein Deye-Zählerstand verworfen, der rückwärts läuft oder unmöglich springt.
+
 ## Auto-Discovery: Home Assistant richtet sich selbst ein
 
 Normalerweise müsste man in Home Assistant jeden Wert einzeln von Hand konfigurieren: Name, Einheit, Typ, welches Topic, wie man den Wert aus dem JSON herausholt. Für neun Werte ist das eine lange, fehleranfällige Textdatei.
@@ -89,7 +128,11 @@ Diese Anzeigen entstehen:
 | Deye Leistung | W | Leistung |
 | Deye SoC | % | Batterie |
 
-Alle sind als Messwerte gekennzeichnet, also direkt für Verläufe, Statistiken und das Energie-Dashboard von Home Assistant brauchbar.
+Alle sind als Messwerte gekennzeichnet, also direkt für Verläufe und Statistiken brauchbar.
+
+Für jeden Eltako-Zähler kommen zwei Energie-Anzeigen dazu, beim Netz-Zähler **Netz Bezug** und **Netz Einspeisung** (beim Erzeugungs- und Deye-Zähler heißen sie „… Bezug“ und „… Lieferung“). Sie sind in kWh und als stetig steigende Zählerstände gekennzeichnet (`total_increasing`). Genau das verlangt das **Energie-Dashboard** von Home Assistant: unter *Stromnetz* „Netz Bezug“ als Netzbezug und „Netz Einspeisung“ als Rückspeisung eintragen. Wird ein Zähler aus der Geräteliste entfernt, löscht das Gerät seine beiden Anzeigen wieder.
+
+Für jeden Akku, der Werte liefert, kommen **„Deye Akku geladen“ / „Deye Akku entladen“** bzw. **„BYD Akku geladen“ / „BYD Akku entladen“** dazu, ebenfalls in kWh und `total_increasing`. Im Energie-Dashboard unter *Batteriespeicher* je Akku „… geladen“ als „In die Batterie geladene Energie“ und „… entladen“ als „Aus der Batterie entladene Energie“ eintragen. Als Ladezustand dienen die vorhandenen Anzeigen **Deye SoC** und **BYD SoC**. Die Akku-Anzeigen löscht das Gerät nie von selbst: Fehlen die Werte beim Start kurz, soll Home Assistant die Anzeigen nicht verwerfen und neu anlegen.
 
 Und diese zwei Bedienelemente:
 

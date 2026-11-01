@@ -17,9 +17,12 @@ Firmware for a **GUITION JC4880P443C** (ESP32-P4 + ESP32-C6, 4.3″ 480×800 MIP
 
 * **Reads** up to 8 Modbus-TCP devices in parallel (Fronius/SunSpec, Deye native, Eltako DSZ15/16), plus two RS485 Modbus-RTU buses.
 * **Bridges** Modbus-TCP to RTU in the other direction: a server on port 502 forwards LAN requests onto the RS485 buses, so any Modbus master can read and write the Deye's registers without its own adapter. Multiple concurrent clients, both buses routable by unit id.
+* **Reports the Deye to a Fronius**: answers as a second Fronius Smart Meter of category *producer* over Modbus TCP, so a Fronius hybrid counts what the AC-coupled Deye feeds in or draws.
 * **Emulates** an Eastron SDM630 energy meter on the Deye's meter port and reports *(real grid power − setpoint)*, so the inverter regulates the real grid connection point to a setpoint you pick on screen. Emulation is gated on a **fresh** meter reading — a frozen value once caused a 15 kW export runaway.
 * **Controls** the Deye battery: Normal / forced charge / forced discharge, from the touch UI or from Home Assistant, with an SLS (main-fuse) export guard that throttles discharge power.
 * **Measures** the Deye's own conversion efficiency (battery→AC and AC→battery) from its registers: a live value, short-term averages with kWh, and a long-term average kept in NVS.
+* **Plans the battery against the dynamic tariff**: Tibber quarter-hour prices (Energy-Charts as fallback, plus the grid's renewable share), a self-calibrating PV forecast per plane (Open-Meteo), a learned household load profile and a planner that charges cheap, holds for expensive peaks and can block the Fronius/BYD discharge meanwhile — off by default, "plan only" or automatic, with REST API and Home Assistant discovery.
+* **Maps efficiency against power**: every counted round also lands in one of 29 power bins (250 W wide from 1 to 5 kW), a fitted loss model finds the best operating point, and an optional power sweep drives the battery through fixed steps (30 s each, about 11 minutes in total), cross-checking the Deye's AC reading against the grid meter.
 * **Publishes** all values over MQTT with Home Assistant auto-discovery (7 sensors + a mode select + a power slider).
 * **Mirrors itself** into a browser: the ESP32-P4 hardware JPEG encoder streams the actual framebuffer as MJPEG (~8 fps) and injects mouse/keyboard back into LVGL — the web page *is* the display.
 * **Flashes itself** over WiFi: `POST /ota` (firmware) and `POST /ota/fs` (filesystem), dual 4 MB slots, plus a `/recovery` page with rollback.
@@ -57,7 +60,7 @@ Documentation is in German — see the [Wiki](../../wiki) for the full reference
 | **Energiemodell bilden** | Aus PV, Netz und Akku wird der Hausverbrauch gerechnet. Jeder Wert läuft durch eine Plausibilitätsprüfung; fehlende Quellen zeigen `--` statt eines eingefrorenen Werts. |
 | **Anzeigen** | Fünf Kreis-Gauges mit animierten Flusslinien, Uhr, WLAN-Status, Build-Nummer. Antippen öffnet Detail-Popups (Einzel-Wechselrichter, Akku-Modus, Laufzeit/Neustart). |
 | **Regeln** | Eastron-SDM630-Emulation am Zähler-Port des Deye plus direkte Register-Schreibzugriffe für Zwangsladen/-entladen. |
-| **Weitergeben** | MQTT mit Home-Assistant-Auto-Discovery, inklusive steuerbarer Entities. Dazu die Modbus-Brücke: Port 502 reicht Anfragen aus dem LAN auf die RS485-Busse durch. |
+| **Weitergeben** | MQTT mit Home-Assistant-Auto-Discovery, inklusive steuerbarer Entities. Dazu die Modbus-Brücke: Port 502 reicht Anfragen aus dem LAN auf die RS485-Busse durch. Und für einen Fronius-Hybrid der Deye als Erzeuger-Zähler über Modbus TCP ([Wiki → Fronius-Zähler](../../wiki/Fronius-Zaehler)). |
 | **Fernwarten** | Web-Mirror (1:1-Bild plus Touch im Browser), Werkbank mit den Messwerten und dem Wirkungsgrad des Deye, OTA-Update über WiFi, Recovery-Seite, WireGuard-Tunnel. |
 
 Unterstützte Geräteprofile am Modbus-TCP:
@@ -235,14 +238,19 @@ Zwei HTTP-Server: `:80` für Seiten und Steuerung, `:81` nur für den MJPEG-Stro
 | Endpunkt | Was es tut |
 | --- | --- |
 | `GET /` | **Web-Mirror**: das echte Panelbild als MJPEG (~8 fps, Hardware-JPEG-Encoder, Qualität 80) plus Maus- und Tastatureingabe zurück in LVGL. Inklusive Copy/Paste in Textfelder. |
-| `GET /deye` | **Werkbank** mit drei Tabs: „Zähler & Deye" (Deye-Messwerte mit Wirkungsgrad, Phasenkette vom Eltako bis zum Wechselrichter, Phasenmanipulation, Gerätetabelle), „Modbus-Register" (beliebige Holding-Register lesen (FC03), einzeln schreiben (FC16), Adressbereich als CSV exportieren und importieren) und „System & Update". |
+| `GET /deye` | **Werkbank** mit vier Tabs: „Zähler & Deye" (Deye-Messwerte mit Wirkungsgrad, Phasenkette vom Eltako bis zum Wechselrichter, Phasenmanipulation, Gerätetabelle), „Modbus-Register" (beliebige Holding-Register lesen (FC03), einzeln schreiben (FC16), Adressbereich als CSV exportieren und importieren), „Fronius-Simulator" (Deye als Erzeuger-Zähler für den Fronius, Seriennummer einstellbar) und „System & Update". |
 | `GET /meter` | Umleitung auf `/deye#meter` |
 | `GET /api/live` | Energiewerte, MQTT-/NTP-Status, Zeit als JSON |
 | `GET /api/devices` | Pro-Gerät-Livewerte als JSON |
 | `GET /api/meter` | Zählerkette in einem Poll: gemessene und gesendete Phasenwerte, Sollwert, Manipulation, alle Modbus-TCP-Geräte |
 | `GET /api/meter/manip` | Phasenmanipulation und Netz-Sollwert setzen |
 | `GET /api/deye/live` | Was der Wechselrichter selbst misst: PV, AC-Ausgang, Last, Netz und Batterie, dazu die Energiesummen für den Wirkungsgrad (`eff`) — fertig skaliert aus dem Poll-Cache, ohne RS485-Verkehr pro Anfrage |
+| `GET /api/frm` · `GET /api/frm/set` | Fronius-Simulator: Status bzw. ein/aus, Unit-ID und Seriennummer ([Wiki → Fronius-Zähler](../../wiki/Fronius-Zaehler)) |
 | `POST /api/deye/eff/reset` | Wirkungsgrad-Statistik (Entladen und Laden) zurücksetzen; der Langzeitwert bleibt |
+| `GET /api/deye/eff/curve` | Wirkungsgrad nach Leistung (29 Stufen je Richtung, Leerlauf) und Stand des Leistungsdurchlaufs ([Wiki → Deye-Steuerung](../../wiki/Deye-Steuerung#wirkungsgrad-nach-leistung)) |
+| `POST /api/deye/eff/curve?cmd=…` | `sweep` startet den Leistungsdurchlauf, `stop` bricht ihn ab, `reset` leert die Kurve |
+| `GET` · `POST /api/em/…` | Energiemanager: Einstellungen, Preise, PV-Prognose, Lastprofil, Plan, Fronius-Speicher, Betriebsart ([Wiki → Energiemanager](../../wiki/Energiemanager)) |
+| `GET` · `POST /api/ui/order` | Standardreihenfolge der Abschnitte im Tab „Zähler & Deye" lesen bzw. setzen (`?o=live,curve,…`, leer = eingebaute) |
 | `GET /ota` | laufende Version, Build, Slot, IDF-Version, MAC, Laufzeit, Grund des letzten Neustarts, freier Speicher |
 | `POST /ota` · `POST /ota/fs` | Firmware- bzw. Dateisystem-Image schreiben |
 | `POST /ota/reboot` · `POST /ota/rollback` | Neustart bzw. Slot-Rückrollung |
@@ -261,11 +269,13 @@ Basistopic frei wählbar, Standard `deye-display`:
 | Topic | Richtung | Inhalt |
 | --- | --- | --- |
 | `<base>/state` | → Broker | `pv_w`, `house_w`, `grid_w`, `byd_w`, `byd_soc`, `deye_w`, `deye_soc`, `deye_mode`, `deye_power` |
+| `<base>/meter/<rolle>` | → Broker | Zählerstände eines Eltako-Zählers: `import_kwh`, `export_kwh`; Rolle `grid`, `pv_meter` oder `deye_ac`, alle 10 s |
+| `<base>/battery/<akku>` | → Broker | `charge_kwh`, `discharge_kwh` je Akku (`deye`: Zähler des Deye; `byd`: vom Display aufsummiert), alle 10 s |
 | `<base>/availability` | → Broker | `online` / `offline` (Last Will) |
 | `<base>/deye/mode/set` | ← Broker | `Normal` \| `Laden` \| `Entladen` |
 | `<base>/deye/power/set` | ← Broker | Leistung in W (1000–20000) |
 
-Bei aktivierter Discovery legt das Gerät in Home Assistant selbst an: 7 Sensoren (Leistungen mit `device_class: power`, SoC mit `battery`), einen **Select** für den Akku-Modus und einen **Number**-Schieber für die Leistung — alle unter einem Gerät „Deye Display". Retain, Discovery und Last Will sind einzeln abschaltbar.
+Bei aktivierter Discovery legt das Gerät in Home Assistant selbst an: 7 Sensoren (Leistungen mit `device_class: power`, SoC mit `battery`), einen **Select** für den Akku-Modus und einen **Number**-Schieber für die Leistung, dazu je Eltako-Zähler und je Akku zwei Energie-Sensoren in kWh (`device_class: energy`, `state_class: total_increasing`, direkt fürs Energie-Dashboard) — alle unter einem Gerät „Deye Display". Retain, Discovery und Last Will sind einzeln abschaltbar.
 
 ---
 
@@ -353,5 +363,5 @@ Dieses README ist die Kurzfassung für Leute, die mit Mikrocontrollern und PV-An
 | --- | --- |
 | **Nachbauen** | [Hardware](../../wiki/Hardware) · [Bauen und Flashen](../../wiki/Bauen-und-Flashen) · [WLAN und Ersteinrichtung](../../wiki/WLAN-und-Captive-Portal) · [Die Menüs](../../wiki/Einstellungen) |
 | **Verstehen** | [Modbus-TCP](../../wiki/Modbus-TCP) · [Modbus-RTU](../../wiki/Modbus-RTU) · [Modbus-Brücke](../../wiki/Modbus-Bridge) · [Architektur](../../wiki/Architektur) |
-| **Benutzen** | [Deye-Steuerung](../../wiki/Deye-Steuerung) · [MQTT und Home Assistant](../../wiki/MQTT-und-Home-Assistant) · [Web-Mirror](../../wiki/Web-Mirror) · [Zeit und VPN](../../wiki/Zeit-und-VPN) · [Updates über WLAN](../../wiki/OTA-und-Recovery) |
+| **Benutzen** | [Deye-Steuerung](../../wiki/Deye-Steuerung) · [Fronius-Zähler](../../wiki/Fronius-Zaehler) · [MQTT und Home Assistant](../../wiki/MQTT-und-Home-Assistant) · [Web-Mirror](../../wiki/Web-Mirror) · [Zeit und VPN](../../wiki/Zeit-und-VPN) · [Updates über WLAN](../../wiki/OTA-und-Recovery) |
 | **Wenn es klemmt** | [Fehlersuche](../../wiki/Fehlersuche) |

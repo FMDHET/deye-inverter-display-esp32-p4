@@ -229,6 +229,100 @@ In `GET /api/deye/live` steht das alles unter `eff`:
 | `full` | Sekunden, die der Akku gerade ununterbrochen auf 100 % steht (`0` = nicht voll) |
 | `lt` | Langzeitwerte: `dis_dc`, `dis_ac`, `chg_ac`, `chg_dc` in Wh, `start` als Unix-Zeit (`0`, solange die Uhr beim ersten Zählen noch nicht stand) |
 
+## Wirkungsgrad nach Leistung
+
+Ein Durchschnitt sagt nicht, **bei welcher Leistung** der Deye am wirtschaftlichsten arbeitet. Beim Entladen mit wenigen hundert Watt frisst sein fester Eigenverbrauch einen großen Teil, bei sehr hoher Leistung wachsen die Leitungsverluste mit dem Quadrat des Stroms (17 kW bei 52 V sind über 300 A). Dazwischen liegt ein Bereich, in dem er am besten ist. Die Karte **„Wirkungsgrad nach Leistung"** im Tab „Zähler & Deye" zeigt ihn.
+
+**Wie gezählt wird.** Jede Pollrunde, die auch in den Wirkungsgrad oben eingeht (ruhig und plausibel, siehe [oben](#wirkungsgrad)), wird zusätzlich nach ihrer **AC-Leistung** einer von 29 Stufen zugeordnet — beim Entladen nach der abgegebenen, beim Laden nach der aufgenommenen Leistung. So teilen sich beide Kurven eine Achse.
+
+```text
+50 · 150 · 300 · 500 · 750 W · 1 bis 5 kW in 250-W-Schritten · 5 · 6 · 7 · 8 · 10 · 12 · 15 · 20 kW und darüber
+```
+
+Unten sind die Stufen fein, weil die Kurve dort steil ist, und zwischen 1 und 5 kW, wo das Haus meistens läuft, 250 W breit. Runden mit weniger als 50 W auf der AC-Seite gehen beim Entladen in den **Leerlauf**: Der Akku versorgt dann nur den Wechselrichter selbst. Daraus ergibt sich der Eigenverbrauch in Watt.
+
+Die Karte und die zum [Leistungsdurchlauf](#leistungsdurchlauf) sind beim Öffnen der Seite **eingeklappt**. Zugeklappt nennt die Kopfzeile die Bestwerte bzw. den Stand eines laufenden Durchlaufs, ein Klick auf die Überschrift klappt auf.
+
+> [!TIP]
+> Alle Abschnitte im Tab „Zähler & Deye" lassen sich umsortieren: am Griff oben rechts ziehen (Maus oder Finger) oder den Griff anwählen und die Pfeiltasten benutzen. Die Reihenfolge merkt sich der Browser, also getrennt für Telefon und Rechner. Am Ende des Tabs:
+>
+> * **Als Standard speichern** legt die aktuelle Reihenfolge auf dem Gerät ab (NVS `disp`/`sec_order`, auch in der Einstellungssicherung). Sie gilt für jeden Browser, der nicht selbst sortiert hat — ein neues Telefon bekommt sie also gleich.
+> * **Standardreihenfolge** verwirft die eigene Reihenfolge dieses Browsers und folgt wieder dem Standard des Geräts.
+> * **Werksreihenfolge** stellt die eingebaute Reihenfolge her (als eigene Reihenfolge dieses Browsers; der Standard auf dem Gerät bleibt).
+>
+> `GET /api/ui/order` liefert den Standard als `{"order":"live,curve,…"}`, `POST /api/ui/order?o=…` setzt ihn, `o=` leer löscht ihn.
+
+**Was die Karte zeigt:**
+
+| Teil | Bedeutung |
+| --- | --- |
+| Ergebnissatz oben | je Richtung die Leistung mit dem besten Wirkungsgrad, der Bereich bis 0,5 Prozentpunkte darunter und — nach einem Durchlauf — der gegengeprüfte Wert; dazu der Eigenverbrauch im Leerlauf |
+| Diagramm | Wirkungsgrad über der AC-Leistung (logarithmische Achse 0,05…22 kW). Gefüllte Punkte: Stufen der Dauerstatistik, ab 10 s Messzeit, blass unter 5 Minuten. Ringe: Stufen aus dem letzten [Durchlauf](#leistungsdurchlauf). Gestrichelt: das Verlustmodell |
+| Tabelle (Rechner, aufklappbar) | je Stufe Wirkungsgrad und Messzeit beider Richtungen, dazu der Leerlauf |
+
+**Das Verlustmodell.** An die Stufen wird `Verlust(P) = a + b·P + c·P²` angepasst: `a` ist der feste Eigenverbrauch, `b` der zur Leistung proportionale Anteil, `c` die Leitungsverluste (I²R). Gewichtet wird mit der Messzeit, höchstens eine Stunde je Stufe; schon eine einzelne Durchlaufstufe (rund 20 s Messzeit) geht ein. Gebraucht werden mindestens drei Stufen über einen Faktor 3 Leistung. Wird `a` oder `c` negativ, was physikalisch nicht sein kann, rechnet die Seite ohne diesen Term neu. Das Maximum liegt bei `P = √(a / c)`. Liegt es außerhalb des gemessenen Bereichs, sagt der Ergebnissatz das so.
+
+> [!NOTE]
+> Unter etwa 500 W machen schon 20 W Messfehler des Deye mehrere Prozentpunkte aus. Dort ist die Kurve eine Tendenz. Belastbarer wird sie mit der [Gegenprobe](#gegenprobe-mit-dem-netzzähler) des Durchlaufs.
+
+**Gespeichert** wird die Kurve im NVS (Namensraum `modbus`, Schlüssel `deye_effc`, rund 0,7 KB), so oft und so sicher wie der Langzeitwert: höchstens alle 15 Minuten, bei jedem geordneten Neustart und nur, wenn sich etwas geändert hat. Weil dieselbe 24-KB-Partition alle Zugangsdaten hält, **verzichtet die Kurve aufs Speichern**, sobald weniger als 128 Einträge (4 KB) frei sind. Statistik darf nie eine Einstellung verdrängen. Der Knopf „Kurve zurücksetzen" setzt alle Stufen auf null, solange kein Durchlauf läuft.
+
+## Leistungsdurchlauf
+
+Im Alltag fährt der Deye nur die paar Leistungen, die das Haus gerade braucht. Bis jede Stufe der Kurve gefüllt ist, vergehen Wochen. Der **Leistungsdurchlauf** in der Karte darunter erledigt das in einer Viertelstunde. Er schaltet den Akku nacheinander auf feste Leistungen, zuerst Entladen, dann Laden oder umgekehrt, je Stufe 30 Sekunden:
+
+| Einstellung | Vorgabe | Bereich |
+| --- | --- | --- |
+| Richtung | Entladen und Laden | eine oder beide |
+| von / bis / Schritt | 500 W bis 5 kW in 500-W-Schritten, also 10 Stufen | bis 20 Stufen, je 250…20000 W; das obere Ende kommt immer dazu |
+| je Stufe | 30 s | 30 s…30 min |
+| davon Einschwingen | 10 s, nicht gemessen | ab 10 s, mindestens 20 s kürzer als die Stufe |
+| SoC min / max | 20 % / 95 % | Entladen endet bei SoC min, Laden bei SoC max |
+
+Mit den Vorgaben dauert ein Durchlauf in beide Richtungen etwa 11 Minuten: 2 × 10 Stufen à 30 s plus 60 s Pause. 30 Sekunden reichen für einen elektrischen Messpunkt. Der Wechselrichter nimmt die neue Leistung in wenigen Sekunden an, das Batterieregister hinkt etwa drei Runden hinterher, und die Ruheprüfung verwirft genau diese Runden. Thermisch eingeschwungen ist das Gerät nach 30 s nicht. Wer den Einfluss der Erwärmung sehen will, stellt längere Stufen ein.
+
+Bei beiden Richtungen beginnt der Durchlauf mit der Richtung, die mehr Platz hat (ab 50 % SoC mit Entladen). Gemessen werden nur Runden, die auch die Kurve zählt. Die fließen also ohnehin in sie ein. Zusätzlich hält der Durchlauf je Stufe eigene Mittelwerte fest und zeigt sie in einer Tabelle.
+
+**Sicherheit**, in dieser Reihenfolge:
+
+* **Der Nutzer hat Vorrang.** Ändert jemand am Display, per MQTT oder durch die 2-Stunden-Grenze die Betriebsart oder die Leistung, endet der Durchlauf sofort und **lässt den Wechselrichter in Ruhe**, statt die neue Wahl mit Normal zu überschreiben.
+* Starten lässt er sich nur aus dem Normalbetrieb.
+* Der Durchlauf darf bis 250 W hinunter. Schieberegler, MQTT und Home Assistant bleiben bei 1000 W bis 20 kW (`deye_ctrl_apply_sweep` gegenüber `deye_ctrl_apply`), damit ein „Normal mit 0 W" vom Display keinen 250-W-Sollwert für den nächsten Zwangsmodus hinterlässt.
+* Die SoC-Grenzen beenden eine Richtung vorzeitig, auch mitten im Einschwingen.
+* Antwortet der Deye 30 Sekunden nicht, endet der Durchlauf mit Normal.
+* Bestätigt der Wechselrichter die Leistung einer Stufe nicht (Rücklesen), endet der Durchlauf mit Normal. Eine Stufe mit der falschen Leistung wäre schlimmer als keine.
+* Zwischen den Richtungen schaltet er für 60 Sekunden auf **Normal**: Der Lade-Registersatz schreibt die Betriebsart (Register 142) nicht, und direkt von „Selling First" auf Zwangsladen bliebe 142 stehen.
+* Eine Richtung darf höchstens 110 Minuten dauern. Eine Leistungsänderung im laufenden Modus startet die 2-Stunden-Uhr der Zwangsmodi **nicht** neu (`deye_ctrl_retune`), damit sich ein Zwangsmodus nicht beliebig verlängern lässt.
+* Der SLS-Schutz drosselt eine Entladestufe wie sonst auch. Die Stufe misst dann einfach die Leistung, die sie bekommen hat.
+* Nach einem Neustart ist der Durchlauf vorbei. Den zurückgebliebenen Zwangsmodus macht die Akku-Steuerung wie immer rückgängig.
+
+**Schonend für das EEPROM des Deye.** Innerhalb einer Richtung schreibt der Durchlauf nur die Leistung: beim Entladen Register 143, beim Laden 126 und 128. Den ganzen Satz mit den zwölf Zeitfenster-Registern schreibt er nicht jedes Mal neu. Ein voller Durchlauf mit 2 × 10 Stufen kostet so knapp 80 Schreibvorgänge statt über 300. Die Karte zählt sie mit.
+
+### Gegenprobe mit dem Netzzähler
+
+Alle Wirkungsgrade beruhen auf den Messungen des Deye selbst. Ob dessen AC-Messung stimmt, prüft der Durchlauf gegen den **Eltako-Netzzähler**, ein unabhängiges, geeichtes Gerät. Zwischen zwei Stufen springt die AC-Leistung des Deye um Kilowatt, der Hausverbrauch bleibt annähernd gleich. Der Netzzähler sieht also
+
+```text
+Netz = Hausverbrauch − g · AC_Deye
+```
+
+Die Steigung der Ausgleichsgeraden über alle fertigen Stufen ist `−g`. Ist `g` größer als 1, meldet der Deye weniger AC-Leistung, als wirklich fließt. Die Seite zeigt die Abweichung mit Unsicherheit und Streuung des Hausverbrauchs. Daraus ergibt sich der gegengeprüfte Wirkungsgrad: beim Entladen η · g (AC ist der Ausgang), beim Laden η / g (AC ist der Eingang). Nötig sind mindestens drei Stufen über 2 kW Spanne mit je mindestens fünf Runden mit frischem Netzzählerwert.
+
+Die Batterieseite des Deye lässt sich so nicht prüfen: Sie geht durch keinen anderen Zähler. Läuft während des Durchlaufs PV, steckt deren Schwankung im Netzwert, und die Seite warnt. **Am besten nachts laufen lassen.**
+
+`GET /api/deye/eff/curve` liefert Kurve und Durchlauf als JSON:
+
+| Feld | Bedeutung |
+| --- | --- |
+| `lo` | Untergrenzen der 29 Stufen in W |
+| `dis`, `chg` | je Stufe `[Wh hinein, Wh heraus, Sekunden]`; Entladen: hinein = Akku + PV, heraus = AC; Laden: hinein = AC, heraus = Akku |
+| `idle` | Leerlauf `[Wh aus dem Akku, Wh am AC, Sekunden]`, `idle_w` die Schwelle (50 W) |
+| `start` | Unix-Zeit der ersten gezählten Runde |
+| `nvs_free` | freie NVS-Einträge (je 32 Byte) |
+| `sweep` | `state` (0 nie gelaufen, 1 läuft, 2 fertig, 3 abgebrochen), `why`, `cur`/`n` Stufe, `paused`, `elapsed`/`left`/`step_s` in s, `writes`, die Einstellungen und `steps[]` mit `m` (1 Laden, 2 Entladen), `st` (0 offen, 1 schwingt ein, 2 misst, 3 fertig, 4 übersprungen), `t` Soll-W, `n` Runden, `in`/`out`/`ac`/`pv` Mittel in W, `ng`/`grid`/`acg` die Runden mit Netzzählerwert und deren Mittel, `soc0`/`soc1` |
+
+`POST /api/deye/eff/curve?cmd=sweep&dirs=1|2|3&p=1000,2000,…&dwell=s&settle=s&smin=%&smax=%` startet den Durchlauf (1 = Entladen, 2 = Laden, 3 = beides), `?cmd=stop` bricht ihn ab und schreibt Normal, `?cmd=reset` leert die Kurve. Abgelehnte Anfragen antworten mit `{"ok":false,"err":"…"}`. Die Kommas in `p` gehören roh in die Adresse; der Webserver des ESP dekodiert Abfrageparameter nicht, nimmt aber auch `%2C` an.
+
 ## Register selbst untersuchen
 
 Wenn du eigene Register finden oder eine Vermutung prüfen willst, ist das Werkzeug unter `http://<ip-des-geräts>/deye` genau dafür da.

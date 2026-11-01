@@ -7,6 +7,7 @@
 #include "mqtt_fwd.h"
 #include "ntp_client.h"
 #include "wg_client.h"
+#include "em_cfg.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -55,8 +56,24 @@ static const blob_t BLOBS[] = {
       nvs_store_get_ntp,      nvs_store_set_ntp,      NULL, NULL },
     { "wg",       sizeof(wg_cfg_t),       sizeof(wg_cfg_t),
       nvs_store_get_wg,       nvs_store_set_wg,       NULL, NULL },
+    { "em",       sizeof(em_cfg_t),       sizeof(em_cfg_t),
+      nvs_store_get_em_cfg,   nvs_store_set_em_cfg,   NULL, NULL },
 };
 #define N_BLOBS (sizeof(BLOBS) / sizeof(BLOBS[0]))
+
+/* The one scratch buffer every blob passes through, both directions. It must
+ * hold the LARGEST cap in the table -- that is the WiFi list (10 x 98 = 980 B),
+ * not the device list it used to be sized after (8 x 66 + 64 = 592 B). With the
+ * old size every export zeroed ~390 B past the end of the buffer
+ * (memset(raw, 0, b->cap) for wifi_list) and corrupted the PSRAM heap: the
+ * TLSF assert in the httpd task on 2026-10-18 right after four exports, and
+ * very likely the unexplained one of 2026-09-11 as well. */
+static size_t blob_cap_max(void)
+{
+    size_t m = 0;
+    for (size_t i = 0; i < N_BLOBS; i++) if (BLOBS[i].cap > m) m = BLOBS[i].cap;
+    return m;
+}
 
 /* Saturating append, same as the jcat() helpers elsewhere: a bare
  * `o += snprintf()` lets o run past the buffer, and `doc + o` is then a pointer
@@ -80,8 +97,7 @@ static esp_err_t export_handler(httpd_req_t *req)
     if (!web_auth_ok(req)) return ESP_OK;    /* contains every secret -- gated */
 
     char *doc = heap_caps_malloc(DOC_CAP, MALLOC_CAP_SPIRAM);
-    uint8_t *raw = heap_caps_malloc(MB_MAX_DEVICES * sizeof(mb_dev_cfg_t) + 64,
-                                    MALLOC_CAP_SPIRAM);
+    uint8_t *raw = heap_caps_malloc(blob_cap_max(), MALLOC_CAP_SPIRAM);
     char *b64 = heap_caps_malloc(2048, MALLOC_CAP_SPIRAM);
     if (!doc || !raw || !b64) {
         free(doc); free(raw); free(b64);
@@ -89,9 +105,10 @@ static esp_err_t export_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    char ap[32] = "", pw[WEB_AUTH_PW_MAX] = "";
+    char ap[32] = "", pw[WEB_AUTH_PW_MAX] = "", order[NVS_SEC_ORDER_MAX] = "";
     nvs_store_get_ap_psk(ap, sizeof(ap));
     web_auth_get(pw, sizeof(pw));
+    nvs_store_get_sec_order(order, sizeof(order));   /* [a-z0-9,] only: no escaping */
 
     int o = dcat(doc, DOC_CAP, 0,
         "{\n  \"format\": 1,\n  \"device\": \"deye-display\",\n"
@@ -101,10 +118,10 @@ static esp_err_t export_handler(httpd_req_t *req)
         "  \"scalars\": {\n"
         "    \"brightness\": %u, \"contrast\": %u, \"sleep_secs\": %u, \"orientation\": %u,\n"
         "    \"grid_sp\": %d, \"sls_a\": %u,\n"
-        "    \"ap_psk\": \"%s\", \"web_pw\": \"%s\"\n  },\n  \"blobs\": {\n",
+        "    \"ap_psk\": \"%s\", \"web_pw\": \"%s\", \"sec_order\": \"%s\"\n  },\n  \"blobs\": {\n",
         nvs_store_get_brightness(), nvs_store_get_contrast(),
         nvs_store_get_sleep_secs(), nvs_store_get_orientation(),
-        nvs_store_get_grid_sp(), nvs_store_get_sls_a(), ap, pw);
+        nvs_store_get_grid_sp(), nvs_store_get_sls_a(), ap, pw, order);
 
     for (size_t i = 0; i < N_BLOBS; i++) {
         const blob_t *b = &BLOBS[i];
@@ -162,6 +179,9 @@ static void apply_scalars(const cJSON *sc, int *applied)
         { nvs_store_set_ap_psk(v->valuestring); (*applied)++; }
     if ((v = cJSON_GetObjectItem(sc, "web_pw")) && cJSON_IsString(v))
         { web_auth_set(v->valuestring); (*applied)++; }
+    if ((v = cJSON_GetObjectItem(sc, "sec_order")) && cJSON_IsString(v) &&
+        nvs_store_set_sec_order(v->valuestring) == ESP_OK)
+        { (*applied)++; }
 }
 
 static esp_err_t import_handler(httpd_req_t *req)
@@ -173,8 +193,7 @@ static esp_err_t import_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
     char *body = heap_caps_malloc(req->content_len + 1, MALLOC_CAP_SPIRAM);
-    uint8_t *raw = heap_caps_malloc(MB_MAX_DEVICES * sizeof(mb_dev_cfg_t) + 64,
-                                    MALLOC_CAP_SPIRAM);
+    uint8_t *raw = heap_caps_malloc(blob_cap_max(), MALLOC_CAP_SPIRAM);
     if (!body || !raw) {
         free(body); free(raw);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");

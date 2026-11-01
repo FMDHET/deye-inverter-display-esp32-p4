@@ -19,12 +19,21 @@ typedef enum {
  * must not be able to outlive the display: after this long deye_ctrl falls back
  * to Normal on its own (and a restart resets it, see deye_ctrl_start). */
 #define DEYE_FORCE_MAX_S  (2 * 60 * 60)
+/* The energy manager may set a longer window for its own blocks (a cheap
+ * night), but never longer than this. */
+#define DEYE_AUTO_MAX_S   (12 * 60 * 60)
 
 /* Power range deye_ctrl_apply() accepts (W). One definition for the LCD slider,
  * the HA discovery payload and the MQTT command parser -- the slider used to
  * offer 0..22000 while the backend silently clamped to this. */
 #define DEYE_POWER_MIN  1000
 #define DEYE_POWER_MAX  20000
+/* Lowest power the efficiency sweep may set (deye_ctrl_apply_sweep, retune).
+ * The inverter takes it -- 143 is plain watts, 128 is 5 A at 250 W -- but the
+ * user-facing range stays at DEYE_POWER_MIN: a Normal apply with 0 W from the
+ * display would otherwise leave a 250 W user setpoint behind for the next
+ * forced mode from Home Assistant. */
+#define DEYE_POWER_FLOOR 250
 
 /* Start the async writer task. Call once, AFTER modbus_rtu_start(). */
 void        deye_ctrl_start(void);
@@ -53,11 +62,30 @@ typedef struct {
      * a wear counter, not a statistic: it is the number the SLS guard's rate
      * limit exists to keep small. Visible in /api/deye/live. */
     uint32_t writes;
+    uint8_t  charge_soc;     /* SoC a forced charge stops at (99 manual) */
 } deye_ctrl_status_t;
 void        deye_ctrl_get_status(deye_ctrl_status_t *out);
 
 /* Apply a battery mode (user action: sets both user setpoint and applied power). */
 esp_err_t deye_ctrl_apply(deye_mode_t mode, int power_w);
+
+/* deye_ctrl_apply() for the energy manager: a forced charge stops at
+ * target_soc (written into the inverter's time-of-use SoC registers, so it
+ * holds even without us), and the mode may last limit_s (<= DEYE_AUTO_MAX_S)
+ * instead of the 2 h of a manual one. Power floor as for the sweep. */
+esp_err_t   deye_ctrl_apply_auto(deye_mode_t mode, int power_w, int target_soc, uint32_t limit_s);
+
+/* deye_ctrl_apply() for the efficiency sweep: the same, but the power may go
+ * down to DEYE_POWER_FLOOR. */
+esp_err_t   deye_ctrl_apply_sweep(deye_mode_t mode, int power_w);
+
+/* Change the power of the forced mode in force without rewriting the mode:
+ * register 143 alone when discharging, 126/128 when charging. Sets the user
+ * setpoint like an apply, but does NOT restart the 2-hour clock -- a sequence
+ * of retunes (eff_sweep) must not be able to stretch a forced mode forever.
+ * Clamped to DEYE_POWER_FLOOR..MAX (only the sweep calls it).
+ * ESP_ERR_INVALID_STATE in Normal. */
+esp_err_t   deye_ctrl_retune(int power_w);
 
 /* Throttle the discharge power without changing the user setpoint.
  * Called exclusively by the SLS grid-export guard in modbus_tcp.c.

@@ -30,6 +30,12 @@ static TaskHandle_t         s_task;
 /* When the current mode was applied (uptime ms) -- drives the automatic
  * fallback after DEYE_FORCE_MAX_S. */
 static volatile uint32_t    s_mode_ms;
+/* How long the mode in force may last (s) and the SoC a forced charge stops
+ * at. Both are the fixed defaults for anything a person sets; only the energy
+ * manager passes its own (deye_ctrl_apply_auto): a cheap night window outlasts
+ * 2 h, and its target SoC is what it bought energy for. */
+static volatile uint32_t    s_limit_s = DEYE_FORCE_MAX_S;
+static volatile uint8_t     s_charge_soc = 99;
 /* Verification result of the last apply (see write_verify). */
 static volatile uint8_t     s_checked, s_failed;
 /* Register writes issued since boot -- 142/143 sit in the inverter's EEPROM,
@@ -113,16 +119,19 @@ static void deye_ctrl_write_regs(deye_mode_t mode, int power_w)
         int rc3, rc4;
         int amps = power_w / 50;             /* WR ignores reg126(W); reacts to reg128 in A */
         rc1 = write_raw(REG_NORMAL_126, (uint16_t)power_w);
-        rc3 = write_verify(REG_NORMAL_127, 99);
+        uint8_t soc = s_charge_soc;
+        rc3 = write_verify(REG_NORMAL_127, soc);
         rc4 = write_verify(REG_NORMAL_128, (uint16_t)amps);
-        /* SOC set-points for the six time-of-use slots all to 99 % */
+        /* SOC set-points for the six time-of-use slots: the inverter stops
+         * charging there ON ITS OWN -- a target that holds even when the
+         * display is gone. 99 % for a manual charge. */
         for (int reg = 166; reg <= 171; reg++)
-            write_raw(reg, 99);
+            write_raw(reg, soc);
         /* grid-charge enable flags for the six slots all ON */
         for (int reg = 172; reg <= 177; reg++)
             write_raw(reg, 1);
-        ESP_LOGW(TAG, "Laden -> reg126=%d (rc=%d) reg127=99 (rc=%d) reg128=%dA (rc=%d) reg166-171=99 reg172-177=1 [%u/%u verified]",
-                 power_w, rc1, rc3, amps, rc4,
+        ESP_LOGW(TAG, "Laden -> reg126=%d (rc=%d) reg127=%u (rc=%d) reg128=%dA (rc=%d) reg166-171=%u reg172-177=1 [%u/%u verified]",
+                 power_w, rc1, soc, rc3, amps, rc4, soc,
                  (unsigned)(s_checked - s_failed), (unsigned)s_checked);
         return;
     }
@@ -168,6 +177,19 @@ static void deye_ctrl_write_power(int power_w)
              power_w, rc, (unsigned)(s_checked - s_failed), (unsigned)s_checked);
 }
 
+/* Charge power alone, for a retune within Forced-Charge. The full charge set
+ * is fifteen registers, twelve of them the time-of-use arrays that do not
+ * change with the power -- a power sweep would rewrite them at every step. */
+static void deye_ctrl_write_charge_power(int power_w)
+{
+    s_checked = s_failed = 0;
+    int amps = power_w / 50;
+    int rc1  = write_raw(REG_NORMAL_126, (uint16_t)power_w);
+    int rc2  = write_verify(REG_NORMAL_128, (uint16_t)amps);
+    ESP_LOGW(TAG, "Ladeleistung -> reg126=%d (rc=%d) reg128=%dA (rc=%d) [%u/%u verified]",
+             power_w, rc1, amps, rc2, (unsigned)(s_checked - s_failed), (unsigned)s_checked);
+}
+
 /* Put the inverter back to Normal and record that as the standing state.
  * Returns true when the decisive registers came back confirmed. */
 static bool fall_back_to_normal(const char *why)
@@ -200,10 +222,12 @@ static void deye_ctrl_write_pending(void)
      * the power would leave the inverter in the previous work mode. */
     bool full = s_write_full;
     s_write_full = false;
-    if (full || s_mode != DEYE_MODE_FORCE_DISCHARGE)
+    if (full || s_mode == DEYE_MODE_NORMAL)
         deye_ctrl_write_regs(s_mode, s_power_w);
+    else if (s_mode == DEYE_MODE_FORCE_DISCHARGE)
+        deye_ctrl_write_power(s_power_w);       /* throttle or retune */
     else
-        deye_ctrl_write_power(s_power_w);
+        deye_ctrl_write_charge_power(s_power_w); /* retune */
 }
 
 static void deye_ctrl_task(void *arg)
@@ -240,10 +264,10 @@ static void deye_ctrl_task(void *arg)
         }
 
         if (s_mode != DEYE_MODE_NORMAL &&
-            (uint32_t)(now_ms() - s_mode_ms) > (uint32_t)DEYE_FORCE_MAX_S * 1000u) {
+            (uint32_t)(now_ms() - s_mode_ms) > s_limit_s * 1000u) {
             char msg[80];
             snprintf(msg, sizeof(msg), "'%s' active for more than %d min",
-                     deye_ctrl_mode_name(s_mode), DEYE_FORCE_MAX_S / 60);
+                     deye_ctrl_mode_name(s_mode), (int)(s_limit_s / 60));
             fall_back_to_normal(msg);
             continue;
         }
@@ -268,7 +292,7 @@ void deye_ctrl_start(void)
         s_undo_pending = true;
         s_undo_mode    = stored;
         s_mode         = (deye_mode_t)stored;   /* the inverter really is in it */
-        if (stored_pw >= DEYE_POWER_MIN && stored_pw <= DEYE_POWER_MAX) {
+        if (stored_pw >= DEYE_POWER_FLOOR && stored_pw <= DEYE_POWER_MAX) {   /* a sweep step too */
             s_power_w = s_user_power_w = stored_pw;
         }
         ESP_LOGW(TAG, "stored mode '%s' (%u W) survived the restart in the inverter "
@@ -280,11 +304,14 @@ void deye_ctrl_start(void)
     xTaskCreatePinnedToCore(deye_ctrl_task, "deye_ctrl", 4096, NULL, 4, &s_task, 0);
 }
 
-esp_err_t deye_ctrl_apply(deye_mode_t mode, int power_w)
+static esp_err_t apply_clamped(deye_mode_t mode, int power_w, int floor_w,
+                               uint8_t charge_soc, uint32_t limit_s)
 {
     if (mode >= DEYE_MODE_COUNT) mode = DEYE_MODE_NORMAL;
-    if (power_w < DEYE_POWER_MIN) power_w = DEYE_POWER_MIN;
+    if (power_w < floor_w) power_w = floor_w;
     if (power_w > DEYE_POWER_MAX) power_w = DEYE_POWER_MAX;
+    s_charge_soc = charge_soc;
+    s_limit_s    = limit_s;
 
     s_mode         = mode;
     s_power_w      = power_w;
@@ -302,6 +329,25 @@ esp_err_t deye_ctrl_apply(deye_mode_t mode, int power_w)
     return ESP_OK;
 }
 
+esp_err_t deye_ctrl_apply(deye_mode_t mode, int power_w)
+{
+    return apply_clamped(mode, power_w, DEYE_POWER_MIN, 99, DEYE_FORCE_MAX_S);
+}
+
+esp_err_t deye_ctrl_apply_sweep(deye_mode_t mode, int power_w)
+{
+    return apply_clamped(mode, power_w, DEYE_POWER_FLOOR, 99, DEYE_FORCE_MAX_S);
+}
+
+esp_err_t deye_ctrl_apply_auto(deye_mode_t mode, int power_w, int target_soc, uint32_t limit_s)
+{
+    if (target_soc < 10)  target_soc = 10;
+    if (target_soc > 100) target_soc = 100;
+    if (limit_s < 60)                  limit_s = 60;
+    if (limit_s > DEYE_AUTO_MAX_S)     limit_s = DEYE_AUTO_MAX_S;
+    return apply_clamped(mode, power_w, DEYE_POWER_FLOOR, (uint8_t)target_soc, limit_s);
+}
+
 void deye_ctrl_get_status(deye_ctrl_status_t *out)
 {
     if (!out) return;
@@ -311,10 +357,24 @@ void deye_ctrl_get_status(deye_ctrl_status_t *out)
     out->user_power_w = s_user_power_w;
     out->age_s        = age;
     out->left_s       = (s_mode == DEYE_MODE_NORMAL) ? 0
-                        : (age >= DEYE_FORCE_MAX_S ? 0 : DEYE_FORCE_MAX_S - age);
+                        : (age >= s_limit_s ? 0 : s_limit_s - age);
+    out->charge_soc   = s_charge_soc;
     out->checked      = s_checked;
     out->failed       = s_failed;
     out->writes       = s_writes;
+}
+
+esp_err_t deye_ctrl_retune(int power_w)
+{
+    if (s_mode == DEYE_MODE_NORMAL) return ESP_ERR_INVALID_STATE;
+    if (power_w < DEYE_POWER_FLOOR) power_w = DEYE_POWER_FLOOR;
+    if (power_w > DEYE_POWER_MAX) power_w = DEYE_POWER_MAX;
+    s_power_w      = power_w;
+    s_user_power_w = power_w;
+    nvs_store_set_deye_power((uint16_t)power_w);
+    ESP_LOGI(TAG, "retune %s to %d W (queued)", deye_ctrl_mode_name(s_mode), power_w);
+    if (s_task) xTaskNotifyGive(s_task);
+    return ESP_OK;
 }
 
 esp_err_t deye_ctrl_set_throttled(int power_w)

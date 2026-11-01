@@ -119,6 +119,9 @@ Alle setzen den Header `Access-Control-Allow-Origin: *`. Das heißt: man kann si
 | `GET` | `/api/live`, `/api/devices` | 80 |
 | `GET` | `/deye`, `/deye/read`, `/deye/write`, `/api/deye/live` | 80 |
 | `POST` | `/api/deye/eff/reset` — Wirkungsgrad-Statistik zurücksetzen | 80 |
+| `GET` | `/api/deye/eff/curve` — Wirkungsgrad nach Leistung und Leistungsdurchlauf | 80 |
+| `POST` | `/api/deye/eff/curve?cmd=sweep\|stop\|reset` — Durchlauf starten/abbrechen, Kurve leeren | 80 |
+| `GET`, `POST` | `/api/ui/order` — Standardreihenfolge der Abschnitte | 80 |
 | `GET` | `/meter` — Umleitung auf `/deye#meter` | 80 |
 | `GET` | `/api/meter`, `/api/meter/manip` | 80 |
 | `GET` | `/ota`, `/recovery` | 80 |

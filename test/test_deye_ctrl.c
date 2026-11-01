@@ -23,6 +23,8 @@ static void reset_all(void)
     s_undo_tries   = 0;
     s_task         = NULL;
     s_write_full   = false;   /* deye_ctrl_apply() leaves this set */
+    s_limit_s      = DEYE_FORCE_MAX_S;
+    s_charge_soc   = 99;
     s_writes       = 0;
 }
 
@@ -332,6 +334,125 @@ static void test_the_wear_counter_sees_every_register(void)
     CHECK_I(st.writes, 18);
 }
 
+/* ------------------------------ retune ---------------------------------
+ * The efficiency sweep steps through powers within one mode. Rewriting the
+ * whole set at every step would be fifteen EEPROM writes per charge step. */
+
+static void test_a_discharge_retune_writes_only_the_sell_power(void)
+{
+    reset_all();
+    deye_ctrl_apply(DEYE_MODE_FORCE_DISCHARGE, 2000);
+    deye_ctrl_write_pending();
+    fake_rtu_reset();
+
+    CHECK_I(deye_ctrl_retune(4000), ESP_OK);
+    CHECK_I(s_user_power_w, 4000);          /* it is the user's setpoint now */
+    CHECK_I(s_power_w, 4000);
+    deye_ctrl_write_pending();
+    CHECK_I(fake_rtu_wrote(143), 1);
+    CHECK_I(fake_rtu_wrote(142), 0);
+    CHECK_I(fake_rtu_reg(143), 4000);
+}
+
+static void test_a_charge_retune_writes_only_the_charge_current(void)
+{
+    reset_all();
+    deye_ctrl_apply(DEYE_MODE_FORCE_CHARGE, 2000);
+    deye_ctrl_write_pending();
+    fake_rtu_reset();
+
+    CHECK_I(deye_ctrl_retune(6000), ESP_OK);
+    deye_ctrl_write_pending();
+    CHECK_I(fake_rtu_reg(128), 120);        /* 6000 W / 50 V */
+    CHECK_I(fake_rtu_reg(126), 6000);
+    CHECK_I(fake_rtu_wrote(127), 0);        /* SoC target untouched */
+    CHECK_I(fake_rtu_wrote(166), 0);        /* time-of-use arrays untouched */
+    CHECK_I(fake_rtu_wrote(172), 0);
+    CHECK_I(fake_rtu_log_n, 2);
+    CHECK_I(s_failed, 0);
+    CHECK_I(s_checked, 1);                  /* 128 is read back */
+}
+
+static void test_a_retune_in_normal_is_refused(void)
+{
+    reset_all();
+    CHECK_I(deye_ctrl_retune(4000), ESP_ERR_INVALID_STATE);
+    CHECK_I(s_user_power_w, 5000);
+    CHECK_I(fake_rtu_log_n, 0);
+}
+
+static void test_a_retune_does_not_restart_the_clock(void)
+{
+    reset_all();
+    deye_ctrl_apply(DEYE_MODE_FORCE_DISCHARGE, 2000);
+    deye_ctrl_write_pending();              /* the apply's full write */
+    uint32_t t0 = s_mode_ms;
+    fake_time_advance_ms(60 * 60 * 1000);
+    deye_ctrl_retune(3000);
+    CHECK_I(s_mode_ms, t0);                 /* the 2-hour limit still counts from the apply */
+    CHECK(!s_write_full);                   /* and it is a power-only write */
+}
+
+static void test_the_sweep_may_go_under_the_slider_range(void)
+{
+    reset_all();
+    deye_ctrl_apply_sweep(DEYE_MODE_FORCE_DISCHARGE, 500);
+    CHECK_I(s_user_power_w, 500);
+    deye_ctrl_retune(100);
+    CHECK_I(s_user_power_w, DEYE_POWER_FLOOR);
+    /* ...but the ordinary apply keeps its range: a Normal with 0 W from the
+     * display must not leave a 250 W setpoint behind. */
+    deye_ctrl_apply(DEYE_MODE_NORMAL, 0);
+    CHECK_I(s_user_power_w, DEYE_POWER_MIN);
+}
+
+/* --------------------------- energy manager --------------------------- */
+
+static void test_an_auto_charge_stops_at_its_target_soc(void)
+{
+    reset_all();
+    deye_ctrl_apply_auto(DEYE_MODE_FORCE_CHARGE, 3000, 80, 5 * 3600);
+    deye_ctrl_write_pending();
+    CHECK_I(fake_rtu_reg(127), 80);
+    for (uint16_t r = 166; r <= 171; r++) CHECK_I(fake_rtu_reg(r), 80);
+    CHECK_I(fake_rtu_reg(128), 60);         /* 3000 W / 50 V */
+    deye_ctrl_status_t st;
+    deye_ctrl_get_status(&st);
+    CHECK_I(st.charge_soc, 80);
+    CHECK_I(st.left_s, 5 * 3600);           /* its own window, not 2 h */
+
+    /* A manual charge afterwards is the user's: 99 % and 2 h again. */
+    deye_ctrl_apply(DEYE_MODE_FORCE_CHARGE, 3000);
+    deye_ctrl_write_pending();
+    CHECK_I(fake_rtu_reg(127), 99);
+    deye_ctrl_get_status(&st);
+    CHECK_I(st.left_s, DEYE_FORCE_MAX_S);
+}
+
+static void test_an_auto_window_is_bounded(void)
+{
+    reset_all();
+    deye_ctrl_apply_auto(DEYE_MODE_FORCE_CHARGE, 3000, 150, 48 * 3600);
+    deye_ctrl_status_t st;
+    deye_ctrl_get_status(&st);
+    CHECK_I(st.charge_soc, 100);
+    CHECK_I(st.left_s, DEYE_AUTO_MAX_S);
+    deye_ctrl_apply_auto(DEYE_MODE_FORCE_CHARGE, 100, 5, 1);
+    deye_ctrl_get_status(&st);
+    CHECK_I(st.charge_soc, 10);
+    CHECK_I(st.left_s, 60);
+    CHECK_I(st.user_power_w, DEYE_POWER_FLOOR);
+}
+
+static void test_a_retune_is_clamped_and_persisted(void)
+{
+    reset_all();
+    deye_ctrl_apply(DEYE_MODE_FORCE_CHARGE, 2000);
+    deye_ctrl_retune(50000);
+    CHECK_I(s_user_power_w, DEYE_POWER_MAX);
+    CHECK_I(nvs_store_get_deye_power(), DEYE_POWER_MAX);
+}
+
 int main(void)
 {
     RUN(test_normal_writes_the_reset_values);
@@ -352,5 +473,13 @@ int main(void)
     RUN(test_a_throttle_outside_discharge_writes_the_whole_mode);
     RUN(test_apply_asks_for_a_full_write);
     RUN(test_the_wear_counter_sees_every_register);
+    RUN(test_a_discharge_retune_writes_only_the_sell_power);
+    RUN(test_a_charge_retune_writes_only_the_charge_current);
+    RUN(test_a_retune_in_normal_is_refused);
+    RUN(test_a_retune_does_not_restart_the_clock);
+    RUN(test_a_retune_is_clamped_and_persisted);
+    RUN(test_the_sweep_may_go_under_the_slider_range);
+    RUN(test_an_auto_charge_stops_at_its_target_soc);
+    RUN(test_an_auto_window_is_bounded);
     return t_report("deye_ctrl");
 }

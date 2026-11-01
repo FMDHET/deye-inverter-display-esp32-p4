@@ -31,6 +31,7 @@ static char    s_ns[MAX_NS][16];
 static int     s_ns_n;
 
 int fake_nvs_flash_init_rc = ESP_OK;
+size_t fake_nvs_available_entries = 500;
 
 void fake_nvs_store_reset(void)
 {
@@ -38,6 +39,7 @@ void fake_nvs_store_reset(void)
     memset(s_ns, 0, sizeof(s_ns));
     s_ns_n = 0;
     fake_nvs_flash_init_rc = ESP_OK;
+    fake_nvs_available_entries = 500;
 }
 
 static entry_t *find(const char *ns, const char *key, bool create)
@@ -76,6 +78,17 @@ int fake_nvs_size(const char *ns, const char *key)
 static const char *ns_of(nvs_handle_t h)
 {
     return (h >= 1 && (int)h <= s_ns_n) ? s_ns[h - 1] : "";
+}
+
+esp_err_t nvs_get_stats(const char *part_name, nvs_stats_t *st)
+{
+    (void)part_name;
+    st->total_entries     = 756;
+    st->available_entries = fake_nvs_available_entries;
+    st->free_entries      = fake_nvs_available_entries + 126;
+    st->used_entries      = 756 - st->free_entries;
+    st->namespace_count   = 8;
+    return ESP_OK;
 }
 
 esp_err_t nvs_open(const char *ns, nvs_open_mode_t mode, nvs_handle_t *out)

@@ -1,6 +1,8 @@
 #include "modbus_rtu.h"
 #include "modbus_tcp.h"      /* grid_w source + RTU-Deye sink */
 #include "nvs_store.h"
+#include "fronius_meter.h"    /* FRM_DEFAULT_UNIT for clamp_cfg */
+#include "energy_ctr.h"
 #include "board_jc4880p443c.h"
 
 #include <string.h>
@@ -23,7 +25,14 @@ static const char *TAG = "mb_rtu";
  * migration contract, so pin them rather than trusting a comment. */
 _Static_assert(sizeof(mb_rtu_bus_cfg_t) == 8, "mb_rtu_bus_cfg_t stride");
 _Static_assert(offsetof(mb_rtu_cfg_t, gw_enabled) == 16, "gw block must follow bus[]");
-_Static_assert(sizeof(mb_rtu_cfg_t) == 24, "mb_rtu_cfg_t layout");
+_Static_assert(offsetof(mb_rtu_cfg_t, frm_enabled) == 24, "producer-meter block follows the bridge");
+_Static_assert(offsetof(mb_rtu_cfg_t, frm_serial) == 28, "serial follows the producer-meter block");
+_Static_assert(sizeof(mb_rtu_cfg_t) == 40, "mb_rtu_cfg_t layout");
+/* eff_curve_load() walks dis[], chg[] and idle as one array. */
+_Static_assert(offsetof(mb_eff_curve_t, idle) ==
+               offsetof(mb_eff_curve_t, dis) + 2 * MB_EFF_BINS * sizeof(mb_eff_bin_t),
+               "curve bins must be contiguous");
+_Static_assert(sizeof(mb_eff_curve_t) == 8 + (2 * MB_EFF_BINS + 1) * 12, "mb_eff_curve_t layout");
 
 #define RX_BUF          512
 #define TX_BUF          256
@@ -56,6 +65,8 @@ static mb_rtu_cfg_t          s_cfg;
 static mb_rtu_status_t       s_st;
 static portMUX_TYPE          s_mux = portMUX_INITIALIZER_UNLOCKED;
 static volatile int          s_grid_sp;      /* grid setpoint (W) for zero-export trick */
+static volatile uint32_t     s_hold_until_ms;/* energy manager HOLD in force until (0 = off) */
+static volatile uint32_t     s_lock_until_ms;/* the operator's lock (deye_lock), same meaning */
 
 /* Per-phase manipulation of the values served to the Deye (under s_mux), plus
  * how often the Deye has actually asked -- the /meter page shows both. */
@@ -73,6 +84,8 @@ static mb_rtu_selftest_result_t s_selftest_result = { .state = MB_RTU_SELFTEST_I
  * page never sees half of one round next to half of the previous one. */
 static mb_deye_live_t        s_live;
 static uint32_t              s_live_ms;      /* ms of the last successful round */
+static energy_ctr_t          s_ectr_chg, s_ectr_dis;  /* 516/518, 0.1 kWh  */
+static int64_t               s_ectr_try_us;  /* last counter read attempt       */
 static int64_t               s_eff_us;       /* last round integrated into e_*  */
 static int64_t               s_eff_t0_us;    /* start of the charge sums (0 = boot) */
 static int64_t               s_eff_dis_t0_us;/* start of the discharge sums        */
@@ -87,6 +100,18 @@ static float                 s_eff_prev_bat, s_eff_prev_ac;  /* previous round *
 #define EFF_STEADY_W         150.0f
 #define EFF_FULL_HOLD_US     (60LL * 60 * 1000000)   /* 100 % this long -> restart */
 #define EFF_LT_SAVE_US       (15LL * 60 * 1000000)   /* NVS write at most this often */
+
+/* Efficiency by power (mb_eff_curve_t), under s_mux like s_live. Saved on the
+ * same cadence as the lt sums, but only when something was added. */
+const uint16_t MB_EFF_BIN_LO[MB_EFF_BINS] = {
+    50, 150, 300, 500, 750,
+    1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000, 3250, 3500, 3750,
+    4000, 4250, 4500, 4750,
+    5000, 6000, 7000, 8000, 10000, 12000, 15000, 20000,
+};
+static mb_eff_curve_t        s_curve = { .ver = MB_EFF_CURVE_VER, .nbins = MB_EFF_BINS };
+static bool                  s_curve_dirty;
+static int64_t               s_curve_saved_us;
 
 /* On-demand Deye register access for the /deye web page. The HTTP handler fills
  * a request and the Deye-master bus task serves it between its regular polls
@@ -164,6 +189,13 @@ static void clamp_cfg(mb_rtu_cfg_t *c)
      * switching it on does something useful instead of answering 0x0A. */
     if (c->gw_enabled && c->gw_bus_mask == 0)
         c->gw_bus_mask = (1u << MB_RTU_BUSES) - 1u;
+    c->frm_enabled = c->frm_enabled ? 1 : 0;
+    if (c->frm_unit == 0 || c->frm_unit > 247) c->frm_unit = FRM_DEFAULT_UNIT;
+    if (c->frm_serial == 0) c->frm_serial = FRM_DEFAULT_SERIAL;
+    if (!frm_serial_txt_ok(c->frm_serial_txt)) {
+        memset(c->frm_serial_txt, 0, sizeof(c->frm_serial_txt));
+        memcpy(c->frm_serial_txt, FRM_DEFAULT_SERIAL_TXT, FRM_SERIAL_TXT_LEN);
+    }
 }
 
 static void load_cfg(void)
@@ -313,9 +345,36 @@ static void compute_served(bool fresh, float grid_w, bool *per_phase_out,
     portEXIT_CRITICAL(&s_mux);
 
     float sp_phase = (float)s_grid_sp / 3.0f;
+
+    /* HOLD (energy manager): the battery must not discharge, but may still
+     * take a surplus. The Deye drives what it is told towards 0, so tell it
+     * min(grid - setpoint, -its own AC output): while it delivers, the
+     * second term is negative and it ramps down to 0 W and stays there; once
+     * it charges from a surplus, the second term is positive and the normal
+     * regulation wins. Only on a FRESH reading (stale still means 0 below)
+     * and only with a fresh output reading -- otherwise plain normal. */
+    float hold_shift = 0.0f;
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    uint32_t hold_until = s_hold_until_ms, lock_until = s_lock_until_ms;
+    bool held = (hold_until && (int32_t)(hold_until - now_ms) > 0) ||
+                (lock_until && (int32_t)(lock_until - now_ms) > 0);
+    if (fresh && held) {
+        float out_w; uint32_t out_ms; bool out_ok;
+        portENTER_CRITICAL(&s_mux);
+        out_w  = -s_live.inv_total;               /* + = delivers on AC */
+        out_ok = s_live.valid && (s_live.blocks & MB_DEYE_BLK_OUT);
+        out_ms = s_live_ms;
+        portEXIT_CRITICAL(&s_mux);
+        if (out_ok && (uint32_t)(now_ms - out_ms) < 6000) {
+            float normal = (per_phase ? real[0] + real[1] + real[2] : grid_w) - (float)s_grid_sp;
+            float target = fminf(normal, -out_w);
+            hold_shift = (target - normal) / 3.0f;   /* <= 0, spread over the phases */
+        }
+    }
+
     float total = 0.0f;
     for (int k = 0; k < 3; k++) {
-        float v = fresh ? (real[k] - sp_phase) : 0.0f;
+        float v = fresh ? (real[k] - sp_phase + hold_shift) : 0.0f;
         if (fresh && m.enabled) {
             switch (m.ph[k].mode) {
             case MB_PH_OFFSET: v += m.ph[k].value;            break;
@@ -603,7 +662,8 @@ static void eff_lt_save(bool force)
     }
 }
 
-static void eff_lt_shutdown(void) { eff_lt_save(true); }
+static void eff_curve_save(bool force);
+static void eff_lt_shutdown(void) { eff_lt_save(true); eff_curve_save(true); }
 
 /* A stored record that is not a set of finite, non-negative energies is
  * damage, not history -- start over rather than show nonsense forever. */
@@ -621,6 +681,97 @@ static void eff_lt_load(void)
     s_lt_saved = lt;
     ESP_LOGI(TAG, "long-term efficiency: %.1f -> %.1f kWh out, %.1f -> %.1f kWh in",
              lt.dis_dc / 1000, lt.dis_ac / 1000, lt.chg_ac / 1000, lt.chg_dc / 1000);
+}
+
+int mb_eff_bin_of(float ac_w)
+{
+    int b = 0;
+    while (b + 1 < MB_EFF_BINS && ac_w >= (float)MB_EFF_BIN_LO[b + 1]) b++;
+    return b;
+}
+
+/* Add one counted round. Called under s_mux. */
+static void eff_bin_add(mb_eff_bin_t *b, float in_w, float out_w, int64_t gap_us)
+{
+    double h = (double)gap_us / 3.6e9;
+    b->in_wh  += (float)(in_w * h);
+    b->out_wh += (float)((out_w > 0.0f ? out_w : 0.0f) * h);
+    b->s      += (uint32_t)((gap_us + 500000) / 1000000);
+    if (!s_curve.start) {
+        time_t t = time(NULL);
+        if (t > 1700000000) s_curve.start = (uint32_t)t;
+    }
+    s_curve_dirty = true;
+}
+
+/* Same contract as eff_lt_save(). The record is half a kilobyte in a small
+ * partition, so it is written only when it changed -- and nvs_store refuses
+ * the write when the partition is nearly full rather than starve the
+ * settings (see nvs_store_set_deye_effc). */
+static void eff_curve_save(bool force)
+{
+    mb_eff_curve_t c;                 /* ~0.5 kB; every caller has the stack */
+    int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&s_mux);
+    bool due = s_curve_dirty && (force || now - s_curve_saved_us >= EFF_LT_SAVE_US);
+    if (due) { c = s_curve; s_curve_dirty = false; }
+    portEXIT_CRITICAL(&s_mux);
+    if (!due) return;
+    esp_err_t e = nvs_store_set_deye_effc(&c, sizeof(c));
+    s_curve_saved_us = now;
+    if (e != ESP_OK) {
+        /* Retried on the next cadence, not on the next round. */
+        ESP_LOGW(TAG, "efficiency curve not saved: %s", esp_err_to_name(e));
+        portENTER_CRITICAL(&s_mux);
+        s_curve_dirty = true;
+        portEXIT_CRITICAL(&s_mux);
+    }
+}
+
+/* A record of another layout, or with sums that are not finite and
+ * non-negative, is discarded: the curve starts over instead of showing
+ * nonsense forever. */
+static void eff_curve_load(void)
+{
+    static mb_eff_curve_t c;
+    memset(&c, 0, sizeof(c));
+    if (nvs_store_get_deye_effc(&c, sizeof(c)) != ESP_OK) return;
+    if (c.ver != MB_EFF_CURVE_VER || c.nbins != MB_EFF_BINS) {
+        ESP_LOGW(TAG, "efficiency curve of another layout (v%u, %u bins), starting over",
+                 c.ver, c.nbins);
+        return;
+    }
+    const mb_eff_bin_t *all = c.dis;   /* dis, chg, idle are contiguous */
+    for (int i = 0; i < 2 * MB_EFF_BINS + 1; i++)
+        if (!isfinite(all[i].in_wh) || !isfinite(all[i].out_wh) ||
+            all[i].in_wh < 0.0f || all[i].out_wh < 0.0f) {
+            ESP_LOGW(TAG, "efficiency curve damaged, starting over");
+            return;
+        }
+    s_curve = c;
+    uint32_t sd = 0, sc = 0;
+    for (int i = 0; i < MB_EFF_BINS; i++) { sd += c.dis[i].s; sc += c.chg[i].s; }
+    ESP_LOGI(TAG, "efficiency curve: %u h discharge, %u h charge, %u h idle",
+             (unsigned)(sd / 3600), (unsigned)(sc / 3600), (unsigned)(c.idle.s / 3600));
+}
+
+void modbus_rtu_get_eff_curve(mb_eff_curve_t *out)
+{
+    if (!out) return;
+    portENTER_CRITICAL(&s_mux);
+    *out = s_curve;
+    portEXIT_CRITICAL(&s_mux);
+}
+
+void modbus_rtu_reset_eff_curve(void)
+{
+    portENTER_CRITICAL(&s_mux);
+    memset(&s_curve, 0, sizeof(s_curve));
+    s_curve.ver   = MB_EFF_CURVE_VER;
+    s_curve.nbins = MB_EFF_BINS;
+    s_curve_dirty = true;
+    portEXIT_CRITICAL(&s_mux);
+    eff_curve_save(true);
 }
 
 static void poll_deye(int idx, int port, uint8_t slave)
@@ -727,6 +878,30 @@ static void poll_deye(int idx, int port, uint8_t slave)
 #undef RG
     }
 
+    /* ---- battery energy counters, 516..519 (see mb_deye_live_t) ----
+     * They move by 0.1 kWh at most every few minutes; every 30 s is plenty
+     * and keeps the round short. Skipped, not delayed, while someone waits
+     * for the bus. */
+    int64_t ectr_now = esp_timer_get_time();
+    if (!bus_has_waiter(idx) &&
+        (!s_ectr_try_us || ectr_now - s_ectr_try_us >= (int64_t)MB_DEYE_ECTR_POLL_MS * 1000)) {
+        s_ectr_try_us = ectr_now;
+        if (rtu_read(port, slave, 516, 4, r) == 0) {
+            uint32_t ms  = (uint32_t)(ectr_now / 1000);
+            uint32_t chg = ((uint32_t)r[1] << 16) | r[0];
+            uint32_t dis = ((uint32_t)r[3] << 16) | r[2];
+            portENTER_CRITICAL(&s_mux);
+            uint32_t pc = s_ectr_chg.val, pd = s_ectr_dis.val;
+            bool okc = energy_ctr_feed(&s_ectr_chg, chg, ms, 10.0);
+            bool okd = energy_ctr_feed(&s_ectr_dis, dis, ms, 10.0);
+            portEXIT_CRITICAL(&s_mux);
+            if (!okc || !okd)
+                ESP_LOGW(TAG, "Deye battery counters jumped %lu/%lu -> %lu/%lu -- discarded",
+                         (unsigned long)pc, (unsigned long)pd,
+                         (unsigned long)chg, (unsigned long)dis);
+        }
+    }
+
     /* ---- conversion energy (see mb_deye_live_t) ----
      * Only rounds with all three blocks fresh count, and a gap of more than
      * EFF_GAP_MAX_US (bus outage, backoff) is skipped instead of being filled
@@ -787,6 +962,10 @@ static void poll_deye(int idx, int port, uint8_t slave)
                 l.lt.dis_dc += dc * h;
                 l.lt.dis_ac += (ac > 0.0f ? ac : 0.0f) * h;
                 l.eff_ok = true;
+                portENTER_CRITICAL(&s_mux);
+                eff_bin_add(ac < MB_EFF_IDLE_W ? &s_curve.idle : &s_curve.dis[mb_eff_bin_of(ac)],
+                            dc, ac, gap);
+                portEXIT_CRITICAL(&s_mux);
             } else if (l.bat_p < 0.0f && ac < 0.0f && dc < 0.0f
                        && -dc <= -ac * 1.02f + 20.0f) {
                 l.e_chg_ac  += -ac * h;
@@ -794,6 +973,12 @@ static void poll_deye(int idx, int port, uint8_t slave)
                 l.lt.chg_ac += -ac * h;
                 l.lt.chg_dc += -dc * h;
                 l.eff_ok = true;
+                /* A trickle from the AC side is no point of the curve. */
+                if (-ac >= MB_EFF_IDLE_W) {
+                    portENTER_CRITICAL(&s_mux);
+                    eff_bin_add(&s_curve.chg[mb_eff_bin_of(-ac)], -ac, -dc, gap);
+                    portEXIT_CRITICAL(&s_mux);
+                }
             }
             /* Date the long-term sums once the clock is known (NTP). */
             if (l.eff_ok && !l.lt.start) {
@@ -809,6 +994,7 @@ static void poll_deye(int idx, int port, uint8_t slave)
     }
 
     l.valid = true;
+    l.rounds++;
     portENTER_CRITICAL(&s_mux);
     /* `l` was copied from s_live at the top of this round; a reset that came
      * in since then must not be undone by writing the old sums back. */
@@ -924,6 +1110,7 @@ static void do_master(int idx, int port, const mb_rtu_bus_cfg_t *c)
         s_next_poll_us[idx] = esp_timer_get_time() + DEYE_POLL_MS * 1000;
         poll_deye(idx, port, c->slave_id);
         eff_lt_save(false);
+        eff_curve_save(false);
     }
 
     /* Break the poll interval early for a self-test or a queued /deye or
@@ -1049,6 +1236,42 @@ const char *modbus_rtu_role_name(uint8_t role)
 
 int modbus_rtu_get_grid_setpoint(void) { return s_grid_sp; }
 
+void modbus_rtu_set_hold(uint32_t for_s)
+{
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (for_s > 3600) for_s = 3600;
+    uint32_t until = for_s ? now + for_s * 1000u : 0;
+    if (for_s && !until) until = 1;                 /* 0 means "off" */
+    if ((s_hold_until_ms != 0) != (until != 0))
+        ESP_LOGI(TAG, "battery HOLD %s", until ? "on" : "off");
+    s_hold_until_ms = until;
+}
+
+bool modbus_rtu_hold_active(void)
+{
+    uint32_t until = s_hold_until_ms;
+    return until && (int32_t)(until - (uint32_t)(esp_timer_get_time() / 1000)) > 0;
+}
+
+/* The operator's lock: the same hold as the energy manager's, from a second
+ * source, so neither can lift the other's. */
+void modbus_rtu_set_lock(uint32_t for_s)
+{
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (for_s > 3600) for_s = 3600;
+    uint32_t until = for_s ? now + for_s * 1000u : 0;
+    if (for_s && !until) until = 1;
+    if ((s_lock_until_ms != 0) != (until != 0))
+        ESP_LOGI(TAG, "battery LOCK %s", until ? "on" : "off");
+    s_lock_until_ms = until;
+}
+
+bool modbus_rtu_lock_active(void)
+{
+    uint32_t until = s_lock_until_ms;
+    return until && (int32_t)(until - (uint32_t)(esp_timer_get_time() / 1000)) > 0;
+}
+
 /* The setpoint shifts what the inverter is told the grid does, so a runaway
  * value here is a runaway inverter. The web form already refuses anything
  * beyond +-30 kW; the module itself accepted any int -- also straight from
@@ -1133,6 +1356,13 @@ void modbus_rtu_get_deye_live(mb_deye_live_t *out)
     out->eff_dis_s    = (uint32_t)((us - s_eff_dis_t0_us) / 1000000);
     out->eff_dis_full = s_eff_dis_full;
     out->full_s       = s_full_since_us ? (uint32_t)((us - s_full_since_us) / 1000000) : 0;
+    out->ectr_ok      = s_ectr_chg.valid && s_ectr_dis.valid;
+    if (out->ectr_ok) {
+        uint32_t ac = (uint32_t)(now - s_ectr_chg.ms), ad = (uint32_t)(now - s_ectr_dis.ms);
+        out->ectr_age_ms = ac > ad ? ac : ad;
+        out->bat_chg_kwh = s_ectr_chg.val / 10.0;
+        out->bat_dis_kwh = s_ectr_dis.val / 10.0;
+    }
     portEXIT_CRITICAL(&s_mux);
 }
 
@@ -1331,7 +1561,8 @@ esp_err_t modbus_rtu_start(void)
         ESP_LOGW(TAG, "grid setpoint from NVS: %d W (meter reports real - setpoint)", s_grid_sp);
     load_manip();
     eff_lt_load();
-    s_lt_saved_us = esp_timer_get_time();
+    eff_curve_load();
+    s_lt_saved_us = s_curve_saved_us = esp_timer_get_time();
     esp_register_shutdown_handler(eff_lt_shutdown);
     if (!s_deye_req_mtx) s_deye_req_mtx = xSemaphoreCreateMutex();
     for (int i = 0; i < MB_RTU_BUSES; i++) {

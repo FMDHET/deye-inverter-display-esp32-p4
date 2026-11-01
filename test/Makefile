@@ -4,22 +4,32 @@
 # the tests run before anything has been fetched. Building them through the
 # firmware's CMake would also run its build-number target and bump the counter.
 
+.DEFAULT_GOAL := all
+
 CC      ?= cc
 CFLAGS  ?= -std=gnu11 -g -O1
 WARN     = -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers
-INC      = -I. -Ifakes -I../main
+INC      = -I. -Ifakes -I../main -Ivendor/cjson
 LDLIBS   = -lm
 BUILD    = build
 
 # One binary per suite. A suite #includes the .c file under test, so two suites
 # must never be linked together.
 SUITES = test_modbus_rtu test_webauth test_deye_ctrl test_nvs_store test_sls_guard \
-         test_dns_hijack
+         test_dns_hijack test_eff_sweep test_em_cfg test_price_feed test_pv_forecast \
+         test_load_profile test_fronius_storage test_em_planner test_bat_lock test_sunspec_mppt test_deye_force \
+         test_energy_ctr test_em_hist
 
 OBJ_COMMON = $(BUILD)/harness.o $(BUILD)/fakes/fakes.o
 OBJ_HTTP   = $(BUILD)/fakes/fakes_http.o
 OBJ_RTU    = $(BUILD)/fakes/fakes_rtu.o
 OBJ_NVS    = $(BUILD)/fakes/fakes_nvs.o
+# cJSON from ESP-IDF (MIT, test/vendor/cjson) for the suites that parse JSON.
+# Built without our warning set: it is not our code.
+OBJ_CJSON  = $(BUILD)/vendor/cjson/cJSON.o
+$(OBJ_CJSON): vendor/cjson/cJSON.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -Ivendor/cjson -c -o $@ $<
 
 BINS = $(addprefix $(BUILD)/,$(SUITES))
 
@@ -41,6 +51,35 @@ $(BUILD)/test_webauth: $(BUILD)/test_webauth.o $(OBJ_COMMON) $(OBJ_HTTP)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BUILD)/test_deye_ctrl: $(BUILD)/test_deye_ctrl.o $(OBJ_COMMON) $(OBJ_RTU)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
+# eff_sweep brings its own deye_ctrl and live-value fakes (in the suite).
+$(BUILD)/test_eff_sweep: $(BUILD)/test_eff_sweep.o $(OBJ_COMMON)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
+# Energy manager suites. Each brings its own fakes for the modules it calls
+# (https_get, modbus_tcp status, ...) inside the suite file.
+$(BUILD)/test_price_feed: $(BUILD)/test_price_feed.o $(OBJ_COMMON) $(OBJ_CJSON)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_pv_forecast: $(BUILD)/test_pv_forecast.o $(OBJ_COMMON) $(OBJ_CJSON)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_load_profile: $(BUILD)/test_load_profile.o $(OBJ_COMMON)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_em_planner: $(BUILD)/test_em_planner.o $(BUILD)/harness.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_fronius_storage: $(BUILD)/test_fronius_storage.o $(OBJ_COMMON)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_bat_lock: $(BUILD)/test_bat_lock.o $(OBJ_COMMON)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_sunspec_mppt: $(BUILD)/test_sunspec_mppt.o $(BUILD)/harness.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_deye_force: $(BUILD)/test_deye_force.o $(OBJ_COMMON)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_energy_ctr: $(BUILD)/test_energy_ctr.o $(BUILD)/harness.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_em_hist: $(BUILD)/test_em_hist.o $(OBJ_COMMON)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_em_cfg: $(BUILD)/test_em_cfg.o $(OBJ_COMMON)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 # sls_guard is a pure header: no fakes at all, not even a clock.

@@ -34,21 +34,27 @@
           --acc:#1e7b4e; --accfg:#ffffff; --acc-soft:rgba(30,123,78,.12);
           --warn:#a9560f; --err:#b42318; --man:#7b3fa0; --link:#245fb0;
           --bd:#dde1e7; --bdi:#7f889a; --inp:#ffffff; --btn:#e8ebf0; --dis:#eef0f3;
-          --warnbg:#fff4e0; --warnfg:#6b3d05; }
+          --warnbg:#fff4e0; --warnfg:#6b3d05;
+          --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#6250d6;
+          --wind:#96cfd6; --sun:#e9aa80; --price:#7b8ba8; }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) { color-scheme: dark;
           --bg:#0f1115; --tbg:#171a21; --fg:#e6e6e6; --mut:#8a8f99;
           --acc:#3aa675; --accfg:#002211; --acc-soft:rgba(58,166,117,.18);
           --warn:#d4823b; --err:#f2705f; --man:#c78bd9; --link:#9bb1d1;
           --bd:#2a2f3a; --bdi:#6a7589; --inp:#222632; --btn:#2a2f3a; --dis:#1b1e27;
-          --warnbg:#221a10; --warnfg:#e8cba6; }
+          --warnbg:#221a10; --warnfg:#e8cba6;
+          --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#9085e9;
+          --wind:#4c9aa3; --sun:#c98157; --price:#8193b3; }
   }
   :root[data-theme="dark"] { color-scheme: dark;
           --bg:#0f1115; --tbg:#171a21; --fg:#e6e6e6; --mut:#8a8f99;
           --acc:#3aa675; --accfg:#002211; --acc-soft:rgba(58,166,117,.18);
           --warn:#d4823b; --err:#f2705f; --man:#c78bd9; --link:#9bb1d1;
           --bd:#2a2f3a; --bdi:#6a7589; --inp:#222632; --btn:#2a2f3a; --dis:#1b1e27;
-          --warnbg:#221a10; --warnfg:#e8cba6; }
+          --warnbg:#221a10; --warnfg:#e8cba6;
+          --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#9085e9;
+          --wind:#4c9aa3; --sun:#c98157; --price:#8193b3; }
   * { box-sizing:border-box; }
   body { margin:0; font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;
          color:var(--fg); background:var(--bg); -webkit-text-size-adjust:100%;
@@ -130,6 +136,7 @@
  * letzten Runde nicht geantwortet hat -- die Zahlen stehen dann noch da, sind
  * aber sichtbar von gestern. */
   th .m { display:none; }
+  .mobonly { display:none; }
   #manipFold > summary { list-style:none; cursor:default; }
   #manipFold > summary::-webkit-details-marker { display:none; }
   #manipFold > summary h2 { display:inline; }
@@ -192,11 +199,207 @@
                      border-radius:5px; padding:6px 8px; }
   #sysStatus { font-size:12px; color:var(--mut); min-height:1.2em; white-space:pre-wrap; }
 
+/* ---- Wirkungsgrad nach Leistung ----
+ * Zwei Reihen, Entladen (--s1) und Laden (--s2), als Kategorie-Farben gegen
+ * beide Flaechen geprueft (CVD und Kontrast). Text traegt nie die
+ * Reihenfarbe; die Zuordnung leisten Legende und Beschriftung am Linienende. */
+  .cv-legend { display:flex; gap:6px 16px; flex-wrap:wrap; font-size:12px; color:var(--mut); margin:0 0 6px; }
+  .cv-key { display:inline-flex; align-items:center; gap:6px; }
+  .cv-key i { display:inline-block; width:16px; height:2px; border-radius:1px; }
+  .cv-key i.ring { width:10px; height:10px; border-radius:50%; border:2px solid var(--mut); }
+  .cv-key i.dash { background:repeating-linear-gradient(90deg, var(--mut) 0 4px, transparent 4px 7px); }
+  .cv-chart { position:relative; touch-action:pan-y; }
+  .cv-chart svg { display:block; width:100%; overflow:visible; }
+  .cv-chart text { fill:var(--mut); font-size:11px; font-variant-numeric:tabular-nums; }
+  .cv-chart text.lab { fill:var(--fg); font-size:12px; }
+  .cv-tip { position:absolute; pointer-events:none; background:var(--tbg); border:1px solid var(--bdi);
+            border-radius:6px; padding:6px 8px; font-size:12px; color:var(--fg); white-space:nowrap;
+            box-shadow:0 2px 8px rgba(0,0,0,.18); display:none; z-index:5; line-height:1.4; }
+  .cv-tip .k { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .cv-tip .m { color:var(--mut); }
+  #cvSummary { font-size:13px; margin:0 0 10px; }
+  #cvSummary b { font-variant-numeric:tabular-nums; }
+  .cv-empty { color:var(--mut); font-size:12px; padding:28px 0; text-align:center; }
+  #cvTable td, #cvTable th, #swTable td, #swTable th { white-space:nowrap; }
+  #tab-meter #swForm input[type=number] { width:80px; }
+  #tab-meter #swTable td:nth-child(2), #tab-meter #swTable th:nth-child(2) { text-align:left; }
+  .prog { height:6px; background:var(--btn); border-radius:3px; overflow:hidden; margin:8px 0; }
+  .prog > div { height:100%; background:var(--acc); width:0; transition:width .4s; }
+  tr.cur td { background:var(--acc-soft); }
+  /* Einklappbare Karten: zu beim Laden der Seite, die Kopfzeile sagt im
+   * zugeklappten Zustand, was drin steht (Bestwert bzw. Stand des Durchlaufs). */
+  details.fold > summary { list-style:none; cursor:pointer; display:flex; align-items:baseline;
+                           gap:4px 12px; flex-wrap:wrap; }
+  details.fold > summary::-webkit-details-marker { display:none; }
+  details.fold > summary h2 { margin:0; }
+  details.fold > summary h2::after { content:" \25B8"; }
+  details.fold[open] > summary h2::after { content:" \25BE"; }
+  details.fold[open] > summary { margin-bottom:8px; }
+  details.fold[open] > summary .hint { display:none; }
+
+/* ---- Abschnitte sortieren ----
+ * Griff oben rechts in jeder Karte des Zaehler-Tabs; ziehen mit Maus oder
+ * Finger (Pointer-Events -- natives Drag&Drop kennt das iPhone nicht),
+ * Pfeiltasten auf dem fokussierten Griff. Die Reihenfolge liegt im Browser. */
+  #tab-meter > .card[data-sec] { position:relative; padding-right:40px; }
+  .sec-grip { position:absolute; top:6px; right:6px; width:28px; height:28px; padding:0;
+              display:flex; align-items:center; justify-content:center; background:transparent;
+              border:1px solid transparent; border-radius:5px; color:var(--mut);
+              cursor:grab; touch-action:none; }
+  .sec-grip:hover { border-color:var(--bdi); color:var(--fg); }
+  .sec-grip svg { width:14px; height:14px; fill:currentColor; }
+  #tab-meter > .card.dragging { opacity:.85; box-shadow:0 6px 20px rgba(0,0,0,.25);
+                                 border-color:var(--acc); z-index:10; }
+  #tab-meter > .card.dragging .sec-grip { cursor:grabbing; color:var(--acc); }
+  body.sorting { user-select:none; -webkit-user-select:none; }
+  .secbar { margin:4px 0 14px; display:flex; gap:6px 8px; flex-wrap:wrap; justify-content:flex-end;
+            align-items:center; }
+  .secbar button { font-size:11px; color:var(--mut); }
+  tr.skip td { color:var(--mut); }
+
+/* ---- Energie-Tab ----
+ * Diagramme nutzen die Bausteine der Wirkungsgradkurve (.cv-chart, .cv-tip,
+ * .cv-legend). Farben: Laden --s1, Halten --s2, Normal neutral (--bdi);
+ * PV-Felder --s3..--s6, dann --s1/--s2. Text traegt nie die Reihenfarbe. */
+  .seg { display:inline-flex; border:1px solid var(--bdi); border-radius:6px; overflow:hidden; }
+  .seg button { border:none; border-radius:0; background:transparent; color:var(--mut); padding:5px 12px; }
+  .seg button + button { border-left:1px solid var(--bdi); }
+  .seg button.on { background:var(--acc); color:var(--accfg); font-weight:600; }
+  .cv-key i.sq { width:10px; height:10px; border-radius:2px; }
+  .cv-tip .lk { display:inline-block; width:10px; height:2px; border-radius:1px; margin-right:6px; vertical-align:middle; }
+  .cv-tip .sk { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; }
+  .cv-tip b { font-variant-numeric:tabular-nums; }
+  .em-wide { grid-column:1 / -1; }
+  #emTNow .val { display:flex; align-items:center; gap:8px; }
+  #emTNow .foot { font-size:12px; color:var(--fg); }
+  .em-dot { display:inline-block; width:12px; height:12px; border-radius:50%; flex:none; }
+  #tab-em h3 { margin:16px 0 8px; }
+  #tab-em details.fold > h3:first-of-type { margin-top:4px; }
+  .em-grid { display:grid; gap:8px 12px; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); margin:0 0 10px; }
+  .em-grid label { display:flex; flex-direction:column; gap:3px; color:var(--mut); font-size:12px; min-width:0; }
+  .em-grid input, .em-grid select { width:100%; min-width:0; }
+  .em-span2 { grid-column:span 2; }
+  .em-inl { display:flex; gap:6px; }
+  .em-inl input { flex:1 1 auto; }
+  .em-geo { display:flex; flex-direction:column; gap:4px; margin:0 0 10px; align-items:flex-start; }
+  .em-geo button { text-align:left; }
+  .em-plane { border:1px solid var(--bd); border-radius:6px; padding:8px 10px; margin:0 0 8px; background:var(--bg); }
+  .em-plane .hd { display:flex; align-items:center; gap:8px; margin:0 0 6px; font-weight:600; }
+  .em-plane .hd .spacer { flex:1; }
+  .em-plane .em-grid { margin:0; }
+  .em-az { display:flex; gap:4px; margin-top:3px; }
+  .em-az button { flex:1 1 0; padding:3px 4px; font-size:11px; }
+  #emPvTbl td, #emPvTbl th, #emTestOut td, #emTestOut th { white-space:nowrap; }
+  #emPvTbl td:nth-child(n+2), #emPvTbl th:nth-child(n+2),
+  #emTestOut td:nth-child(n+2), #emTestOut th:nth-child(n+2) { text-align:right; }
+  #emPvTbl tr.sum td { font-weight:600; }
+  #emTestOut table { margin:4px 0 10px; }
+  #emFrKv { max-width:720px; }
+  /* Akkus sperren: Name und Zustand in festen Spalten, damit beide Zeilen fluchten */
+  .em-lock .em-lock-name, .em-force .em-lock-name { flex:0 0 6.5em; font-size:13px; }
+  .em-lock .em-lock-state { flex:0 0 15em; font-size:13px; }
+  .em-lock { margin:0 0 6px; }
+  .em-force label { font-size:12px; color:var(--mut); display:flex; align-items:center; gap:6px; }
+  .em-force input[type=number] { width:6em; }
+  @media (max-width:640px) { .em-force .em-force-state { margin-left:0 !important; } }
+  /* Datenquellen: Zustand mit Zeichen und Wort, nicht nur Farbe */
+  .em-src { margin:10px 0 0; }
+  .em-src > summary { cursor:pointer; font-size:13px; font-weight:600; }
+  .em-src-t { width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+  .em-src-t th { text-align:left; font-weight:500; color:var(--mut); padding:4px 8px 4px 0; border-bottom:1px solid var(--bd); }
+  .em-src-t td { padding:5px 8px 5px 0; border-bottom:1px solid var(--bd); vertical-align:top; }
+  .em-src-t .host { display:block; color:var(--mut); font-size:12px; }
+  .em-src-t .err { display:block; color:var(--err); font-size:12px; }
+  .src-ok { color:var(--acc); font-weight:600; }
+  .src-bad { color:var(--err); font-weight:600; }
+  .src-wait { color:var(--warn); font-weight:600; }
+  .src-off { color:var(--mut); }
+  @media (max-width:640px) { .em-src-t .host { display:none; } }
+  /* Werte mit Schieberegler: Wert rechtsbuendig, Regler daneben */
+  #emFrKv .kv.sl { align-items:center; gap:12px; }
+  #emFrKv .kv.sl b { margin-left:auto; text-align:right; }
+  /* Eigene Schieberegler statt der Browserform: der Knopf laeuft bis buendig an
+   * die Enden der Spur, die Fuellung endet genau unter seiner Mitte (--p = 0..1,
+   * vom Skript gesetzt). */
+  #emFrKv .kv.sl input[type=range] {
+    --th:20px; --tk:6px; --p:0;
+    flex:0 0 200px; width:200px; height:var(--th); margin:0; padding:0;
+    -webkit-appearance:none; appearance:none; background:transparent; cursor:pointer;
+    border:0; border-radius:0; box-shadow:none; min-height:0;   /* nicht die Form der Textfelder */
+  }
+  #emFrKv .kv.sl input[type=range]:disabled { opacity:.45; cursor:not-allowed; background:transparent; }
+  #emFrKv .kv.sl input[type=range]::-webkit-slider-runnable-track {
+    height:var(--tk); border-radius:calc(var(--tk) / 2);
+    background:linear-gradient(var(--s1), var(--s1)) 0 / calc(var(--th) / 2 + var(--p) * (100% - var(--th))) 100% no-repeat,
+               var(--bd);
+  }
+  #emFrKv .kv.sl input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:var(--th); height:var(--th); border-radius:50%;
+    margin-top:calc((var(--tk) - var(--th)) / 2);
+    background:var(--tbg); border:2px solid var(--s1); box-sizing:border-box;
+    box-shadow:0 1px 3px rgba(0,0,0,.25);
+  }
+  #emFrKv .kv.sl input[type=range]::-moz-range-track { height:var(--tk); border-radius:calc(var(--tk) / 2); background:var(--bd); }
+  #emFrKv .kv.sl input[type=range]::-moz-range-progress { height:var(--tk); border-radius:calc(var(--tk) / 2); background:var(--s1); }
+  #emFrKv .kv.sl input[type=range]::-moz-range-thumb {
+    width:var(--th); height:var(--th); border-radius:50%; box-sizing:border-box;
+    background:var(--tbg); border:2px solid var(--s1); box-shadow:0 1px 3px rgba(0,0,0,.25);
+  }
+  #emFrKv .kv.sl input[type=range]:focus-visible { outline:none; }
+  #emFrKv .kv.sl input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow:0 0 0 3px var(--acc-soft); }
+  @media (max-width:640px) { #emFrKv .kv.sl input[type=range] { flex:1 1 100%; width:100%; } }
+  .em-ctl { margin:0 0 6px; }
+  .em-sp { flex:1; }
+  .em-leg { margin:6px 0 0; }
+  .cv-chart text.em-pl { fill:#fff; font-size:12px; font-weight:700; }
+  .cv-tip .em-tt { width:auto; margin:2px 0 0; }
+  .cv-tip .em-tt td, .cv-tip .em-tt th { padding:0 0 0 10px; border:0; text-align:right; font-size:12px;
+                                         position:static; background:none; box-shadow:none; }
+  .cv-tip .em-tt td:first-child { padding-left:0; color:var(--mut); }
+  .cv-tip .em-tt td:last-child { text-align:left; }
+  .cv-tip .em-tt th { color:var(--mut); font-weight:400; }
+  #tab-em button:disabled { opacity:.45; cursor:not-allowed; }
+  #tab-em button:disabled:hover { border-color:var(--bdi); }
+
 /* ---- iPhone / schmale Schirme ---------------------------------------
  * Ein Breakpoint. Der Zaehler-Tab bleibt bewusst unangetastet: seine
  * mehrspaltigen Tabellen scrollen per .xscroll in sich, das ist oben schon
  * so entschieden worden. Hier geht es um alles andere. */
   @media (max-width:640px) {
+    /* Erklaerungen gehoeren auf den Schreibtisch, nicht aufs Telefon */
+    .nomob { display:none !important; }
+    .mobonly { display:inline !important; }
+
+    /* Energie: die drei Abruf-Knoepfe gleich breit, mit kurzer Aufschrift */
+    #emRefRow { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; }
+    #emRefRow button { font-size:0; padding:6px 4px; }
+    #emRefRow button::after { content:attr(data-short); font-size:14px; }
+    #emRefRow .hint { grid-column:1 / -1; }
+
+    /* Akkus sperren: oben Name und Zustand, darunter Dauer + zwei Knoepfe */
+    .em-lock { display:grid; grid-template-columns:minmax(0, 1fr) auto auto; gap:6px 8px; align-items:center; }
+    .em-lock .em-lock-name { grid-column:1; }
+    .em-lock .em-lock-state { grid-column:2 / 4; justify-self:end; text-align:right; }
+    .em-lock select { grid-column:1; width:100%; min-width:0; }
+    .em-lock .em-lock-msg { grid-column:1 / -1; }
+    .em-lock .em-lock-msg:empty { display:none; }
+    .em-lock button { padding:8px 10px; }
+
+    /* Zwangsbetrieb: drei Spalten -- Name/Richtung, die drei Werte mit
+       Beschriftung darueber, die zwei Knoepfe */
+    .em-force .formrow { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px 8px; align-items:end; }
+    .em-force .em-lock-name { grid-column:1; align-self:center; }
+    .em-force select { grid-column:2 / 4; width:100%; min-width:0; }
+    .em-force label { flex-direction:column; align-items:stretch; gap:2px; }
+    .em-force input[type=number] { width:100%; min-width:0; }
+    .em-force button[data-go="1"] { grid-column:1 / 3; }
+    .em-force button[data-go="0"] { grid-column:3; }
+    .em-force .em-force-state { margin:4px 0 12px 0 !important; }
+
+    /* Zaehler: die Knoepfe zur Reihenfolge untereinander, volle Breite */
+    .secbar { display:grid; grid-template-columns:1fr; gap:6px; }
+
     body { padding-left:calc(12px + env(safe-area-inset-left));
            padding-right:calc(12px + env(safe-area-inset-right)); }
 
@@ -224,7 +427,13 @@
     nav.tabs { gap:4px; flex-wrap:nowrap; }
     nav.tabs button { flex:1 1 0; min-width:0; padding:10px 4px; font-size:12px; min-height:44px;
                       white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    nav.tabs button.on { font-size:12px; }   /* 12 px: alle drei Titel passen bei 375 px ohne "..." */
+    nav.tabs button.on { font-size:12px; }
+    /* Fuenf Tabs: die langen Titel passen bei 375 px nicht mehr nebeneinander,
+       dort stehen die Kurztitel aus data-short. */
+    nav.tabs button, nav.tabs button.on { font-size:0; }
+    nav.tabs button::after { content:attr(data-short); font-size:12px; }
+    /* Fronius-Tab: am Telefon nur die Zahlen, keine Phasen/IP-Zeile. */
+    #tab-frm .tile .foot { display:none; }
 
     .card { padding:10px; }
     .formrow { gap:8px; }
@@ -402,11 +611,36 @@
     header.hub .spacer { display:none; }
     header.hub a.ext { padding:4px 0; }
     .theme button { min-height:32px; padding:4px 10px; }
+    /* Wirkungsgrad: am Telefon nur die Kurve und ihr Ergebnissatz, vom
+       Durchlauf nur der Stand. Tabellen, Formular, Knoepfe: Rechner. */
+    #tab-meter #cvFold, #tab-meter #cvFoot, #tab-meter #swForm, #tab-meter #swWarn,
+    #tab-meter #swTblWrap, #tab-meter #swCheck .det, #tab-meter #cvSummary .det { display:none; }
+    #tab-meter > .card[data-sec] { padding-right:34px; }
+    /* Ohne min-height:0 erbt der Griff die 44 px aller Knoepfe: hoeher als
+       eine eingeklappte Karte, die Punkte rutschen unter die Titelzeile.
+       32 px hoch, Mitte auf der Titelzeile (Karte 8 px + halbe h2). */
+    .sec-grip { top:2px; right:3px; min-height:0; height:32px; }
     #manipFold > summary { cursor:pointer; }
     #manipFold > summary h2 { margin:0; }
     #manipFold > summary::after { content:" ▸"; color:var(--mut); }
     #manipFold[open] > summary::after { content:" ▾"; }
     #manipFold[open] > summary { margin-bottom:8px; }
+
+    /* Energie-Tab: zwei Felder je Zeile, Eingaben fuellen ihre Spalte. Die
+       Betriebsart ueber die volle Breite, damit jeder Knopf ein Fingerziel ist. */
+    #tab-em .em-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    #tab-em .seg { display:flex; flex:1 1 100%; }
+    #tab-em .em-ctl .seg { flex:1 1 auto; }
+    #tab-em .em-ctl .em-sp { display:none; }
+    #tab-em .em-ctl > .hint { flex:0 0 auto; }
+    #tab-em .em-ctl > .hint:empty { display:none; }
+    #tab-em .seg button { flex:1 1 0; min-height:40px; padding:6px 4px; }
+    #tab-em .em-az button { min-height:36px; padding:4px; font-size:13px; }
+    #tab-em .em-inl button { flex:none; }
+    #tab-em .xscroll > table { min-width:0; }
+    #emPvTbl td, #emPvTbl th { padding:5px 4px; white-space:normal; }
+    #emPvTbl th { font-size:11px; line-height:1.2; vertical-align:bottom; }
+    #emTNow .foot { font-size:13px; }
   }
 </style></head>
 <body>
@@ -426,14 +660,16 @@
 </header>
 
 <nav class="tabs">
-  <button data-tab="meter" class="on">Z&auml;hler &amp; Deye</button>
-  <button data-tab="regs">Modbus-Register</button>
-  <button data-tab="sys">System &amp; Update</button>
+  <button data-tab="meter" class="on" data-short="Z&auml;hler">Z&auml;hler &amp; Deye</button>
+  <button data-tab="em" data-short="Energie">Energie</button>
+  <button data-tab="regs" data-short="Register">Modbus-Register</button>
+  <button data-tab="frm" data-short="Fronius">Fronius-Simulator</button>
+  <button data-tab="sys" data-short="System">System &amp; Update</button>
 </nav>
 
 <section class="tab" id="tab-meter">
   <p class="lead">Was der Eltako-Z&auml;hler misst &mdash; und was die SDM630-Emulation dem Deye davon erz&auml;hlt.</p>
-<div class="card">
+<div class="card" data-sec="live">
   <h2>Was der Deye daraus macht &mdash; seine eigenen Messwerte</h2>
   <div class="formrow" style="margin:0 0 12px;">
     <span id="lvState" class="pill">Wechselrichter &hellip;</span>
@@ -448,7 +684,99 @@
   <p class="hint" style="margin:12px 0 0;" id="lvDelta"></p>
 </div>
 
-<div class="card">
+<div class="card" data-sec="curve" id="cardCurve">
+<details class="fold" id="cvCard">
+  <summary><h2>Wirkungsgrad nach Leistung</h2><span class="hint" id="cvSum"></span></summary>
+  <p id="cvSummary">&hellip;</p>
+  <div class="cv-legend" aria-hidden="true">
+    <span class="cv-key"><i style="background:var(--s1)"></i>Entladen (Batt&rarr;AC)</span>
+    <span class="cv-key"><i style="background:var(--s2)"></i>Laden (AC&rarr;Batt)</span>
+    <span class="cv-key"><i class="ring"></i>Stufe aus dem Durchlauf</span>
+    <span class="cv-key"><i class="dash"></i>Verlustmodell</span>
+  </div>
+  <div class="cv-chart" id="cvChart" role="img" aria-label="Wirkungsgrad über der AC-Leistung"></div>
+  <details id="cvFold">
+    <summary class="hint">Tabelle je Leistungsstufe</summary>
+    <table id="cvTable">
+      <thead><tr><th>AC-Leistung</th><th>Entladen &eta;</th><th>gemessen</th><th>Laden &eta;</th><th>gemessen</th></tr></thead>
+      <tbody id="cvBody"></tbody>
+    </table>
+  </details>
+  <div class="formrow" id="cvFoot" style="margin:10px 0 0;">
+    <button type="button" id="btnCurveReset">Kurve zurücksetzen</button>
+    <span class="hint" id="cvInfo"></span>
+  </div>
+  <p class="hint expl" style="margin:10px 0 0;">
+    Jede Pollrunde, die auch in den Wirkungsgrad-Durchschnitt oben eingeht
+    (beide Seiten ruhig, Bilanz plausibel), wird nach der AC-Leistung einer
+    Stufe zugeordnet. Punkte mit weniger als 5&nbsp;min Messzeit sind blass. Das
+    Verlustmodell (fester Eigenverbrauch + linearer + quadratischer Anteil)
+    ist an die Stufen angepasst; sein Maximum liegt bei &radic;(fest/quadratisch).
+    Unter etwa 500&nbsp;W machen schon 20&nbsp;W Messfehler des Deye mehrere
+    Prozentpunkte aus &ndash; dort ist die Kurve eine Tendenz.
+  </p>
+</details>
+</div>
+
+<div class="card" data-sec="sweep" id="cardSweep">
+<details class="fold" id="swCard">
+  <summary><h2>Leistungsdurchlauf</h2><span class="hint" id="swSum"></span></summary>
+  <div class="formrow" style="margin:0;">
+    <span id="swState" class="pill">Durchlauf &hellip;</span>
+    <span class="hint" id="swInfo"></span>
+  </div>
+  <div class="prog" id="swProg" hidden><div></div></div>
+  <p class="hint" id="swCheck" style="margin:6px 0 0;"></p>
+  <p class="warn" id="swWarn" style="margin:12px 0;">
+    <b>&#9888; Achtung:</b> Der Durchlauf zwingt den Akku nacheinander auf feste
+    Lade- und Entladeleistungen &ndash; geladen wird dabei aus dem Netz, entladen
+    ins Netz. Der SLS-Schutz drosselt die Einspeisung weiter. Am besten nachts
+    laufen lassen: dann steht die PV, und der Eltako-Netzz&auml;hler kann die
+    AC-Messung des Deye gegenpr&uuml;fen. Eine Bedienung am Display oder per MQTT
+    beendet den Durchlauf sofort, ohne die neue Einstellung zu &uuml;berschreiben.
+  </p>
+  <div id="swForm">
+    <div class="formrow">
+      <label for="swDirs">Richtung</label>
+      <select id="swDirs">
+        <option value="3">Entladen und Laden</option>
+        <option value="1">nur Entladen</option>
+        <option value="2">nur Laden</option>
+      </select>
+      <label for="swFrom">von [W]</label>
+      <input type="number" id="swFrom" min="250" max="20000" step="250" value="500">
+      <label for="swTo">bis [W]</label>
+      <input type="number" id="swTo" min="250" max="20000" step="250" value="5000">
+      <label for="swStep">Schritt [W]</label>
+      <input type="number" id="swStep" min="100" max="10000" step="50" value="500">
+    </div>
+    <div class="formrow">
+      <label for="swDwell">je Stufe [s]</label>
+      <input type="number" id="swDwell" min="30" max="1800" step="10" value="30">
+      <label for="swSettle">davon Einschwingen [s]</label>
+      <input type="number" id="swSettle" min="10" max="600" step="5" value="10">
+      <label for="swSmin">SoC min [%]</label>
+      <input type="number" id="swSmin" min="5" max="90" step="1" value="20">
+      <label for="swSmax">SoC max [%]</label>
+      <input type="number" id="swSmax" min="20" max="100" step="1" value="95">
+    </div>
+    <div class="formrow" style="margin:10px 0 0;">
+      <button class="primary" id="btnSwStart" type="button">Durchlauf starten</button>
+      <button class="danger" id="btnSwStop" type="button" disabled>Abbrechen</button>
+      <span class="hint" id="swMsg"></span>
+    </div>
+  </div>
+  <div id="swTblWrap" hidden>
+    <table id="swTable" style="margin-top:12px;">
+      <thead><tr><th>#</th><th>Richtung</th><th>Soll</th><th>AC (Deye)</th><th>DC</th>
+        <th>&eta; Deye</th><th>&eta; gegengepr&uuml;ft</th><th>Netz (Eltako)</th><th>Runden</th><th>SoC</th></tr></thead>
+      <tbody id="swBody"></tbody>
+    </table>
+  </div>
+</details>
+</div>
+
+<div class="card" data-sec="state">
   <div class="formrow" style="margin:0;">
     <span id="pStale" class="pill">Zählerwert …</span>
     <span id="pSlave" class="pill">Emulation …</span>
@@ -458,7 +786,7 @@
   </div>
 </div>
 
-<div class="card">
+<div class="card" data-sec="phase">
   <h2>Phasenübersicht</h2>
   <div class="xscroll">
   <table class="cpt" id="phaseTbl">
@@ -489,7 +817,7 @@
   </p>
 </div>
 
-<div class="card">
+<div class="card" data-sec="manip">
   <details id="manipFold" open>
   <summary><h2>Phasen gezielt manipulieren</h2></summary>
   <p class="warn">
@@ -523,7 +851,7 @@
 </details>
 </div>
 
-<div class="card">
+<div class="card" data-sec="dev">
   <h2>Modbus-TCP Zähler / Geräte</h2>
   <div class="xscroll">
   <table class="cpt" id="devTbl">
@@ -546,7 +874,7 @@
   </p>
 </div>
 
-<div class="card" id="cardLvPhase">
+<div class="card" data-sec="lvphase" id="cardLvPhase">
   <h2>Deye-Leistungen je Phase</h2>
   <div class="xscroll">
   <table class="cpt" id="lvPhaseTbl">
@@ -578,6 +906,255 @@
   </p>
 </div>
 
+<div class="secbar">
+  <span class="hint" id="secMsg"></span>
+  <button type="button" id="btnSecSave" title="Diese Reihenfolge auf dem Gerät speichern – sie gilt dann für jeden Browser, der nicht selbst sortiert hat">Als Standard speichern</button>
+  <button type="button" id="btnSecReset" title="Zur auf dem Gerät gespeicherten Standardreihenfolge zurück">Standardreihenfolge</button>
+  <button type="button" id="btnSecFactory" title="Die eingebaute Reihenfolge">Werksreihenfolge</button>
+</div>
+</section>
+
+<section class="tab" id="tab-em" hidden>
+  <p class="lead">Der Energie-Manager plant Laden und Halten des Deye-Akkus nach Strompreis,
+     PV-Prognose und gelerntem Verbrauch &mdash; und f&uuml;hrt den Plan in &bdquo;Automatik&ldquo; aus.</p>
+
+<div class="card" id="emCardStatus">
+  <h2>Status</h2>
+  <div class="formrow" style="margin:0 0 10px;">
+    <span class="seg" role="group" aria-label="Betriebsart" id="emMode">
+      <button type="button" data-m="0">Aus</button>
+      <button type="button" data-m="1">Nur planen</button>
+      <button type="button" data-m="2">Automatik</button>
+    </span>
+    <span id="emState" class="pill">&hellip;</span>
+    <span class="hint" id="emModeMsg"></span>
+  </div>
+  <div class="tiles" id="emTiles">
+    <div class="tile em-wide" id="emTNow"><div class="lbl">Jetzt</div><div class="val">&ndash;</div><div class="foot"></div></div>
+    <div class="tile" id="emTPrice"><div class="lbl">Strompreis jetzt</div><div class="val">&ndash;</div><div class="foot"></div></div>
+    <div class="tile" id="emTMix"><div class="lbl">Netzmix jetzt</div><div class="val">&ndash;</div><div class="foot"></div></div>
+    <div class="tile" id="emTPv"><div class="lbl">PV-Prognose heute</div><div class="val">&ndash;</div><div class="foot"></div></div>
+    <div class="tile" id="emTSave"><div class="lbl">Erwartete Ersparnis</div><div class="val">&ndash;</div><div class="foot"></div></div>
+    <div class="tile" id="emTDeye"><div class="lbl">Deye-Akku</div><div class="val">&ndash;</div><div class="foot"></div></div>
+    <div class="tile" id="emTByd"><div class="lbl">BYD-Akku</div><div class="val">&ndash;</div><div class="foot"></div></div>
+  </div>
+  <div class="formrow" id="emRefRow" style="margin:10px 0 0;">
+    <button type="button" data-what="prices" data-short="Preise holen">Preise neu holen</button>
+    <button type="button" data-what="forecast" data-short="Prognose holen">Prognose neu holen</button>
+    <button type="button" data-what="plan" data-short="Neu planen">Neu planen</button>
+    <span class="hint" id="emRefMsg"></span>
+  </div>
+  <!-- Beide Akkus von Hand sperren (z. B. waehrend das Auto laedt) -->
+  <h3 style="margin:14px 0 4px;font-size:13px;">Akkus sperren</h3>
+  <div class="em-locks">
+    <div class="formrow em-lock" data-bat="deye">
+      <span class="em-lock-name">Deye-Akku</span>
+      <b class="em-lock-state">–</b>
+      <select aria-label="Dauer der Sperre des Deye-Akkus"></select>
+      <button type="button" class="danger" data-on="1">Sperren</button>
+      <button type="button" data-on="0">Freigeben</button>
+      <span class="hint em-lock-msg"></span>
+    </div>
+    <div class="formrow em-lock" data-bat="byd">
+      <span class="em-lock-name">BYD-Akku</span>
+      <b class="em-lock-state">–</b>
+      <select aria-label="Dauer der Sperre des BYD-Akkus"></select>
+      <button type="button" class="danger" data-on="1">Sperren</button>
+      <button type="button" data-on="0">Freigeben</button>
+      <span class="hint em-lock-msg"></span>
+    </div>
+  </div>
+  <p class="hint nomob" style="margin:4px 0 0;">Gesperrt gibt ein Akku nichts ab, lädt aber weiter aus PV-Überschuss – etwa damit
+    beim Laden des Autos kein Hausakku ins Auto wandert. Deye: über die Zähler-Emulation; fällt das Display aus, ist er nach
+    2 Minuten wieder frei. BYD: über den Fronius (braucht „BYD-Steuerung erlaubt“); der Fronius hebt die Sperre nicht selbst auf,
+    das Display tut es – auch nach einem Neustart. Beide auch als Schalter in Home Assistant.</p>
+  <!-- Zwangsbetrieb beider Akkus -->
+  <h3 style="margin:14px 0 4px;font-size:13px;">Zwangsbetrieb</h3>
+  <div class="em-forces">
+    <div class="em-force" data-bat="deye">
+      <div class="formrow" style="margin:0;">
+        <span class="em-lock-name">Deye-Akku</span>
+        <select data-f="dir" aria-label="Richtung Deye"><option value="charge">Laden</option><option value="discharge">Entladen</option></select>
+        <label>Leistung [W]<input type="number" data-f="w" min="250" max="20000" step="250" value="3000"></label>
+        <label>Dauer [min]<input type="number" data-f="min" min="1" max="720" step="5" value="60"></label>
+        <label>Ziel [%]<input type="number" data-f="soc" min="10" max="100" step="1" value="80"></label>
+        <button type="button" class="danger" data-go="1">Starten</button>
+        <button type="button" data-go="0">Beenden</button>
+      </div>
+      <p class="hint em-force-state" style="margin:2px 0 8px calc(6.5em * 13 / 12);">–</p>
+    </div>
+    <div class="em-force" data-bat="byd">
+      <div class="formrow" style="margin:0;">
+        <span class="em-lock-name">BYD-Akku</span>
+        <select data-f="dir" aria-label="Richtung BYD"><option value="charge">Laden</option><option value="discharge">Entladen</option></select>
+        <label>Leistung [W]<input type="number" data-f="w" min="100" max="10000" step="100" value="2000"></label>
+        <label>Dauer [min]<input type="number" data-f="min" min="1" max="720" step="5" value="60"></label>
+        <label>Ziel [%]<input type="number" data-f="soc" min="0" max="100" step="1" value="80"></label>
+        <button type="button" class="danger" data-go="1">Starten</button>
+        <button type="button" data-go="0">Beenden</button>
+      </div>
+      <p class="hint em-force-state" style="margin:2px 0 8px calc(6.5em * 13 / 12);">–</p>
+    </div>
+  </div>
+  <p class="hint nomob" style="margin:4px 0 0;">Lädt (auch aus dem Netz) oder entlädt mit fester Leistung, bis die Dauer um ist oder der
+    Ladestand erreicht ist – was zuerst kommt – und endet mit jedem Neustart des Displays. Der Energiemanager hält sich
+    so lange heraus. Deye: eine Änderung am Display oder per Home Assistant beendet ihn ohne Rückschreiben.
+    BYD: braucht „BYD-Steuerung erlaubt“, hat Vorrang vor einer Sperre.</p>
+  <!-- Obere Ladegrenze des BYD -- gilt immer, auch fuer Zwangsladen -->
+  <h3 style="margin:14px 0 4px;font-size:13px;">Ladegrenze</h3>
+  <div class="formrow em-lock em-cap" id="emCapRow">
+    <span class="em-lock-name">BYD-Akku</span>
+    <b class="em-lock-state">–</b>
+    <select aria-label="Obere Ladegrenze des BYD-Akkus"></select>
+    <span class="hint em-lock-msg"></span>
+  </div>
+  <p class="hint nomob" style="margin:4px 0 0;">Über der Grenze sperrt das Display das Laden des BYD (PV und Netz), 2 Punkte darunter
+    gibt es wieder frei. Gilt auch für Zwangsladen. Braucht „BYD-Steuerung erlaubt“.</p>
+</div>
+
+<div class="card">
+<details class="fold" id="emFoldPlan" open>
+  <summary><h2>Preise &amp; Plan</h2><span class="hint" id="emPlanSum"></span></summary>
+  <p class="hint" id="emPlanInfo" style="margin:0 0 8px;"></p>
+  <div class="formrow em-ctl">
+    <span class="seg" role="group" aria-label="Tag" id="emDay">
+      <button type="button" data-d="0" class="on">Heute</button>
+      <button type="button" data-d="1">Morgen</button>
+      <button type="button" data-d="2">48 h</button>
+    </span>
+    <span class="hint" id="emDayHint"></span>
+    <span class="em-sp"></span>
+    <span class="seg" role="group" aria-label="Preisbasis" id="emBasis">
+      <button type="button" data-b="energy">B&ouml;rsenpreis</button>
+      <button type="button" data-b="total">Endpreis</button>
+    </span>
+  </div>
+  <div class="cv-chart" id="emPlanChart" role="img" aria-label="Erzeugungsprognose Wind und Sonne, Strompreis je Viertelstunde, geplantes Laden und Halten, gemessener und erwarteter Ladestand"></div>
+  <div class="cv-legend em-leg" aria-hidden="true">
+    <span class="cv-key"><i class="sq" style="background:var(--price)"></i><span id="emLegPrice">B&ouml;rsenpreis (Cent/kWh)</span></span>
+    <span class="cv-key"><i class="sq" style="background:var(--wind)"></i>Windenergie (GW)</span>
+    <span class="cv-key"><i class="sq" style="background:var(--sun)"></i>Sonnenenergie (GW)</span>
+    <span class="cv-key"><i class="sq" style="background:var(--s1)"></i>Laden</span>
+    <span class="cv-key"><i class="sq" style="background:var(--s2)"></i>Halten</span>
+    <span class="cv-key"><i style="background:var(--fg)"></i>SoC gemessen</span>
+    <span class="cv-key"><i style="background:var(--s3)"></i>SoC erwartet</span>
+  </div>
+  <!-- Woher die Daten kommen und ob die Quelle gerade antwortet -->
+  <details class="em-src" id="emSrc">
+    <summary>Datenquellen <span class="hint" id="emSrcSum"></span></summary>
+    <table class="em-src-t"><thead><tr><th>Quelle</th><th>Zustand</th><th>zuletzt ok</th>
+      <th class="nomob">nächster Abruf</th><th class="nomob">deckt ab</th></tr></thead><tbody id="emSrcBody"></tbody></table>
+  </details>
+</details>
+</div>
+
+<div class="card">
+<details class="fold" id="emFoldPv" open>
+  <summary><h2>PV-Prognose</h2><span class="hint" id="emPvSum"></span></summary>
+  <p class="hint" id="emPvInfo" style="margin:0 0 8px;"></p>
+  <div class="cv-legend" id="emPvLegend" aria-hidden="true"></div>
+  <div class="cv-chart" id="emPvChart" role="img" aria-label="PV-Prognose je Feld, gestapelt, darunter der Anteil erneuerbarer Energie im Netz"></div>
+  <div class="xscroll" style="margin-top:10px;">
+  <table id="emPvTbl">
+    <thead><tr><th>Feld</th><th><span class="d">heute Prognose</span><span class="m">heute</span> [kWh]</th>
+      <th><span class="d">heute gemessen</span><span class="m">gem.</span> [kWh]</th><th>morgen [kWh]</th>
+      <th><span class="d">Korrekturfaktor</span><span class="m">Faktor</span></th></tr></thead>
+    <tbody id="emPvBody"></tbody>
+  </table>
+  </div>
+</details>
+</div>
+
+<div class="card">
+<details class="fold" id="emFoldPvE" open>
+  <summary><h2>PV-Tagesenergie</h2><span class="hint" id="emPvESum"></span></summary>
+  <p class="hint" id="emPvEInfo" style="margin:0 0 8px;"></p>
+  <div class="cv-legend" id="emPvELegend" aria-hidden="true"></div>
+  <div class="cv-chart" id="emPvEChart" role="img" aria-label="Tagesenergie kumuliert: gemessen gegen Prognose"></div>
+</details>
+</div>
+
+<div class="card">
+<details class="fold" id="emFoldLoad" open>
+  <summary><h2>Verbrauchsprofil</h2><span class="hint" id="emLoadSum"></span></summary>
+  <p class="hint" id="emLoadInfo" style="margin:0 0 8px;"></p>
+  <div class="cv-legend" aria-hidden="true">
+    <span class="cv-key"><i style="background:var(--s1)"></i>erwarteter Verbrauch<span class="nomob"> (damit plant der Energiemanager)</span></span>
+    <span class="cv-key"><i class="dash"></i><span class="nomob">anderes Profil zum Vergleich</span><span class="mobonly">anderes Profil</span></span>
+    <span class="cv-key"><i style="background:var(--fg)"></i>heute gemessen</span>
+  </div>
+  <div class="cv-chart" id="emLoadChart" role="img" aria-label="Erwarteter Hausverbrauch je Viertelstunde aus dem gelernten Werktags- bzw. Wochenendprofil"></div>
+</details>
+</div>
+
+<div class="card">
+<details class="fold" id="emFoldCfg">
+  <summary><h2>Einstellungen</h2><span class="hint" id="emCfgSum"></span></summary>
+
+  <h3>Standort</h3>
+  <div class="em-grid">
+    <label>Breite [&deg;]<input type="number" id="emLat" min="-90" max="90" step="0.00001"></label>
+    <label>L&auml;nge [&deg;]<input type="number" id="emLon" min="-180" max="180" step="0.00001"></label>
+    <label class="em-span2">Ort suchen
+      <span class="em-inl"><input type="text" id="emGeoQ" placeholder="z.&nbsp;B. Fellbach" autocomplete="off">
+      <button type="button" id="emGeoBtn">Suchen</button></span></label>
+  </div>
+  <div id="emGeoList" class="em-geo"></div>
+
+  <h3>PV-Felder</h3>
+  <div id="emPlanes"></div>
+  <div class="formrow">
+    <button type="button" id="emPlaneAdd">+ Feld hinzuf&uuml;gen</button>
+    <button type="button" id="emTestBtn">Prognose testen</button>
+    <span class="hint" id="emPlaneMsg"></span>
+  </div>
+  <div id="emTestOut"></div>
+
+  <h3>Speicher</h3>
+  <div class="em-grid">
+    <label>Deye-Akku [kWh]<input type="number" id="emDeyeKwh" min="1" max="200" step="0.1"></label>
+    <label>BYD-Akku [kWh]<input type="number" id="emBydKwh" min="0" max="100" step="0.1"></label>
+    <label>BYD-Reserve [%]<input type="number" id="emBydRes" min="0" max="100" step="1"></label>
+  </div>
+
+  <h3>Planer</h3>
+  <div class="em-grid">
+    <label>Ladeleistung [kW]<input type="number" id="emChargeKw" min="0.25" max="20" step="0.25"></label>
+    <label>Mindestvorteil [ct/kWh]<input type="number" id="emSpread" min="0" max="100" step="0.1"></label>
+    <label>Verschlei&szlig; [ct/kWh]<input type="number" id="emCycle" min="0" max="100" step="0.1"></label>
+    <label>SoC min [%]<input type="number" id="emSocMin" min="0" max="100" step="1"></label>
+    <label>SoC max [%]<input type="number" id="emSocMax" min="0" max="100" step="1"></label>
+  </div>
+  <div class="formrow">
+    <span class="sw"><input type="checkbox" id="emBydCtrl"> <label for="emBydCtrl" style="font-size:13px;color:var(--fg);">BYD-Entladung sperren erlaubt</label></span>
+  </div>
+
+  <h3>Tibber</h3>
+  <div class="em-grid">
+    <label class="em-span2">API-Token<input type="password" id="emTok" autocomplete="off" placeholder="leer lassen = unver&auml;ndert"></label>
+  </div>
+  <div class="formrow">
+    <span id="emTokState" class="pill">&hellip;</span>
+    <button type="button" class="danger" id="emTokDel">Token l&ouml;schen</button>
+  </div>
+
+  <div class="formrow" style="margin:14px 0 0;">
+    <button type="button" class="primary" id="emSave">Speichern</button>
+    <span class="hint" id="emSaveMsg"></span>
+  </div>
+</details>
+</div>
+
+<div class="card">
+<details class="fold" id="emFoldFr">
+  <summary><h2>Fronius / BYD</h2><span class="hint" id="emFrSum"></span></summary>
+  <p class="hint nomob" style="margin:0 0 8px;">Speichersteuerung des Fronius &uuml;ber SunSpec (Modell 124) &mdash; f&uuml;r Tests mit dem Betreiber.</p>
+  <div id="emFrKv"></div>
+  <div class="formrow" style="margin:12px 0 0;">
+    <span class="hint" id="emFrMsg"></span>
+  </div>
+</details>
+</div>
 </section>
 
 <section class="tab" id="tab-regs" hidden>
@@ -638,6 +1215,50 @@
     <div class="formrow" style="margin-top:6px;">
       <span id="ioStatus" style="color:var(--mut);font-size:12px;"></span>
     </div>
+</section>
+
+<section class="tab" id="tab-frm" hidden>
+  <p class="lead">Der Deye als Fronius Smart Meter der Kategorie Erzeuger, &uuml;ber Modbus TCP.</p>
+
+  <div class="card">
+    <h2>Fronius-Simulator</h2>
+    <div class="formrow" style="margin:0 0 12px;">
+      <span id="frmState" class="pill">&hellip;</span>
+    </div>
+    <div class="tiles">
+      <div class="tile" id="frmTP"><div class="lbl">Leistung</div><div class="val">&ndash;</div><div class="foot"></div></div>
+      <div class="tile" id="frmTI"><div class="lbl">Bezug</div><div class="val">&ndash;</div><div class="foot"></div></div>
+      <div class="tile" id="frmTE"><div class="lbl">Einspeisung</div><div class="val">&ndash;</div><div class="foot"></div></div>
+      <div class="tile" id="frmTR"><div class="lbl">Anfragen</div><div class="val">&ndash;</div><div class="foot"></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Einstellung</h2>
+    <div class="formrow">
+      <span class="sw"><input type="checkbox" id="frmEn"> <label for="frmEn" style="font-size:13px;color:var(--fg);">Z&auml;hler anbieten</label></span>
+      <label>Unit-ID
+        <select id="frmUnit"><option>2</option><option>3</option><option>4</option><option>5</option>
+          <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select></label>
+      <span class="hint" id="frmPort"></span>
+    </div>
+    <div class="formrow">
+      <label>Seriennummer <input type="text" id="frmSn" inputmode="numeric" maxlength="10" style="width:120px;"></label>
+      <label>Text <input type="text" id="frmSnt" maxlength="7" style="width:90px;"></label>
+      <button class="primary" id="frmSave">Speichern</button>
+      <span class="hint" id="frmMsg"></span>
+    </div>
+  </div>
+
+  <details class="card" id="frmHow">
+    <summary><h2 style="display:inline;">Am Fronius einrichten</h2></summary>
+    <ol class="hint" style="margin:10px 0 0 18px; padding:0; line-height:1.6;">
+      <li>Weboberfl&auml;che des Fronius, Techniker-Zugang &rarr; Z&auml;hler &rarr; Z&auml;hler hinzuf&uuml;gen, Typ <b>Modbus TCP</b></li>
+      <li>IP <b id="frmIp"></b>, Port <b id="frmPort2"></b>, Modbus-Adresse <b id="frmUnit2"></b></li>
+      <li>Kategorie <b>Erzeuger</b>, dann <b>Scan</b></li>
+      <li>Seriennummer ge&auml;ndert: am Fronius neu scannen</li>
+    </ol>
+  </details>
 </section>
 
 <section class="tab" id="tab-sys" hidden>
@@ -1305,6 +1926,9 @@ async function poll() {
     $("pInfo").textContent = "keine Verbindung zum Gerät";
   }
   renderLive(live, served, liveWhy);
+  /* Die Wirkungsgradkurve haengt sich hier an, statt eigene Anfragen neben
+   * diese zu stellen -- sie entscheidet selbst, ob sie dran ist. */
+  if (window.effCurvePoll) await window.effCurvePoll();
 }
 
 /* ---------- Senden ---------- */
@@ -1398,6 +2022,640 @@ window.meterTabVisible = function (visible) {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && polling) { clearTimeout(pollTimer); pollLoop(); }
 });
+})();
+</script>
+<script>
+/* ---------------- Wirkungsgrad nach Leistung + Leistungsdurchlauf ----------------
+ * /api/deye/eff/curve liefert je Leistungsstufe [in_Wh, out_Wh, Sekunden] fuer
+ * Entladen (in = Batt+PV, out = AC) und Laden (in = AC, out = Batt+PV), die
+ * Untergrenzen der Stufen in "lo", den Leerlauf (Batterie speist nur den
+ * Eigenverbrauch) und den Durchlauf mit Mittelwerten je Stufe. Modell und
+ * Gegenprobe rechnet die Seite, die Firmware zaehlt nur.
+ *
+ * Abgefragt wird aus dem Poll des Zaehler-Tabs heraus (window.effCurvePoll),
+ * nicht daneben: der :80-Server hat vier Sockets. Alle 15 s, waehrend eines
+ * Durchlaufs alle 3 s. */
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const NS = "http://www.w3.org/2000/svg";
+  /* Eine Durchlaufstufe von 30 s bringt ihrer Leistungsstufe ~20 s Messzeit
+   * (zehn Runden) -- die muss sie zeigen und ins Modell geben koennen. Das
+   * Modell gewichtet ohnehin nach Messzeit. */
+  const MIN_S  = 10;        /* darunter wird eine Stufe nicht gezeigt          */
+  const SURE_S = 300;       /* ab 5 min Messzeit voll deckend, darunter blass  */
+  const FIT_S  = 10;        /* in das Modell gehen Stufen ab 10 s ein          */
+  const SER = {
+    dis: { name: "Entladen", col: "var(--s1)" },
+    chg: { name: "Laden",    col: "var(--s2)" },
+  };
+  const MODE_DIS = 2, MODE_CHG = 1;       /* deye_mode_t */
+  const ST_DONE = 3, ST_SKIP = 4;         /* eff_sweep_step_state_t */
+
+  function sig(ms) { try { return AbortSignal.timeout(ms); } catch (e) { return undefined; } }
+  function n(x, d) {
+    if (x == null || !isFinite(x)) return "–";
+    const s = x.toFixed(d || 0);
+    return /^-0(\.0+)?$/.test(s) ? s.slice(1) : s;
+  }
+  function pct(eta, d) { return n(100 * eta, d === undefined ? 1 : d) + " %"; }
+  function kw(w) {
+    if (!isFinite(w)) return "–";
+    return Math.abs(w) < 1000 ? n(w) + " W" : n(w / 1000, Math.abs(w) < 9950 ? 1 : 0) + " kW";
+  }
+  function range(lo, hi) {
+    return hi ? kw(lo).replace(/ k?W$/, "") + "–" + kw(hi) : "ab " + kw(lo);
+  }
+  function dur(s) {
+    s = Math.round(s);
+    if (s < 600) return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") + " min";
+    if (s < 3600) return Math.round(s / 60) + " min";
+    const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+    return h + " h " + m + " min";
+  }
+
+  /* ---------- Stufen -> Punkte ---------- */
+  function points(d, key) {
+    const out = [];
+    d[key].forEach((b, i) => {
+      const win = b[0], wout = b[1], s = b[2];
+      if (s < MIN_S || win <= 0) return;
+      const pin = win * 3600 / s, pout = wout * 3600 / s;
+      out.push({ key: key, i: i, p: key === "dis" ? pout : pin, eta: wout / win,
+                 s: s, loss: pin - pout, lo: d.lo[i], hi: d.lo[i + 1] });
+    });
+    return out;
+  }
+
+  /* ---------- Verlustmodell: Verlust(P) = a + b·P + c·P² ----------
+   * Gewichtete kleinste Quadrate ueber die Stufen (Gewicht = Messzeit, ab
+   * einer Stunde gedeckelt, damit eine Dauerstufe nicht alles bestimmt).
+   * Physikalisch sind a (Eigenverbrauch) und c (Leitungsverluste, I²R)
+   * nicht negativ; faellt einer negativ aus, wird ohne ihn neu gerechnet.
+   * P in kW, damit die Normalgleichungen gut konditioniert bleiben. */
+  function solve(A, y) {            /* Gauss mit Pivotsuche, A n×n */
+    const m = A.length, M = A.map((r, i) => r.concat([y[i]]));
+    for (let c = 0; c < m; c++) {
+      let piv = c;
+      for (let r = c + 1; r < m; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+      if (Math.abs(M[piv][c]) < 1e-12) return null;
+      [M[c], M[piv]] = [M[piv], M[c]];
+      for (let r = 0; r < m; r++) if (r !== c) {
+        const f = M[r][c] / M[c][c];
+        for (let k = c; k <= m; k++) M[r][k] -= f * M[c][k];
+      }
+    }
+    return M.map((r, i) => r[m] / r[i]);
+  }
+  function wls(pts, terms) {        /* terms: Teilmenge von [0,1,2] */
+    const A = terms.map(() => terms.map(() => 0)), y = terms.map(() => 0);
+    pts.forEach(q => {
+      const w = Math.min(q.s, 3600), x = q.p / 1000, l = q.loss / 1000;
+      const f = terms.map(t => Math.pow(x, t));
+      for (let i = 0; i < f.length; i++) {
+        y[i] += w * f[i] * l;
+        for (let j = 0; j < f.length; j++) A[i][j] += w * f[i] * f[j];
+      }
+    });
+    const c = solve(A, y);
+    if (!c) return null;
+    const out = [0, 0, 0];
+    terms.forEach((t, i) => { out[t] = c[i] * 1000; });   /* zurueck in W */
+    return out;                    /* Verlust[W] = out0 + out1·x + out2·x², x = P/kW */
+  }
+  function fit(pts, key) {
+    const use = pts.filter(q => q.s >= FIT_S && q.p > 0);
+    if (use.length < 3) return null;
+    const ps = use.map(q => q.p), pmin = Math.min.apply(null, ps), pmax = Math.max.apply(null, ps);
+    if (pmax / pmin < 3) return null;      /* zu schmaler Bereich fuer drei Parameter */
+    let k = wls(use, [0, 1, 2]);
+    if (k && k[2] < 0) { k = wls(use, [0, 1]); }
+    if (k && k[0] < 0) { k = wls(use, k[2] > 0 ? [1, 2] : [1]); }
+    if (!k || k[0] < 0 || k[2] < 0) return null;
+    return mk(k, key, pmin, pmax);
+  }
+  /* k in Einheiten von x = P/kW: Verlust[W] = k0 + k1·x + k2·x² */
+  function mk(k, key, pmin, pmax) {
+    const loss = (p) => { const x = p / 1000; return k[0] + k[1] * x + k[2] * x * x; };
+    const eta = key === "dis" ? (p) => p / (p + loss(p)) : (p) => (p - loss(p)) / p;
+    let pbest;
+    if (k[0] > 0 && k[2] > 0) pbest = 1000 * Math.sqrt(k[0] / k[2]);
+    else pbest = k[2] > 0 ? pmin : pmax;
+    pbest = Math.min(pmax, Math.max(pmin, pbest));
+    const best = eta(pbest);
+    /* Bereich, in dem das Modell hoechstens 0,5 Punkte unter dem Maximum liegt */
+    let lo = null, hi = null;
+    for (let t = 0; t <= 200; t++) {
+      const p = pmin * Math.pow(pmax / pmin, t / 200);
+      if (eta(p) >= best - 0.005) { if (lo === null) lo = p; hi = p; }
+    }
+    return { k: k, eta: eta, loss: loss, pbest: pbest, best: best, lo: lo, hi: hi,
+             pmin: pmin, pmax: pmax, idle: k[0] };
+  }
+
+  /* ---------- Gegenprobe mit dem Netzzaehler ----------
+   * Zwischen zwei Stufen springt die AC-Leistung des Deye um Kilowatt, der
+   * Hausverbrauch kaum. Der Eltako-Netzzaehler (geeicht, unabhaengig) misst
+   * also Netz = Haus − g · AC_Deye. Die Steigung der Ausgleichsgeraden ueber
+   * alle Stufen ist −g: g > 1 heisst, der Deye meldet weniger AC-Leistung,
+   * als wirklich fliesst. Seine Batterieseite laesst sich so nicht pruefen. */
+  function gain(steps) {
+    const u = steps.filter(s => s.st === ST_DONE && s.ng >= 5);
+    if (u.length < 3) return null;
+    const xs = u.map(s => s.acg), ys = u.map(s => s.grid);
+    const N = u.length, mx = xs.reduce((a, b) => a + b, 0) / N, my = ys.reduce((a, b) => a + b, 0) / N;
+    let sxx = 0, sxy = 0;
+    for (let i = 0; i < N; i++) { sxx += (xs[i] - mx) ** 2; sxy += (xs[i] - mx) * (ys[i] - my); }
+    if (Math.max.apply(null, xs) - Math.min.apply(null, xs) < 2000 || sxx <= 0) return null;
+    const m = sxy / sxx, b = my - m * mx;
+    let ssr = 0;
+    for (let i = 0; i < N; i++) ssr += (ys[i] - (b + m * xs[i])) ** 2;
+    const se = N > 2 ? Math.sqrt(ssr / (N - 2) / sxx) : NaN;
+    const pv = u.some(s => s.pv > 100);
+    return { g: -m, se: se, n: N, house: b, rms: Math.sqrt(ssr / N), pv: pv };
+  }
+  /* Wirkungsgrad mit der gegengeprueften AC-Seite: beim Entladen ist AC der
+   * Ausgang (η·g), beim Laden der Eingang (η/g). */
+  function corr(eta, key, g) { return g ? (key === "dis" ? eta * g.g : eta / g.g) : NaN; }
+
+  /* ---------- Diagramm ---------- */
+  let tip = null;
+  function el(tag, attrs, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function draw(sets, models, sweepPts) {
+    const box = $("cvChart");
+    const all = sets.dis.concat(sets.chg);
+    if (!all.length && !sweepPts.length) {
+      box.innerHTML = '<div class="cv-empty">Noch keine Stufe mit mindestens 10 s Messzeit.</div>';
+      return;
+    }
+    const W = Math.max(280, box.clientWidth || 600), narrow = W < 500;
+    const H = narrow ? 220 : 280, L = 40, R = narrow ? 58 : 70, T = 10, B = 28;
+    const pw = W - L - R, ph = H - T - B;
+    const X0 = Math.log10(50), X1 = Math.log10(22000);
+    const x = (p) => L + (Math.log10(Math.max(50, Math.min(22000, p))) - X0) / (X1 - X0) * pw;
+
+    const etas = all.map(q => q.eta).concat(sweepPts.map(q => q.eta));
+    let y0 = Math.floor(Math.min.apply(null, etas) * 100 - 1), y1 = Math.ceil(Math.max.apply(null, etas) * 100 + 0.5);
+    y0 = Math.max(0, y0); y1 = Math.min(105, Math.max(y1, y0 + 4));
+    const span = y1 - y0, step = span <= 6 ? 1 : (span <= 12 ? 2 : (span <= 30 ? 5 : 10));
+    y0 = Math.floor(y0 / step) * step; y1 = Math.ceil(y1 / step) * step;
+    const y = (e) => T + (1 - (e * 100 - y0) / (y1 - y0)) * ph;
+
+    box.innerHTML = "";
+    const svg = el("svg", { viewBox: "0 0 " + W + " " + H, height: H }, box);
+    const grid = el("g", {}, svg);
+    for (let v = y0; v <= y1 + 1e-9; v += step) {
+      el("line", { x1: L, x2: L + pw, y1: y(v / 100), y2: y(v / 100), stroke: "var(--bd)", "stroke-width": 1 }, grid);
+      el("text", { x: L - 6, y: y(v / 100) + 4, "text-anchor": "end" }, grid).textContent = v + (v === y1 ? " %" : "");
+    }
+    const xt = narrow ? [100, 500, 1000, 5000, 20000] : [100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+    xt.forEach(p => {
+      el("line", { x1: x(p), x2: x(p), y1: T + ph, y2: T + ph + 4, stroke: "var(--bdi)", "stroke-width": 1 }, grid);
+      el("text", { x: x(p), y: T + ph + 16, "text-anchor": "middle" }, grid).textContent =
+        p < 1000 ? (p / 1000).toFixed(1) : String(p / 1000);
+    });
+    el("text", { x: L + pw, y: T + ph + 27, "text-anchor": "end" }, grid).textContent = "AC-Leistung [kW]";
+    el("line", { x1: L, x2: L + pw, y1: T + ph, y2: T + ph, stroke: "var(--bdi)", "stroke-width": 1 }, grid);
+
+    const ends = [];
+    ["dis", "chg"].forEach(key => {
+      const col = SER[key].col, pts = sets[key].slice().sort((a, b) => a.p - b.p), m = models[key];
+      if (m) {   /* Modell: duenn, gestrichelt, nur ueber den gemessenen Bereich */
+        let d = "";
+        for (let t = 0; t <= 60; t++) {
+          const p = m.pmin * Math.pow(m.pmax / m.pmin, t / 60);
+          d += (t ? "L" : "M") + x(p).toFixed(1) + "," + y(m.eta(p)).toFixed(1);
+        }
+        el("path", { d: d, fill: "none", stroke: col, "stroke-width": 1.5, "stroke-dasharray": "4 3",
+                     opacity: 0.75 }, svg);
+      }
+      if (pts.length > 1) {
+        el("path", { d: pts.map((q, i) => (i ? "L" : "M") + x(q.p).toFixed(1) + "," + y(q.eta).toFixed(1)).join(""),
+                     fill: "none", stroke: col, "stroke-width": 2, "stroke-linejoin": "round",
+                     "stroke-linecap": "round", opacity: 0.55 }, svg);
+      }
+      pts.forEach(q => {
+        el("circle", { cx: x(q.p), cy: y(q.eta), r: 4, fill: col, stroke: "var(--tbg)", "stroke-width": 2,
+                       opacity: q.s >= SURE_S ? 1 : 0.4 }, svg);
+      });
+      if (pts.length) { const q = pts[pts.length - 1]; ends.push({ key: key, x: x(q.p), y: y(q.eta) }); }
+    });
+    sweepPts.forEach(q => {
+      el("circle", { cx: x(q.p), cy: y(q.eta), r: 5, fill: "var(--tbg)", stroke: SER[q.key].col, "stroke-width": 2 }, svg);
+    });
+    /* Beschriftung am Linienende, in Textfarbe; zu nah beieinander -> auseinander */
+    if (ends.length === 2 && Math.abs(ends[0].y - ends[1].y) < 14) {
+      const up = ends[0].y <= ends[1].y ? 0 : 1, mid = (ends[0].y + ends[1].y) / 2;
+      ends[up].y = mid - 7; ends[1 - up].y = mid + 7;
+    }
+    ends.forEach(e => {
+      el("text", { x: Math.min(e.x + 8, L + pw + 6), y: e.y + 4, class: "lab" }, svg).textContent = SER[e.key].name;
+    });
+
+    /* Hover/Tippen: Trefferflaeche groesser als der Punkt */
+    tip = document.createElement("div");
+    tip.className = "cv-tip";
+    box.appendChild(tip);
+    const hits = el("g", {}, svg);
+    const show = (q, cx, cy) => {
+      const head = q.sweep ? "Durchlauf · " + SER[q.key].name + " " + kw(q.t)
+                           : SER[q.key].name + " · " + range(q.lo, q.hi);
+      const body = q.sweep
+        ? "η " + pct(q.eta) + ' <span class="m">· Ø ' + kw(q.p) + " · " + q.n + " Runden</span>"
+        : "η " + pct(q.eta) + ' <span class="m">· Ø ' + kw(q.p) + " · " + dur(q.s) + " gemessen</span>"
+          + '<br><span class="m">Verlust ' + n(q.loss) + " W</span>";
+      tip.innerHTML = '<span class="k" style="background:' + SER[q.key].col + '"></span>' + head + "<br>" + body;
+      tip.style.display = "block";
+      const bw = box.clientWidth, tw = tip.offsetWidth;
+      tip.style.left = Math.max(0, Math.min(bw - tw, cx / W * bw - tw / 2)) + "px";
+      tip.style.top = Math.max(0, cy / W * bw - tip.offsetHeight - 12) + "px";
+    };
+    const hide = () => { tip.style.display = "none"; };
+    all.concat(sweepPts).forEach(q => {
+      const cx = x(q.p), cy = y(q.eta);
+      const h = el("circle", { cx: cx, cy: cy, r: 11, fill: "transparent", style: "cursor:pointer" }, hits);
+      h.addEventListener("pointerenter", () => show(q, cx, cy));
+      h.addEventListener("pointerleave", hide);
+      h.addEventListener("pointerdown", (ev) => { ev.stopPropagation(); show(q, cx, cy); });
+    });
+    svg.addEventListener("pointerdown", hide);
+  }
+
+  /* ---------- Text, Tabelle ---------- */
+  function summaryLine(key, m, pts, g) {
+    const nm = SER[key].name;
+    if (m) {
+      let s = nm + ": am besten um <b>" + kw(m.pbest) + "</b> (" + pct(m.best) + ")";
+      if (m.pbest >= m.pmax * 0.98) s = nm + ": steigt bis zum Ende des Gemessenen, <b>" + kw(m.pmax) + "</b> (" + pct(m.best) + ")";
+      else if (m.pbest <= m.pmin * 1.02) s = nm + ": am besten bei der kleinsten gemessenen Leistung, <b>" + kw(m.pmin) + "</b> (" + pct(m.best) + ")";
+      if (m.lo !== null && m.hi > m.lo * 1.05)
+        s += '<span class="det">, ±0,5 Punkte: ' + kw(m.lo) + " bis " + kw(m.hi) + "</span>";
+      if (g) s += '<span class="det">; gegengeprüft ' + pct(corr(m.best, key, g)) + "</span>";
+      return s;
+    }
+    const sure = pts.filter(q => q.s >= SURE_S);
+    if (sure.length) {
+      const b = sure.reduce((a, q) => q.eta > a.eta ? q : a);
+      return nm + ": bisher am besten " + range(b.lo, b.hi) + " (" + pct(b.eta) + ") – für ein Modell fehlen noch Stufen";
+    }
+    return nm + ": noch zu wenig gemessen";
+  }
+
+  function renderCurve(d) {
+    const sets = { dis: points(d, "dis"), chg: points(d, "chg") };
+    const g = gain(d.sweep.steps || []);
+    const models = { dis: fit(sets.dis, "dis"), chg: fit(sets.chg, "chg") };
+    const sweepPts = (d.sweep.steps || []).filter(s => s.st === ST_DONE && s.n >= 3 && s.in > 0).map(s => ({
+      sweep: true, key: s.m === MODE_DIS ? "dis" : "chg", t: s.t, n: s.n,
+      p: s.m === MODE_DIS ? s.out : s.in, eta: s.out / s.in,
+    }));
+    draw(sets, models, sweepPts);
+
+    const lines = [summaryLine("dis", models.dis, sets.dis, g), summaryLine("chg", models.chg, sets.chg, g)];
+    const idle = d.idle;
+    if (idle && idle[2] >= 300) lines.push("Eigenverbrauch ohne Abgabe: <b>≈ " + n(idle[0] * 3600 / idle[2]) + " W</b>");
+    else if (models.dis && models.dis.idle > 0) lines.push("fester Verlustanteil laut Modell: ≈ " + n(models.dis.idle) + " W");
+    $("cvSummary").innerHTML = lines.join("<br>");
+    /* Kopfzeile fuer den zugeklappten Zustand: nur die Bestwerte */
+    const best = ["dis", "chg"].filter(k => models[k]).map(k => SER[k].name + " am besten um " + kw(models[k].pbest));
+    $("cvSum").textContent = best.join(" · ");
+
+    let h = "";
+    for (let i = 0; i < d.lo.length; i++) {
+      const a = d.dis[i], b = d.chg[i];
+      if (a[2] < MIN_S && b[2] < MIN_S) continue;
+      const cell = (x) => x[2] >= MIN_S && x[0] > 0 ? "<td>" + pct(x[1] / x[0]) + "</td><td>" + dur(x[2]) + "</td>"
+                                                     : "<td>–</td><td>" + (x[2] ? dur(x[2]) : "–") + "</td>";
+      h += "<tr><td>" + range(d.lo[i], d.lo[i + 1]) + "</td>" + cell(a) + cell(b) + "</tr>";
+    }
+    if (idle && idle[2] > 0)
+      h += '<tr><td>Leerlauf (&lt; ' + n(d.idle_w) + " W)</td><td>" + n(idle[0] * 3600 / Math.max(1, idle[2]))
+         + " W Verbrauch</td><td>" + dur(idle[2]) + "</td><td></td><td></td></tr>";
+    $("cvBody").innerHTML = h || '<tr><td colspan="5" class="hint">noch nichts gemessen</td></tr>';
+    $("cvInfo").textContent = (d.start ? "sammelt seit " + new Date(d.start * 1000).toLocaleDateString("de-DE") : "")
+      + (d.nvs_free ? " · NVS frei: " + d.nvs_free + " Einträge" : "");
+    return g;
+  }
+
+  /* ---------- Durchlauf ---------- */
+  let formTouched = false;
+  function renderSweep(sw, g) {
+    const running = sw.state === 1;
+    const st = $("swState"), steps = sw.steps || [];
+    const cur = steps[sw.cur];
+    if (sw.state === 0) { st.textContent = "Durchlauf noch nicht gelaufen"; st.className = "pill"; }
+    else if (running) {
+      st.textContent = sw.paused ? "Pause im Normalbetrieb vor dem Richtungswechsel"
+        : (cur ? "Stufe " + (sw.cur + 1) + "/" + sw.n + ": " + SER[cur.m === MODE_DIS ? "dis" : "chg"].name
+                 + " " + kw(cur.t) + " · " + (sw.step_s < sw.settle ? "schwingt ein" : "misst") : "läuft");
+      st.className = "pill hot";
+    } else if (sw.state === 2) { st.textContent = "Durchlauf fertig"; st.className = "pill ok"; }
+    else { st.textContent = "Durchlauf abgebrochen: " + sw.why; st.className = "pill bad"; }
+
+    $("swSum").textContent = sw.state === 0 ? "" : st.textContent;
+    $("swInfo").textContent = sw.state === 0 ? "" :
+      (running ? "noch ca. " + dur(sw.left) + " · " : "")
+      + "läuft seit " + dur(sw.elapsed) + " · " + sw.writes + " Registerschreibvorgänge im Deye";
+    $("swProg").hidden = !running;
+    if (running) $("swProg").firstElementChild.style.width =
+      Math.min(100, 100 * sw.elapsed / Math.max(1, sw.elapsed + sw.left)) + "%";
+
+    $("btnSwStart").disabled = running;
+    $("btnSwStop").disabled = !running;
+    ["swDirs", "swFrom", "swTo", "swStep", "swDwell", "swSettle", "swSmin", "swSmax"].forEach(id => { $(id).disabled = running; });
+    if (running && !formTouched) {   /* nach einem Neuladen zeigen, was wirklich laeuft */
+      $("swDirs").value = String(sw.dirs);
+      const ts = Array.from(new Set(steps.map(s => s.t))).sort((a, b) => a - b);
+      if (ts.length) {
+        $("swFrom").value = ts[0]; $("swTo").value = ts[ts.length - 1];
+        if (ts.length > 1) $("swStep").value = ts[1] - ts[0];
+      }
+      $("swDwell").value = sw.dwell;
+      $("swSettle").value = sw.settle; $("swSmin").value = sw.smin; $("swSmax").value = sw.smax;
+    }
+
+    let h = "";
+    steps.forEach((s, i) => {
+      const key = s.m === MODE_DIS ? "dis" : "chg", has = s.n > 0 && s.in > 0, eta = has ? s.out / s.in : NaN;
+      const klass = i === sw.cur && running ? "cur" : (s.st === ST_SKIP ? "skip" : "");
+      h += '<tr class="' + klass + '"><td>' + (i + 1) + "</td><td>" + SER[key].name + "</td><td>" + kw(s.t) + "</td>"
+        + "<td>" + (has ? n(s.ac) + " W" : "–") + "</td>"
+        + "<td>" + (has ? n(key === "dis" ? s.in : s.out) + " W" : "–") + "</td>"
+        + "<td>" + (has ? pct(eta) : (s.st === ST_SKIP ? "übersprungen" : "–")) + "</td>"
+        + "<td>" + (has && g ? pct(corr(eta, key, g)) : "–") + "</td>"
+        + "<td>" + (s.ng ? n(s.grid) + " W" : "–") + "</td>"
+        + "<td>" + (s.n || "–") + "</td>"
+        + "<td>" + (s.st === ST_DONE || s.n ? s.soc0 + "→" + s.soc1 + " %" : "–") + "</td></tr>";
+    });
+    $("swBody").innerHTML = h;
+    $("swTblWrap").hidden = !steps.length;
+
+    const c = $("swCheck");
+    if (g) {
+      const dev = (g.g - 1) * 100;
+      c.innerHTML = "Gegenprobe mit dem Eltako-Netzzähler: der Deye meldet seine AC-Leistung "
+        + (Math.abs(dev) < 0.1 ? "praktisch genau" : n(Math.abs(dev), 1) + " % zu " + (dev > 0 ? "niedrig" : "hoch"))
+        + ' <span class="det">(± ' + n(100 * g.se, 1) + " %, " + g.n + " Stufen, Streuung des Hausverbrauchs "
+        + n(g.rms) + " W)</span>"
+        + (g.pv ? ' <span class="det">– während des Durchlaufs lief PV, die Gegenprobe ist dann unsicher</span>' : "");
+    } else {
+      c.textContent = steps.some(s => s.st === ST_DONE)
+        ? "Gegenprobe: braucht mindestens drei fertige Stufen über 2 kW Spanne mit frischem Netzzählerwert."
+        : "";
+    }
+  }
+
+  /* ---------- Abfrage ---------- */
+  let lastAt = 0, data = null;
+  async function load() {
+    try {
+      const r = await fetch("/api/deye/eff/curve", { cache: "no-store", signal: sig(5000) });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      data = await r.json();
+      const g = renderCurve(data);
+      renderSweep(data.sweep, g);
+    } catch (e) {
+      $("cvSummary").textContent = "Kurve nicht verfügbar (" + (e.message || "keine Verbindung") + ")";
+    }
+  }
+  window.effCurvePoll = async function () {
+    const running = data && data.sweep && data.sweep.state === 1;
+    const now = Date.now();
+    if (now - lastAt < (running ? 3000 : 15000)) return;
+    lastAt = now;
+    await load();
+  };
+  /* Zugeklappt hat das Diagramm keine Breite -- beim Aufklappen neu zeichnen. */
+  $("cvCard").addEventListener("toggle", () => {
+    if ($("cvCard").open && data) renderSweep(data.sweep, renderCurve(data));
+  });
+  let rz = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(rz);
+    rz = setTimeout(() => { if (data) renderSweep(data.sweep, renderCurve(data)); }, 200);
+  });
+
+  /* ---------- Bedienung ---------- */
+  /* von/bis/Schritt -> Liste, wie die Firmware sie nimmt. Das obere Ende
+   * kommt immer dazu, auch wenn der Schritt nicht aufgeht. */
+  function powers() {
+    const a = Math.round(+$("swFrom").value), b = Math.round(+$("swTo").value), st = Math.round(+$("swStep").value);
+    if (!(a > 0 && b >= a && st > 0)) return [];
+    const out = [];
+    for (let w = a; w <= b && out.length <= 20; w += st) out.push(w);
+    if (out[out.length - 1] !== b && out.length <= 20) out.push(b);
+    return out;
+  }
+  function sweepParams() {
+    return {
+      dirs: +$("swDirs").value, p: powers().join(","), n: powers().length,
+      dwell: Math.round(+$("swDwell").value),
+      settle: Math.round(+$("swSettle").value), smin: Math.round(+$("swSmin").value),
+      smax: Math.round(+$("swSmax").value),
+    };
+  }
+  function estimate(q) {
+    const dirs = q.dirs === 3 ? 2 : 1;
+    return q.n * dirs * q.dwell + (dirs === 2 ? 60 : 0);
+  }
+  function showEstimate() {
+    const q = sweepParams();
+    $("swMsg").textContent = q.n > 20 ? "höchstens 20 Stufen – Schritt größer wählen"
+      : (q.n && q.dwell > 0 ? q.n + " Stufen je Richtung, Dauer ca. " + dur(estimate(q)) : "");
+  }
+  ["swDirs", "swFrom", "swTo", "swStep", "swDwell", "swSettle", "swSmin", "swSmax"].forEach(id => {
+    $(id).addEventListener("input", () => { formTouched = true; showEstimate(); });
+  });
+  showEstimate();
+  $("btnSwStart").addEventListener("click", async () => {
+    const q = sweepParams();
+    if (!q.n || q.n > 20) { showEstimate(); return; }
+    const what = q.dirs === 3 ? "Entladen und Laden" : (q.dirs === 1 ? "nur Entladen" : "nur Laden");
+    if (!confirm("Leistungsdurchlauf starten?\n\n" + what + ", " + q.n + " Stufen von " + $("swFrom").value + " bis " + $("swTo").value
+        + " W, je " + q.dwell + " s, insgesamt ca. " + dur(estimate(q)) + ".\n\nDer Akku wird dabei aus dem Netz geladen bzw. ins Netz "
+        + "entladen (SoC-Grenzen " + q.smin + " / " + q.smax + " %). Eine Bedienung am Display beendet den Durchlauf.")) return;
+    $("swMsg").textContent = "…";
+    try {
+      const r = await fetch("/api/deye/eff/curve?cmd=sweep&dirs=" + q.dirs + "&p=" + q.p   /* Ziffern und Kommas, roh: der Server dekodiert nicht */
+        + "&dwell=" + q.dwell + "&settle=" + q.settle + "&smin=" + q.smin + "&smax=" + q.smax,
+        { method: "POST", signal: sig(5000) });
+      const d = await r.json();
+      $("swMsg").textContent = d.ok ? "gestartet" : ("abgelehnt: " + (d.err || "?"));
+      formTouched = !d.ok;
+    } catch (e) { $("swMsg").textContent = "Fehler: keine Verbindung"; }
+    lastAt = 0;
+    await load();
+  });
+  $("btnSwStop").addEventListener("click", async () => {
+    try { await fetch("/api/deye/eff/curve?cmd=stop", { method: "POST", signal: sig(5000) }); }
+    catch (e) { alert("Abbrechen fehlgeschlagen – bitte am Display auf Normal stellen."); }
+    lastAt = 0;
+    setTimeout(load, 1500);
+  });
+  $("btnCurveReset").addEventListener("click", async () => {
+    if (!confirm("Wirkungsgradkurve auf null setzen? Alle Stufen beginnen von vorn.")) return;
+    try {
+      const r = await fetch("/api/deye/eff/curve?cmd=reset", { method: "POST", signal: sig(5000) });
+      const d = await r.json();
+      if (!d.ok) alert("Nicht zurückgesetzt: " + (d.err || "?"));
+    } catch (e) { alert("Zurücksetzen fehlgeschlagen: keine Verbindung"); }
+    lastAt = 0;
+    await load();
+  });
+})();
+</script>
+
+<script>
+/* ---------------- Abschnitte im Zaehler-Tab sortieren ----------------
+ * Jede Karte mit data-sec bekommt einen Griff. Gezogen wird per Pointer-
+ * Events (Maus und Finger gleich), die Karte wandert dabei vor die erste
+ * andere Karte, deren Mitte unter dem Zeiger liegt. Nur andere Karten
+ * werden vermessen: so rueckt beim Umsetzen nichts unter den Zeiger zurueck,
+ * und die Position flattert nicht. Gespeichert wird die Reihenfolge der
+ * data-sec-Namen im localStorage; ein unbekannter Name (Karte weggefallen)
+ * wird uebergangen, eine neue Karte landet an ihrem Standardplatz am Ende.
+ *
+ * Drei Ebenen: die eigene Reihenfolge dieses Browsers (localStorage), sonst
+ * der Standard auf dem Geraet (GET /api/ui/order, gilt fuer alle Browser),
+ * sonst die eingebaute Reihenfolge des Markups. */
+(function () {
+  const KEY = "deyeSecOrder";
+  const tab = document.getElementById("tab-meter");
+  const bar = tab.querySelector(".secbar");
+  const cards = () => Array.from(tab.querySelectorAll(":scope > .card[data-sec]"));
+  const DEFAULT = cards().map(c => c.dataset.sec);
+
+  function load() {
+    try { const v = JSON.parse(localStorage.getItem(KEY) || "null"); return Array.isArray(v) ? v : null; }
+    catch (e) { return null; }
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(cards().map(c => c.dataset.sec))); } catch (e) {}
+  }
+  function apply(order) {
+    const by = {};
+    cards().forEach(c => { by[c.dataset.sec] = c; });
+    order.filter(id => by[id]).concat(DEFAULT.filter(id => order.indexOf(id) < 0))
+         .forEach(id => tab.insertBefore(by[id], bar));
+  }
+  function sig(ms) { try { return AbortSignal.timeout(ms); } catch (e) { return undefined; } }
+  function msg(t) {
+    const m = document.getElementById("secMsg");
+    m.textContent = t;
+    clearTimeout(msg.t);
+    msg.t = setTimeout(() => { m.textContent = ""; }, 4000);
+  }
+  async function deviceOrder() {
+    try {
+      const r = await fetch("/api/ui/order", { cache: "no-store", signal: sig(4000) });
+      const d = await r.json();
+      return d.order ? d.order.split(",").filter(Boolean) : null;
+    } catch (e) { return undefined; }   /* undefined = Geraet nicht erreicht */
+  }
+  const saved = load();
+  if (saved) apply(saved);
+  else deviceOrder().then(o => { if (o && !load()) apply(o); });
+
+  const GRIP = '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="4" cy="3" r="1.4"/><circle cx="10" cy="3" r="1.4"/>'
+             + '<circle cx="4" cy="7" r="1.4"/><circle cx="10" cy="7" r="1.4"/><circle cx="4" cy="11" r="1.4"/>'
+             + '<circle cx="10" cy="11" r="1.4"/></svg>';
+  let drag = null, scrollTimer = null;
+
+  function place(y) {
+    const others = cards().filter(c => c !== drag.card);
+    let ref = bar;
+    for (const c of others) {
+      const r = c.getBoundingClientRect();
+      if (y < r.top + r.height / 2) { ref = c; break; }
+    }
+    if (drag.card.nextElementSibling !== ref) tab.insertBefore(drag.card, ref);
+  }
+  /* Am Rand des Fensters weiterscrollen, solange der Zeiger dort steht. */
+  function edgeScroll() {
+    clearInterval(scrollTimer);
+    scrollTimer = setInterval(() => {
+      if (!drag) return;
+      const y = drag.y, h = window.innerHeight;
+      const d = y < 70 ? -Math.ceil((70 - y) / 5) : (y > h - 70 ? Math.ceil((y - h + 70) / 5) : 0);
+      if (d) { window.scrollBy(0, d); place(y); }
+    }, 16);
+  }
+  function end() {
+    if (!drag) return;
+    drag.card.classList.remove("dragging");
+    document.body.classList.remove("sorting");
+    clearInterval(scrollTimer);
+    drag = null;
+    save();
+  }
+
+  cards().forEach(card => {
+    const g = document.createElement("button");
+    g.type = "button";
+    g.className = "sec-grip";
+    g.title = "Ziehen zum Verschieben (oder Pfeiltasten)";
+    g.setAttribute("aria-label", "Abschnitt verschieben");
+    g.innerHTML = GRIP;
+    card.appendChild(g);
+
+    g.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      g.setPointerCapture(e.pointerId);
+      drag = { card: card, id: e.pointerId, y: e.clientY };
+      card.classList.add("dragging");
+      document.body.classList.add("sorting");
+      edgeScroll();
+    });
+    g.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag.y = e.clientY;
+      place(e.clientY);
+    });
+    g.addEventListener("pointerup", end);
+    g.addEventListener("pointercancel", end);
+    g.addEventListener("lostpointercapture", end);
+    g.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      e.preventDefault();
+      const list = cards(), i = list.indexOf(card);
+      if (e.key === "ArrowUp" && i > 0) tab.insertBefore(card, list[i - 1]);
+      else if (e.key === "ArrowDown" && i < list.length - 1) tab.insertBefore(card, list[i + 1].nextElementSibling);
+      else return;
+      save();
+      g.focus();
+      card.scrollIntoView({ block: "nearest" });
+    });
+  });
+
+  /* Als Standard: aufs Geraet, und dieser Browser folgt danach wieder dem
+   * Standard (sein eigener Eintrag waere ja identisch). */
+  document.getElementById("btnSecSave").addEventListener("click", async () => {
+    const order = cards().map(c => c.dataset.sec).join(",");
+    try {
+      const r = await fetch("/api/ui/order?o=" + order, { method: "POST", signal: sig(4000) });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.err || "abgelehnt");
+      try { localStorage.removeItem(KEY); } catch (e) {}
+      msg("als Standard gespeichert");
+    } catch (e) { msg("nicht gespeichert: " + (e.message || "keine Verbindung")); }
+  });
+  document.getElementById("btnSecReset").addEventListener("click", async () => {
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    const o = await deviceOrder();
+    if (o === undefined) { msg("Gerät nicht erreicht"); return; }
+    apply(o || DEFAULT);
+    msg(o ? "Standardreihenfolge" : "kein Standard gespeichert – Werksreihenfolge");
+  });
+  document.getElementById("btnSecFactory").addEventListener("click", () => {
+    apply(DEFAULT);
+    save();          /* bleibt die eigene Reihenfolge dieses Browsers */
+    msg("Werksreihenfolge");
+  });
 })();
 </script>
 
@@ -2165,6 +3423,1632 @@ async function importRegs(input){
 </script>
 
 <script>
+/* ---------------- Energie-Manager (Tab "Energie") ----------------
+ * Liest Plan, Preise, PV-Prognose und Lastprofil von /api/em/... und zeigt sie
+ * als Kacheln und Diagramme; die Einstellungen gehen als JSON an /api/em/cfg.
+ *
+ * Abgefragt wird nur bei sichtbarem Tab und strikt nacheinander (der
+ * :80-Server hat vier Sockets): Plan alle 15 s, Preise, Prognose und
+ * Lastprofil alle 60 s oder gleich nach einem der Knoepfe. Fronius/BYD nur,
+ * solange die Karte offen ist.
+ *
+ * Zeiten kommen als Unix-Sekunden, Reihen als Viertelstunden ab t0, gezeigt
+ * wird in Ortszeit des Browsers. null in einer Reihe heisst "unbekannt" und
+ * wird als Luecke gezeichnet, nie als 0.
+ *
+ * Ortssuche und "Prognose testen" fragen open-meteo.com direkt aus dem
+ * Browser -- das Geraet ist daran nicht beteiligt. */
+(function () {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const STEP = 900;
+const ACT = [
+  { name: "Normal", col: "var(--bdi)" },
+  { name: "Halten", col: "var(--s2)" },
+  { name: "Laden",  col: "var(--s1)" },
+];
+/* PV-Felder: aqua, gelb, magenta, violett, dann blau, orange -- feste Reihenfolge */
+const PCOL = ["var(--s3)", "var(--s4)", "var(--s5)", "var(--s6)", "var(--s1)", "var(--s2)"];
+const SOC_COL = "var(--s3)", REN_COL = "var(--mut)";
+/* Gemessen = Tinte: hebt sich von allen Feldfarben ab. In der kumulierten
+ * Ansicht gibt es keine Felder: dort Ist orange, Prognose blau. */
+const MEAS_COL = "var(--fg)", IST_COL = "var(--s2)", PROG_COL = "var(--s1)";   /* Netzmix ist Kontext: neutral, nicht gruen wie ein PV-Feld */
+const WD = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+const PHONE = !!(window.matchMedia && matchMedia("(max-width:640px)").matches);
+const METER_DEYE = 99;
+
+function sig(ms) { try { return AbortSignal.timeout(ms); } catch (e) { return undefined; } }
+/* Servertext (Feldnamen, Fehlermeldungen) nur escaped in innerHTML */
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function ok(v) { return v !== null && v !== undefined && v !== "" && isFinite(v); }
+function num(x, d) {
+  if (!ok(x)) return "–";
+  d = d || 0;
+  const s = Number(x).toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d });
+  return /^-0(,0+)?$/.test(s) ? s.slice(1) : s;
+}
+const pad = (n) => String(n).padStart(2, "0");
+function hm(t) { const d = new Date(t * 1000); return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+function dayTxt(t) { const d = new Date(t * 1000); return WD[d.getDay()] + " " + d.getDate() + "." + (d.getMonth() + 1) + "."; }
+/* Ortszeit-Mitternacht des Tages von t, plus add Tage (DST-fest ueber Date) */
+function midnight(t, add) {
+  const d = new Date(t * 1000);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + (add || 0));
+  return Math.round(d.getTime() / 1000);
+}
+const nowS = () => Date.now() / 1000;
+/* Wert einer Reihe zum Zeitpunkt t; null ausserhalb oder unbekannt */
+function at(arr, t0, step, t) {
+  if (!arr || !ok(t0)) return null;
+  const i = Math.floor((t - t0) / (step || STEP));
+  return i >= 0 && i < arr.length && ok(arr[i]) ? +arr[i] : null;
+}
+function slotTxt(t) { return dayTxt(t) + " " + hm(t) + "–" + hm(t + STEP); }
+function niceStep(span, n) {
+  const raw = span / n, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+
+/* ---------- Zeitdiagramm ----------
+ * Ein oder mehrere Felder uebereinander mit gemeinsamer x-Achse, jedes mit
+ * eigener y-Achse -- nie zwei Skalen in einem Feld. Ein Fadenkreuz und ein
+ * Tooltip fuer alle Felder.
+ *   o.n       Anzahl Slots
+ *   o.xt(i, narrow) -> { lab, day } | null   Achsenmarke an der Slotgrenze i
+ *   o.now     (gebrochener) Slot-Index fuer "jetzt", oder null
+ *   o.tip(i)  -> HTML des Tooltips fuer Slot i, oder null
+ *   o.note    { from, text }: Hinweis in der leeren Flaeche ab Slot from
+ *   o.snap    Slots je Rastschritt des Fadenkreuzes (4 = volle Stunde)
+ *   o.aligned Raender wie mit rechter Achse, auch ohne -- Diagramme
+ *             untereinander stehen dann Strich auf Strich
+ *   panel     { title, h, hn (Hoehe am Telefon), min, max, step, draw(c), dots(i),
+ *               right (Achse rechts), invert (0 oben, waechst nach unten),
+ *               unit (an der aeussersten Marke, nur am Rechner), bare (ohne
+ *               Gitter und Achse), gap (Abstand zum Feld darueber) } */
+function svgEl(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) if (attrs[k] !== null && attrs[k] !== undefined) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function chart(box, o) {
+  const W = Math.max(280, box.clientWidth || 600), narrow = W < 500;
+  const anyR = o.panels.some(p => p.right);
+  const L = narrow ? 26 : 40, R = (anyR || o.aligned) ? (narrow ? 24 : 46) : 8, TT = 18, GAP = 10, B = 34;
+  const pw = W - L - R, sw = pw / o.n, snap = o.snap || 1;
+  const x = (i) => L + i * sw;
+  let yc = 0;
+  const P = o.panels.map((p, k) => {
+    /* Feld ohne Titel: nur Platz fuer "jetzt" ueber dem ersten Feld */
+    const head = p.title ? TT : (k === 0 ? 16 : 0);
+    const top = yc + (k ? (p.gap !== undefined ? p.gap : GAP) : 0) + head, h = narrow && p.hn ? p.hn : p.h;
+    yc = top + h;
+    let lo = p.min, hi = p.max;
+    if (!(hi > lo)) hi = lo + 1;
+    const st = p.step || niceStep(hi - lo, h < 90 ? 2 : 4);
+    lo = Math.floor(lo / st + 1e-9) * st; hi = Math.ceil(hi / st - 1e-9) * st;
+    const y = p.invert ? (v) => top + (v - lo) / (hi - lo) * h
+                       : (v) => top + (1 - (v - lo) / (hi - lo)) * h;
+    return Object.assign({}, p, { top: top, h: h, lo: lo, hi: hi, st: st, y: y });
+  });
+  const last = P[P.length - 1], bottom = last.top + last.h, H = bottom + B;
+  box.innerHTML = "";
+  const svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, height: H }, box);
+  const grid = svgEl("g", {}, svg);
+
+  /* Achsenmarken unten, Tagesgrenzen als Haarlinie durch alle Felder */
+  for (let i = 0; i <= o.n; i++) {
+    const m = o.xt(i, narrow);
+    if (!m) continue;
+    const X = x(i);
+    if (m.day) svgEl("line", { x1: X, x2: X, y1: P[0].top, y2: bottom, stroke: "var(--bd)", "stroke-width": 1 }, grid);
+    svgEl("line", { x1: X, x2: X, y1: bottom, y2: bottom + 4, stroke: "var(--bdi)", "stroke-width": 1 }, grid);
+    const anc = i === 0 ? "start" : (i === o.n ? "end" : "middle");
+    svgEl("text", { x: X, y: bottom + 15, "text-anchor": anc }, grid).textContent = m.lab;
+    if (m.day && i < o.n - 8)
+      svgEl("text", { x: X + 2, y: bottom + 29, class: "lab" }, grid).textContent = m.day;
+  }
+  P.forEach(p => {
+    p.titleEnd = L;
+    if (p.title) {
+      const t = svgEl("text", { x: L, y: p.top - 6 }, grid);
+      t.textContent = p.title;
+      p.titleEnd = L + (t.getComputedTextLength ? t.getComputedTextLength() : 100);
+    }
+    if (p.bare) return;
+    const dec = p.st < 1 ? 1 : 0;
+    for (let k = 0; k < 50; k++) {
+      const v = p.lo + k * p.st;
+      if (v > p.hi + 1e-9) break;
+      const Y = p.y(v), outer = v + p.st > p.hi + 1e-9;
+      const base = Math.abs(v) < 1e-9 || k === 0;
+      svgEl("line", { x1: L, x2: L + pw, y1: Y, y2: Y, stroke: base ? "var(--bdi)" : "var(--bd)", "stroke-width": 1 }, grid);
+      svgEl("text", { x: p.right ? L + pw + 5 : L - 5, y: Y + 4, "text-anchor": p.right ? "start" : "end" }, grid)
+        .textContent = num(v, dec) + (outer && p.unit && !narrow ? " " + p.unit : "");
+    }
+  });
+
+  if (o.note && o.note.from < o.n) {
+    const X0 = x(o.note.from), X1 = L + pw, p = P[0];
+    svgEl("rect", { x: X0, y: p.top, width: X1 - X0, height: p.h, fill: "var(--bg)" }, svg);
+    if (X1 - X0 > 90) {
+      const t = svgEl("text", { x: (X0 + X1) / 2, y: p.top + p.h / 2, "text-anchor": "middle" }, svg);
+      t.textContent = o.note.text;
+    }
+  }
+
+  P.forEach(p => {
+    const c = { g: svgEl("g", {}, svg), x: x, sw: sw, y: p.y, lo: p.lo, hi: p.hi, top: p.top, h: p.h, n: o.n };
+    p.draw(c);
+  });
+
+  if (ok(o.now) && o.now >= 0 && o.now <= o.n) {
+    const X = x(o.now);
+    const right = X + 40 < L + pw;
+    const lx = right ? X + 4 : X - 4;
+    /* Beschriftung nur, wenn sie den Feldtitel nicht trifft -- die Legende
+     * erklaert den Strich ohnehin. Der Strich selbst laeuft nur durch die
+     * Zeichenflaechen, nicht durch die Titelzeilen. */
+    const label = !right || lx > P[0].titleEnd + 6;
+    P.forEach((p, k) => {
+      svgEl("line", { x1: X, x2: X, y1: p.top - (k === 0 && label ? 14 : 0), y2: p.top + p.h, stroke: "var(--fg)",
+                      "stroke-width": 1, "stroke-dasharray": "3 3" }, svg);
+    });
+    if (label)
+      svgEl("text", { x: lx, y: P[0].top - 6, "text-anchor": right ? "start" : "end", class: "lab" }, svg).textContent = "jetzt";
+  }
+
+  /* Fadenkreuz: rastet auf den Slot unter dem Zeiger ein */
+  const tip = document.createElement("div");
+  tip.className = "cv-tip";
+  box.appendChild(tip);
+  const hit = svgEl("rect", { x: L, y: P[0].top - TT, width: pw, height: bottom - P[0].top + TT,
+                              fill: "transparent" }, svg);
+  const cross = svgEl("g", { "pointer-events": "none", style: "display:none" }, svg);
+  const cl = svgEl("line", { y1: P[0].top, y2: bottom, stroke: "var(--fg)", "stroke-width": 1, opacity: 0.45 }, cross);
+  const dots = svgEl("g", {}, cross);
+  const hide = () => { tip.style.display = "none"; cross.style.display = "none"; };
+  const show = (ev) => {
+    const r = svg.getBoundingClientRect();
+    if (!r.width) return;
+    const px = (ev.clientX - r.left) * W / r.width;
+    let i = Math.max(0, Math.min(o.n - 1, Math.floor((px - L) / sw)));
+    i -= i % snap;
+    const html = o.tip(i);
+    if (!html) { hide(); return; }
+    const X = x(i) + sw * Math.min(snap, o.n - i) / 2;
+    cl.setAttribute("x1", X); cl.setAttribute("x2", X);
+    dots.innerHTML = "";
+    P.forEach(p => (p.dots ? p.dots(i) : []).forEach(d => {
+      if (ok(d.v)) svgEl("circle", { cx: X, cy: p.y(Math.max(p.lo, Math.min(p.hi, d.v))), r: 4, fill: d.col,
+                                     stroke: "var(--tbg)", "stroke-width": 2 }, dots);
+    }));
+    cross.style.display = "";
+    tip.innerHTML = html;
+    tip.style.display = "block";
+    const bw = box.clientWidth, tw = tip.offsetWidth, sx = X * r.width / W;
+    let left = sx + 14;
+    if (left + tw > bw) left = sx - tw - 14;
+    if (left < 0) left = Math.max(0, Math.min(bw - tw, sx - tw / 2));
+    tip.style.left = left + "px";
+    tip.style.top = (P[0].top * r.height / H) + "px";
+  };
+  hit.addEventListener("pointermove", show);
+  hit.addEventListener("pointerdown", show);
+  /* Am Finger bleibt der Tooltip nach dem Loslassen stehen; ein Tipp
+   * ausserhalb des Diagramms schliesst ihn (siehe unten). */
+  hit.addEventListener("pointerleave", (ev) => { if (ev.pointerType !== "touch") hide(); });
+  box._hide = hide;
+}
+document.addEventListener("pointerdown", (ev) => {
+  document.querySelectorAll("#tab-em .cv-chart").forEach(b => {
+    if (b._hide && !b.contains(ev.target)) b._hide();
+  });
+});
+
+/* Pfad durch die Slotmitten, Luecke bei null */
+function pathOf(c, vals) {
+  let d = "", pen = false;
+  for (let i = 0; i < vals.length; i++) {
+    const v = vals[i];
+    if (!ok(v)) { pen = false; continue; }
+    d += (pen ? "L" : "M") + (c.x(i) + c.sw / 2).toFixed(1) + "," + c.y(Math.max(c.lo, Math.min(c.hi, v))).toFixed(1);
+    pen = true;
+  }
+  return d;
+}
+function line(c, vals, col) {
+  const d = pathOf(c, vals);
+  if (d) svgEl("path", { d: d, fill: "none", stroke: col, "stroke-width": 2, "stroke-linejoin": "round",
+                         "stroke-linecap": "round" }, c.g);
+}
+/* Saeulen ab der Nulllinie, 2 px Luft dazwischen, wo die Breite es hergibt */
+function bars(c, vals, colOf, opOf) {
+  const gap = c.sw >= 6 ? 2 : (c.sw >= 3 ? 1 : 0);
+  const base = c.y(Math.max(c.lo, Math.min(c.hi, 0)));
+  vals.forEach((v, i) => {
+    if (!ok(v)) return;
+    const Y = c.y(Math.max(c.lo, Math.min(c.hi, v)));
+    svgEl("rect", { x: c.x(i) + gap / 2, width: Math.max(0.6, c.sw - gap), y: Math.min(Y, base),
+                    height: Math.max(0.6, Math.abs(base - Y)), fill: colOf(i), opacity: opOf ? opOf(i) : null }, c.g);
+  });
+}
+/* Gestapelte Flaechen: Hauch der Reihenfarbe, 2-px-Linie an der Oberkante.
+ * Ein Slot zaehlt nur, wenn alle Reihen dort einen Wert haben. */
+function stack(c, series, cols) {
+  const n = c.n;
+  let lower = new Array(n).fill(0);
+  series.forEach((vals, j) => {
+    const upper = lower.map((b, i) => (ok(b) && ok(vals[i])) ? b + Math.max(0, +vals[i]) : null);
+    for (let i = 0; i < n;) {
+      if (!ok(upper[i])) { i++; continue; }
+      let k = i;
+      while (k + 1 < n && ok(upper[k + 1])) k++;
+      let d = "";
+      for (let m = i; m <= k; m++) d += (m === i ? "M" : "L") + (c.x(m) + c.sw / 2).toFixed(1) + "," + c.y(upper[m]).toFixed(1);
+      for (let m = k; m >= i; m--) d += "L" + (c.x(m) + c.sw / 2).toFixed(1) + "," + c.y(lower[m]).toFixed(1);
+      svgEl("path", { d: d + "Z", fill: cols[j], "fill-opacity": 0.16, stroke: "none" }, c.g);
+      i = k + 1;
+    }
+    /* Linie nur, wo die Reihe etwas beitraegt (plus ein Slot Anlauf) --
+     * sonst liegt nachts die oberste Reihe auf der Nulllinie und verdeckt alle. */
+    const pos = (i) => ok(vals[i]) && +vals[i] > 0;
+    line(c, upper.map((u, i) => (pos(i - 1) || pos(i) || pos(i + 1)) ? u : null), cols[j]);
+    lower = upper;
+  });
+}
+function area(c, vals, col) {
+  for (let i = 0; i < vals.length;) {
+    if (!ok(vals[i])) { i++; continue; }
+    let k = i;
+    while (k + 1 < vals.length && ok(vals[k + 1])) k++;
+    let d = "";
+    for (let m = i; m <= k; m++) d += (m === i ? "M" : "L") + (c.x(m) + c.sw / 2).toFixed(1) + "," + c.y(vals[m]).toFixed(1);
+    d += "L" + (c.x(k) + c.sw / 2).toFixed(1) + "," + c.y(c.lo) + "L" + (c.x(i) + c.sw / 2).toFixed(1) + "," + c.y(c.lo) + "Z";
+    svgEl("path", { d: d, fill: col, "fill-opacity": 0.12, stroke: "none" }, c.g);
+    i = k + 1;
+  }
+  line(c, vals, col);
+}
+/* Achsenmarken fuer Zeitreihen ab d0: Stunden, an Mitternacht der Tag */
+function timeTicks(d0) {
+  return (i, narrow) => {
+    const t = d0 + i * STEP, d = new Date(t * 1000);
+    if (d.getMinutes() !== 0) return null;
+    const h = d.getHours(), every = narrow ? 12 : 6;
+    if (h % every) return null;
+    return { lab: pad(h), day: h === 0 ? dayTxt(t) : null };
+  };
+}
+const lk = (col) => '<span class="lk" style="background:' + col + '"></span>';
+const sk = (col) => '<span class="sk" style="background:' + col + '"></span>';
+
+/* ---------- Daten ---------- */
+const D = { cfg: null, plan: null, prices: null, fc: null, load: null, meters: null, fr: null, hist: null };
+const ERR = {};
+let modeNow = null;
+
+function priceNow(t) {
+  const pr = D.prices, pl = D.plan;
+  let v = pr ? at(pr.total, pr.t0, pr.step, t) : null;
+  if (v === null && pl) v = at(pl.price, pl.t0, pl.step, t);
+  return v;
+}
+function mixAt(t) {
+  const m = D.prices && D.prices.mix;
+  if (!m) return null;
+  const st = m.step || STEP;
+  const ren = at(m.ren, m.t0, st, t);
+  if (ren === null) return null;
+  const wo = at(m.wind_on, m.t0, st, t), wf = at(m.wind_off, m.t0, st, t);
+  return { ren: ren, solar: at(m.solar, m.t0, st, t),
+           wind: (wo === null && wf === null) ? null : (wo || 0) + (wf || 0) };
+}
+
+/* ---------- Status ---------- */
+function tile(id, val, foot) {
+  const e = $(id);
+  e.querySelector(".val").innerHTML = val;
+  /* Zahl und Einheit nicht trennen ("0 / %" am Zeilenende) */
+  e.querySelector(".foot").innerHTML = (foot || "").replace(/(\d) (?=%|kWh|kW|ct|€)/g, "$1\u00a0");
+}
+function renderMode() {
+  document.querySelectorAll("#emMode button").forEach(b => {
+    b.classList.toggle("on", modeNow !== null && +b.dataset.m === modeNow);
+  });
+}
+function renderStatus() {
+  const pl = D.plan, now = nowS();
+  renderMode();
+  const st = $("emState");
+  if (ERR.plan) { st.textContent = "Plan nicht verfügbar: " + ERR.plan; st.className = "pill bad"; }
+  else if (!pl) { st.textContent = "…"; st.className = "pill"; }
+  else if (pl.err) { st.textContent = "Planer: " + pl.err; st.className = "pill bad"; }
+  else if (modeNow === 0) { st.textContent = "Energie-Manager aus – der Deye regelt selbst"; st.className = "pill"; }
+  else {
+    st.textContent = (modeNow === 2 ? "Automatik aktiv" : "plant nur, steuert nicht")
+      + (pl.updated ? " · Plan von " + hm(pl.updated) : "");
+    st.className = "pill " + (modeNow === 2 ? "ok" : "hot");
+  }
+
+  const a = pl && pl.now && ok(pl.now.act) ? pl.now.act : null;
+  if (a !== null && ACT[a]) {
+    tile("emTNow", '<span class="em-dot" style="background:' + ACT[a].col + '"></span>' + ACT[a].name
+         + (modeNow === 1 ? ' <span class="hint">(nur geplant)</span>' : ""),
+         esc(pl.now.why || ""));
+  } else tile("emTNow", "–", pl && modeNow === 0 ? "Betriebsart „Aus“" : "");
+
+  const p = priceNow(now), pr = D.prices;
+  const en = pr ? at(pr.energy, pr.t0, pr.step, now) : null;
+  tile("emTPrice", p === null ? "–" : num(p, 1) + " ct/kWh",
+       (en !== null ? "davon Energie " + num(en, 1) + " ct" : "")
+       + (pr && pr.src ? (en !== null ? " · " : "") + esc(pr.src === "tibber" ? "Tibber" : pr.src) : "")
+       + (pr && pr.err ? '<br><span class="pos">' + esc(pr.err) + "</span>" : ""));
+
+  const mx = mixAt(now);
+  tile("emTMix", mx ? num(mx.ren) + " %" : "–",
+       mx ? "erneuerbar, davon Sonne " + num(mx.solar) + " % · Wind " + num(mx.wind) + " %" : "");
+
+  const fc = D.fc;
+  if (fc && fc.planes && fc.planes.length) {
+    const sum = (k) => fc.planes.reduce((s, q) => s + (ok(q[k]) ? +q[k] : 0), 0);
+    tile("emTPv", num(sum("kwh_today"), 1) + " kWh",
+         "morgen " + num(sum("kwh_tomorrow"), 1) + " kWh · bisher gemessen " + num(sum("meas_kwh_today"), 1) + " kWh"
+         + (fc.err ? '<br><span class="pos">' + esc(fc.err) + "</span>" : ""));
+  } else tile("emTPv", "–", fc && fc.err ? esc(fc.err) : "keine PV-Felder eingerichtet");
+
+  if (pl && ok(pl.cost_base) && ok(pl.cost_plan) && pl.act && pl.act.length) {
+    const end = pl.t0 + pl.act.length * (pl.step || STEP);
+    tile("emTSave", num((pl.cost_base - pl.cost_plan) / 100, 2) + " €",
+         "Plan " + num(pl.cost_plan / 100, 2) + " € statt " + num(pl.cost_base / 100, 2) + " € bis " + dayTxt(end - 1) + " " + hm(end).replace("00:00", "24:00"));
+  } else tile("emTSave", "–", "");
+
+  const lk_ = pl && pl.lock, ld_ = lk_ && lk_.deye;
+  tile("emTDeye", pl && ok(pl.deye_soc) ? num(pl.deye_soc) + " %" : "–",
+       ld_ && ld_.on ? "<b>Entladen gesperrt</b>" + (ld_.until ? " bis " + hm(ld_.until) : "") : "Ladestand jetzt");
+  renderLock(lk_);
+  renderForce(pl);
+  renderCap(pl);
+
+  const b = pl && pl.byd;
+  if (!b) tile("emTByd", "–", "");
+  /* Kurz nach dem Start sucht das Geraet den Fronius noch: kein Fehler */
+  else if (!b.ok) tile("emTByd", "–", b.err ? '<span class="pos">' + esc(b.err) + "</span>" : "wird gelesen …");
+  else if (b.force) tile("emTByd", num(b.soc) + " %", "<b>" + (b.force === 1 ? "Zwangsladen" : "Zwangsentladen") + "</b>"
+                                         + (b.forcing ? "" : " · wird angewendet …") + (b.err ? " · " + esc(b.err) : ""));
+  else tile("emTByd", num(b.soc) + " %", "Entladung " + (b.blocked ? "<b>gesperrt</b>" : "frei")
+                                         /* dieser Fronius hebt eine Sperre nicht selbst auf */
+                                         + (b.blocked && b.no_revert ? ' · <span class="pos">ohne Rückfallzeit</span>' : "")
+                                         + (b.err ? " · " + esc(b.err) : ""));
+}
+
+/* ---------- Akkus sperren (Deye, BYD) ---------- */
+const LOCK_DUR = [[0, "unbefristet"], [60, "1 Stunde"], [120, "2 Stunden"], [240, "4 Stunden"],
+                  [480, "8 Stunden"], [720, "12 Stunden"]];
+document.querySelectorAll(".em-lock select").forEach(sel => {
+  sel.innerHTML = LOCK_DUR.map(d => '<option value="' + d[0] + '">' + d[1] + "</option>").join("");
+});
+function renderLock(l) {
+  document.querySelectorAll(".em-lock").forEach(row => {
+    const bat = row.dataset.bat, x = l && l[bat], st = row.querySelector(".em-lock-state");
+    const on = row.querySelector('[data-on="1"]'), off = row.querySelector('[data-on="0"]');
+    if (!x) { st.textContent = "–"; return; }
+    const until = x.until ? " bis " + dayTxt(x.until) + " " + hm(x.until) : " bis aufgehoben";
+    st.innerHTML = x.on ? '<span class="pos">gesperrt' + until + "</span>" + (x.held ? "" : " (wird gesetzt …)") : "frei";
+    off.disabled = !x.on;
+    /* Der BYD braucht die Freigabe in den Einstellungen */
+    const blocked = bat === "byd" && !x.allowed;
+    on.disabled = blocked;
+    on.title = blocked ? "Erst in den Einstellungen „BYD-Entladung sperren erlaubt“ setzen" : "";
+  });
+}
+document.querySelectorAll(".em-lock").forEach(row => {
+  row.addEventListener("click", async (ev) => {
+    const b = ev.target.closest("button");
+    if (!b) return;
+    const on = b.dataset.on === "1", bat = row.dataset.bat, m = row.querySelector(".em-lock-msg");
+    m.textContent = "…";
+    try {
+      const q = "bat=" + bat + "&on=" + (on ? 1 : 0) + (on ? "&min=" + row.querySelector("select").value : "");
+      const r = await fetch("/api/em/lock?" + q, { method: "POST", signal: sig(8000) });
+      const d = await r.json();
+      m.textContent = d.ok ? (on ? "gesperrt" : "freigegeben") : "Fehler: " + (d.err || "?");
+    } catch (e) { m.textContent = "Fehler: keine Verbindung"; }
+    kick(false);
+  });
+});
+
+/* ---------- Ladegrenze BYD ---------- */
+let capBusy = false;
+{
+  const sel = document.querySelector("#emCapRow select");
+  sel.innerHTML = '<option value="100">aus (100 %)</option>'
+    + [95, 90, 85, 80, 75, 70, 65, 60, 55, 50].map(v => '<option value="' + v + '">bis ' + v + " %</option>").join("");
+  sel.addEventListener("change", async () => {
+    const m = document.querySelector("#emCapRow .em-lock-msg"), v = +sel.value;
+    m.textContent = "…";
+    capBusy = true;
+    try {
+      const r = await fetch("/api/em/cfg", { method: "POST", headers: { "Content-Type": "application/json" },
+                                             body: JSON.stringify({ byd_max: v }), signal: sig(8000) });
+      const d = await r.json();
+      if (d.ok !== false && D.cfg) D.cfg.byd_max = v;
+      m.textContent = d.ok === false ? "Fehler: " + (d.err || "?") : "übernommen";
+    } catch (e) { m.textContent = "Fehler: keine Verbindung"; }
+    capBusy = false;
+    kick(false);
+  });
+}
+function renderCap(pl) {
+  const row = $("emCapRow"), st = row.querySelector(".em-lock-state"), sel = row.querySelector("select");
+  const b = pl && pl.byd, allowed = !!(pl && pl.lock && pl.lock.byd && pl.lock.byd.allowed);
+  sel.disabled = !allowed;
+  sel.title = allowed ? "" : "Erst in den Einstellungen „BYD-Entladung sperren erlaubt“ setzen";
+  if (!b || !ok(b.cap)) { st.textContent = "–"; return; }
+  const cap = +b.cap;
+  if (!capBusy && document.activeElement !== sel) {
+    /* Zwischenwerte (per HA gesetzt) als eigene Option zeigen */
+    if (![...sel.options].some(o => +o.value === cap))
+      sel.insertAdjacentHTML("beforeend", '<option value="' + cap + '">bis ' + cap + " %</option>");
+    sel.value = String(cap);
+  }
+  st.innerHTML = cap >= 100 ? "aus"
+    : "bis " + num(cap) + " %" + (b.cap_on ? ' · <span class="pos">Laden gesperrt</span>' : "");
+}
+
+/* ---------- Zwangsbetrieb (Deye, BYD) ---------- */
+function forceTxt(mode, w, until, soc, active, end) {
+  if (!mode) return "aus" + (end ? " – zuletzt: " + esc(end) : "");
+  return "<b>" + (mode === 1 ? "Laden " : "Entladen ") + num(w) + " W bis " + hm(until) + " oder "
+       + (mode === 1 ? "≥ " : "≤ ") + num(soc) + " %</b>"
+       + (active ? " · übernommen" : ' · <span class="pos">wird angewendet …</span>');
+}
+function renderForce(pl) {
+  document.querySelectorAll(".em-force").forEach(row => {
+    const st = row.querySelector(".em-force-state");
+    if (!pl) { st.textContent = "–"; return; }
+    let html;
+    if (row.dataset.bat === "deye") {
+      const d = pl.deye_force || {};
+      html = forceTxt(d.mode, d.w, d.until, d.soc, d.active, d.end);
+    } else {
+      const b = pl.byd || {};
+      /* Die Ladegrenze gilt auch hier: das Ziel ist die kleinere Zahl. */
+      const top = b.force === 1 && ok(b.cap) && b.cap < 100 && b.cap < b.force_soc ? b.cap : b.force_soc;
+      html = forceTxt(b.force, b.force_w, b.force_until, top, b.forcing, b.force_end)
+           + (top !== b.force_soc ? " (Ladegrenze)" : "");
+      const allowed = !!(pl.lock && pl.lock.byd && pl.lock.byd.allowed);
+      row.querySelector('[data-go="1"]').disabled = !allowed;
+      row.querySelector('[data-go="1"]').title = allowed ? "" : "Erst in den Einstellungen „BYD-Entladung sperren erlaubt“ setzen";
+    }
+    st.innerHTML = html;
+  });
+}
+document.querySelectorAll(".em-force").forEach(row => {
+  const q = (f) => row.querySelector('[data-f="' + f + '"]');
+  /* Sinnvolle Vorgabe je Richtung: laden bis 80 %, entladen bis 20 %. */
+  q("dir").addEventListener("change", e => { q("soc").value = e.target.value === "charge" ? 80 : 20; });
+  row.addEventListener("click", async (ev) => {
+    const b = ev.target.closest("button");
+    if (!b) return;
+    const go = b.dataset.go === "1", bat = row.dataset.bat, st = row.querySelector(".em-force-state");
+    const name = bat === "deye" ? "Deye" : "BYD";
+    let qs = "cmd=stop";
+    if (go) {
+      const dir = q("dir").value, w = +q("w").value, mi = +q("min").value, soc = +q("soc").value;
+      if (!confirm(name + "-Akku mit " + w + " W " + (dir === "charge" ? "zwangsladen (auch aus dem Netz)" : "zwangsentladen")
+                   + "?\n\nEnde nach " + mi + " min oder bei " + (dir === "charge" ? "≥ " : "≤ ") + soc + " % Ladestand.")) return;
+      qs = "cmd=" + dir + "&w=" + w + "&min=" + mi + "&soc=" + soc;
+    }
+    st.textContent = "…";
+    try {
+      const r = await fetch((bat === "deye" ? "/api/em/deye?" : "/api/em/fronius?") + qs, { method: "POST", signal: sig(10000) });
+      const d = await r.json();
+      st.textContent = d.ok ? (go ? "angefordert" : "beendet") : "Fehler: " + (d.err || "?");
+    } catch (e) { st.textContent = "Fehler: keine Verbindung"; }
+    kick(false);
+  });
+});
+
+/* ---------- Preise & Plan ----------
+ * Ein Tag (Heute/Morgen), je Stunde der Mittelwert der vier Viertelstunden:
+ * oben die Erzeugungsprognose im Netz, von der Oberkante herabhaengend
+ * (Wind zuerst, Sonne darunter weiter), darunter die Preissaeulen mit Wert,
+ * darunter ein Streifen je Viertelstunde mit dem Plan (Laden/Halten) und
+ * ganz unten der erwartete SoC. Jedes Feld hat seine eigene Achse. */
+let planDay = 0;   /* 0 = heute, 1 = morgen, 2 = beide Tage (48 h); nur fuer diese Seite */
+let basis = "energy";
+try { if (localStorage.getItem("emPriceBasis") === "total") basis = "total"; } catch (e) {}
+const BASIS_TXT = { energy: "Börsenpreis", total: "Endpreis" };
+
+/* Rechteck mit gerundeten Ecken nur oben (rt) oder nur unten (rb) */
+function rbar(x, y, w, h, rt, rb) {
+  rt = Math.max(0, Math.min(rt, w / 2, h)); rb = Math.max(0, Math.min(rb, w / 2, h - rt));
+  const f = (v) => v.toFixed(1);
+  return "M" + f(x) + "," + f(y + rt)
+    + (rt ? "A" + rt + "," + rt + " 0 0 1 " + f(x + rt) + "," + f(y) : "")
+    + "L" + f(x + w - rt) + "," + f(y)
+    + (rt ? "A" + rt + "," + rt + " 0 0 1 " + f(x + w) + "," + f(y + rt) : "")
+    + "L" + f(x + w) + "," + f(y + h - rb)
+    + (rb ? "A" + rb + "," + rb + " 0 0 1 " + f(x + w - rb) + "," + f(y + h) : "")
+    + "L" + f(x + rb) + "," + f(y + h)
+    + (rb ? "A" + rb + "," + rb + " 0 0 1 " + f(x) + "," + f(y + h - rb) : "") + "Z";
+}
+/* Kleines Windrad in Weiss, Nabe bei (cx, cy), Hoehe s */
+function turbine(g, cx, cy, s) {
+  const t = svgEl("g", { transform: "translate(" + cx.toFixed(1) + "," + cy.toFixed(1) + ")", fill: "#fff" }, g);
+  svgEl("path", { d: "M-0.8,0L-0.5," + (s * 0.55).toFixed(1) + "L0.5," + (s * 0.55).toFixed(1) + "L0.8,0Z" }, t);
+  const bl = (s * 0.42).toFixed(1);
+  [0, 120, 240].forEach(a => svgEl("path", { d: "M-1,0L0,-" + bl + "L1,0Z", transform: "rotate(" + (a + 15) + ")" }, t));
+  svgEl("circle", { r: 1.4 }, t);
+}
+function sunIcon(g, cx, cy) {
+  svgEl("circle", { cx: cx, cy: cy, r: 6, fill: "#ffd84a", opacity: 0.35 }, g);
+  svgEl("circle", { cx: cx, cy: cy, r: 3.4, fill: "#ffd84a" }, g);
+}
+function mean(vals) {
+  const v = vals.filter(ok);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
+
+function renderPlanCtl() {
+  const pr = D.prices, tom = !!(pr && pr.tomorrow);
+  /* Morgen ist immer waehlbar: ohne Preise zeigt das Diagramm den Tag leer
+   * (Achsen, Raster, gleiche Skala wie heute) statt die Schaltflaeche zu sperren. */
+  document.querySelectorAll("#emDay button").forEach(b => {
+    b.classList.toggle("on", +b.dataset.d === planDay);
+    b.disabled = false;
+  });
+  $("emDayHint").textContent = tom ? "" : "Preise für morgen ab ~13 Uhr";
+  document.querySelectorAll("#emBasis button").forEach(b => b.classList.toggle("on", b.dataset.b === basis));
+  $("emLegPrice").textContent = BASIS_TXT[basis] + " (Cent/kWh)";
+}
+
+/* Gemeinsames Zeitfenster der drei Energie-Diagramme (Preise & Plan,
+ * PV-Prognose, Verbrauchsprofil): folgt Heute | Morgen | 48 h, damit
+ * "jetzt"-Strich und Stundenmarken untereinander auf einer Linie liegen. */
+function emWindow(now) {
+  const d0 = midnight(now, planDay === 2 ? 0 : planDay),
+        d1 = midnight(now, planDay === 2 ? 2 : planDay + 1);
+  return { d0: d0, n: Math.round((d1 - d0) / STEP), now: planDay !== 1 ? (now - d0) / STEP : null };
+}
+function emXt(d0, n) {
+  return (i, narrow) => {
+    if (i % 4) return null;
+    const hr = new Date((d0 + i * STEP) * 1000).getHours();
+    if (planDay === 2) {
+      /* 48 h: alle 6 h (Telefon 12 h), um Mitternacht mit dem Wochentag */
+      if (hr % (narrow ? 12 : 6)) return null;
+      return { lab: i === n ? "24" : pad(hr), day: hr === 0 && i < n ? dayTxt(d0 + i * STEP) : null };
+    }
+    return hr % (narrow ? 6 : 3) && i !== n ? null : { lab: i === n ? "24" : pad(hr), day: null };
+  };
+}
+
+function drawPlan() {
+  renderPlanCtl();
+  const box = $("emPlanChart");
+  const pl = D.plan, pr = D.prices, hs = D.hist, now = nowS();
+  if (!pl && !pr) { box.innerHTML = '<div class="cv-empty">' + (ERR.prices || ERR.plan ? "keine Daten vom Gerät" : "lädt …") + "</div>"; return; }
+  const win = emWindow(now), d0 = win.d0, n = win.n, T = (i) => d0 + i * STEP;
+  const mx = pr && pr.mix, mst = mx && (mx.step || STEP);
+  /* Wind/Sonne in GW kommen getrennt von den Anteilen und haben eigenes t0;
+   * nach einem Neustart fehlen sie ein paar Minuten -- dann bleibt das Feld leer. */
+  const gt0 = mx && (mx.gen_t0 || mx.t0);
+  /* Vergangenheit aus dem Verlauf des Geraets (/api/em/hist): gemessener
+   * SoC und was fuer die Viertelstunde geplant war. Der Plan selbst beginnt
+   * immer bei der laufenden Viertelstunde. hflag: Bit 0 = ausgefuehrt. */
+  const q = { energy: [], total: [], act: [], soc: [], hsoc: [], hflag: [], wind: [], sun: [] };
+  for (let i = 0; i < n; i++) {
+    const t = T(i);
+    const past = !pl || t < pl.t0;
+    let tot = pr ? at(pr.total, pr.t0, pr.step, t) : null;
+    if (tot === null && pl) tot = at(pl.price, pl.t0, pl.step, t);
+    if (tot === null && hs) tot = at(hs.price, hs.t0, hs.step, t);
+    q.total.push(tot);
+    q.energy.push(pr ? at(pr.energy, pr.t0, pr.step, t) : null);
+    q.act.push(past ? (hs ? at(hs.act, hs.t0, hs.step, t) : null) : at(pl.act, pl.t0, pl.step, t));
+    q.hflag.push(past && hs ? at(hs.flags, hs.t0, hs.step, t) : null);
+    q.soc.push(pl ? at(pl.soc, pl.t0, pl.step, t) : null);
+    q.hsoc.push(hs && t + STEP <= now ? at(hs.soc, hs.t0, hs.step, t) : null);
+    q.wind.push(mx ? at(mx.wind_gw, gt0, mst, t) : null);
+    q.sun.push(mx ? at(mx.solar_gw, gt0, mst, t) : null);
+  }
+  /* Die erwartete Linie setzt am letzten gemessenen Punkt an, sonst
+   * klafft zwischen gemessen und erwartet eine Viertelstunde Luecke. */
+  const socExp = q.soc.slice();
+  for (let i = 1; i < n; i++)
+    if (ok(socExp[i]) && !ok(socExp[i - 1]) && ok(q.hsoc[i - 1])) { socExp[i - 1] = q.hsoc[i - 1]; break; }
+  /* Ein Balken je Viertelstunde (G = 1); G = 4 gaebe Stundenbalken aus dem
+   * Mittel der Viertelstunden -- so war es zuerst, der Betreiber will den
+   * 15-min-Takt. Alles darunter rechnet mit G statt mit einer festen 4. */
+  const G = 1;
+  const hours = [];
+  for (let i = 0; i < n; i += G) {
+    const sl = (a) => a.slice(i, Math.min(n, i + G));
+    hours.push({ i: i, k: Math.min(G, n - i), p: mean(sl(q[basis])), wind: mean(sl(q.wind)), sun: mean(sl(q.sun)) });
+  }
+  /* Skalen ueber BEIDE Tage: Heute und Morgen sollen beim Umschalten
+   * vergleichbar bleiben, also dieselbe ct- und GW-Achse haben. */
+  const ps = [], gen = [];
+  {
+    const dA = midnight(now, 0), nA = Math.round((midnight(now, 2) - dA) / STEP);
+    for (let i = 0; i < nA; i++) {
+      const t = dA + i * STEP;
+      let v = basis === "energy" ? (pr ? at(pr.energy, pr.t0, pr.step, t) : null)
+                                 : (pr ? at(pr.total, pr.t0, pr.step, t) : null);
+      if (v === null && basis !== "energy" && pl) v = at(pl.price, pl.t0, pl.step, t);
+      if (ok(v)) ps.push(v);
+      const w = mx ? at(mx.wind_gw, gt0, mst, t) : null, s = mx ? at(mx.solar_gw, gt0, mst, t) : null;
+      if (ok(w) || ok(s)) gen.push((ok(w) ? w : 0) + (ok(s) ? s : 0));
+    }
+    if (!gen.length) gen.push(0);
+  }
+  const dayHasPrice = hours.some(h => ok(h.p));
+  const pastH = (h) => T(h.i + h.k) <= now;
+  const cfg = D.cfg;
+  const hasGen = hours.some(h => ok(h.wind) || ok(h.sun));
+  /* Energy-Charts veroeffentlicht Wind/Sonne fuer morgen erst im Laufe des
+   * Nachmittags/Abends -- das Geraet fragt ab 12 Uhr alle 45 min nach. */
+  const tmrw0 = midnight(now, 1);
+  const genTmrw = hours.some(h => T(h.i) >= tmrw0 && (ok(h.wind) || ok(h.sun)));
+  const GEN_LATER = "Wind/Sonne für morgen: Energy-Charts veröffentlicht sie meist am Abend";
+
+  chart(box, {
+    n: n, snap: G, now: win.now, aligned: true, xt: emXt(d0, n),
+    panels: [
+      { h: 140, hn: 80, min: 0, max: Math.max(5, Math.max.apply(null, gen)), step: Math.max(5, niceStep(Math.max(5, Math.max.apply(null, gen)), 3)),
+        invert: true, right: true, unit: "GW",   /* Achse auch am leeren Tag: gleiche Skala */
+        draw: (c) => {
+          const note = (x, txt) => {
+            const t = svgEl("text", { x: x, y: c.top + c.h / 2 + 4, "text-anchor": "middle" }, c.g);
+            t.textContent = txt;
+            if (box.clientWidth < 500) t.setAttribute("font-size", "10");
+          };
+          if (!hasGen) {
+            note(c.x(c.n / 2), planDay === 1 ? GEN_LATER : "Wind- und Sonnenprognose folgt");
+            return;
+          }
+          if (planDay === 2 && !genTmrw) note(c.x(c.n * 0.75), box.clientWidth < 500 ? "morgen: folgt am Abend" : GEN_LATER);
+          const bw = c.sw * G, gap = bw >= 8 ? 2 : 1, w = bw - gap;
+          hours.forEach(h => {
+            const wv = ok(h.wind) ? h.wind : 0, sv = ok(h.sun) ? h.sun : 0;
+            if (!ok(h.wind) && !ok(h.sun)) return;
+            const x0 = c.x(h.i) + gap / 2, yW = c.y(wv), yS = c.y(wv + sv);
+            const g = svgEl("g", { opacity: pastH(h) ? 0.45 : null }, c.g);
+            const sunH = yS - yW - gap;      /* Luft zwischen Wind und Sonne */
+            const sunOn = sv > 0 && sunH >= 1, r = w >= 8 ? 4 : 1;
+            if (wv > 0) svgEl("path", { d: rbar(x0, c.top, w, yW - c.top, 0, sunOn ? 0 : r), fill: "var(--wind)" }, g);
+            if (sunOn) svgEl("path", { d: rbar(x0, yW + gap, w, sunH, 0, r), fill: "var(--sun)" }, g);
+            const s = Math.min(14, w - 2);
+            if (wv > 0 && w >= 9 && yW - c.top >= s + 6) turbine(g, x0 + w / 2, yW - 3 - s * 0.55, s);
+            if (sunOn && w >= 10 && sunH >= 15) sunIcon(g, x0 + w / 2, yW + gap + sunH / 2);
+          });
+        } },
+      { h: 170, hn: 150, min: Math.min(0, ps.length ? Math.min.apply(null, ps) : 0), max: Math.max(10, ps.length ? Math.max.apply(null, ps) : 10),
+        unit: "ct", gap: 12, step: niceStep(Math.max(10, ps.length ? Math.max.apply(null, ps) : 10), 5),
+        draw: (c) => {
+          const bw = c.sw * G, gap = bw >= 8 ? 2 : 1, w = bw - gap, base = c.y(Math.max(c.lo, 0)), r = w >= 8 ? 4 : 1;
+          if (!dayHasPrice) {
+            svgEl("text", { x: c.x(c.n / 2), y: c.top + c.h / 2 + 4, "text-anchor": "middle" }, c.g)
+              .textContent = planDay === 1 ? "Preise für morgen ab ~13 Uhr" : "keine Preise";
+          } else if (planDay === 2 && !(pr && pr.tomorrow)) {
+            /* 48 h ohne Preise fuer morgen: die rechte Haelfte bleibt leer */
+            svgEl("text", { x: c.x(c.n * 0.75), y: c.top + c.h / 2 + 4, "text-anchor": "middle" }, c.g)
+              .textContent = "Preise für morgen ab ~13 Uhr";
+          }
+          hours.forEach(h => {
+            if (!ok(h.p)) return;
+            const x0 = c.x(h.i) + gap / 2, Y = c.y(Math.max(c.lo, Math.min(c.hi, h.p)));
+            const g = svgEl("g", { opacity: pastH(h) ? 0.45 : null }, c.g);
+            const up = h.p >= 0, bh = Math.abs(base - Y);
+            if (bh >= 0.5) svgEl("path", { d: up ? rbar(x0, Y, w, bh, r, 0) : rbar(x0, base, w, bh, 0, r), fill: "var(--price)" }, g);
+            if (!up) return;
+            /* Wert in der Saeule: waagrecht, wenn Platz ist, sonst senkrecht,
+             * sonst gar nicht -- dann bleibt der Tooltip. */
+            const txt = num(h.p, 2), cx = x0 + w / 2;
+            if (w >= 26) {
+              if (bh >= 18) svgEl("text", { x: cx, y: Y + 14, "text-anchor": "middle", class: "em-pl" }, g).textContent = txt;
+            } else if (w >= 9) {
+              /* schmale Viertelstundenbalken: kleinere Schrift, damit der
+               * senkrechte Wert nicht in den Nachbarbalken laeuft */
+              const fs = w >= 13 ? 12 : 10, dx = fs * 0.35;
+              const t = svgEl("text", { x: cx + dx, y: Y + 4, "text-anchor": "end", class: "em-pl",
+                                         style: "font-size:" + fs + "px",
+                                         transform: "rotate(-90 " + (cx + dx).toFixed(1) + " " + (Y + 4).toFixed(1) + ")" }, g);
+              t.textContent = txt;
+              const len = t.getComputedTextLength ? t.getComputedTextLength() : 32;
+              if (bh < len + 7) t.remove();
+            }
+          });
+        } },
+      { h: 7, bare: true, min: 0, max: 1, gap: 2,
+        draw: (c) => q.act.forEach((a, i) => {
+          if (a !== 1 && a !== 2) return;
+          /* Vergangen und nicht ausgefuehrt (Schattenbetrieb, Handbedienung): blass */
+          const done = q.hflag[i] === null || (q.hflag[i] & 1);
+          svgEl("rect", { x: c.x(i), y: c.top, width: c.sw + 0.3, height: c.h, fill: ACT[a].col,
+                          opacity: done ? null : 0.35 }, c.g);
+        }) },
+      { title: "Deye-SoC [%]", h: 90, hn: 70, min: 0, max: 100, step: 50,
+        draw: (c) => {
+          if (cfg) [cfg.soc_min, cfg.soc_max].forEach((v, k) => {
+            if (!ok(v)) return;
+            svgEl("line", { x1: c.x(0), x2: c.x(c.n), y1: c.y(v), y2: c.y(v), stroke: "var(--bdi)", "stroke-width": 1,
+                            "stroke-dasharray": "2 3" }, c.g);
+            svgEl("text", { x: c.x(c.n) - 2, y: c.y(v) - 4, "text-anchor": "end" }, c.g)
+              .textContent = (k ? "max " : "min ") + num(v) + " %";
+          });
+          line(c, socExp, SOC_COL);
+          line(c, q.hsoc, MEAS_COL);
+        },
+        dots: (i) => {
+          const k = Math.min(n - 1, i + Math.floor(G / 2));
+          return [{ v: q.hsoc[k], col: MEAS_COL }, { v: q.soc[k], col: SOC_COL }];
+        } },
+    ],
+    tip: (i) => {
+      const h = hours[Math.floor(i / G)];
+      if (!h) return null;
+      const rows = [];
+      let any = false;
+      for (let k = h.i; k < h.i + h.k; k++) {
+        if (ok(q.energy[k]) || ok(q.total[k])) any = true;
+        const a = q.act[k];
+        const shadow = q.hflag[k] !== null && !(q.hflag[k] & 1) && (a === 1 || a === 2) ? ' <span class="m">nur geplant</span>' : "";
+        rows.push("<tr><td>" + hm(T(k)) + "</td><td>" + num(q.energy[k], 2) + "</td><td>" + num(q.total[k], 2) + "</td><td>"
+          + (a === 1 || a === 2 ? sk(ACT[a].col) + ACT[a].name + shadow : (a === 0 ? '<span class="m">Normal</span>' : "")) + "</td></tr>");
+      }
+      if (!any && !ok(h.wind) && !ok(h.sun)) return null;
+      let s = "<b>" + dayTxt(T(h.i)) + " " + hm(T(h.i)) + "–" + hm(T(h.i + h.k)).replace(/^00:00$/, "24:00") + "</b>";
+      s += '<table class="em-tt"><tr><th></th><th>Börse</th><th>Endpreis</th><th></th></tr>' + rows.join("") + "</table>";
+      s += '<span class="m">ct/kWh</span>';
+      if (ok(h.wind)) s += "<br>" + sk("var(--wind)") + "<b>" + num(h.wind, 1) + ' GW</b> <span class="m">Wind</span>';
+      if (ok(h.sun)) s += "<br>" + sk("var(--sun)") + "<b>" + num(h.sun, 1) + ' GW</b> <span class="m">Sonne</span>';
+      const ren = mean([0, 1, 2, 3].slice(0, h.k).map(k => { const m = mixAt(T(h.i + k)); return m ? m.ren : null; }));
+      if (ok(ren)) s += "<br><b>" + num(ren) + ' %</b> <span class="m">erneuerbar im Netz</span>';
+      const hsoc = q.hsoc[h.i + h.k - 1], soc = q.soc[h.i + h.k - 1];
+      if (ok(hsoc)) s += "<br>" + lk(MEAS_COL) + "<b>" + num(hsoc) + ' %</b> <span class="m">Deye-SoC am Ende (gemessen)</span>';
+      else if (ok(soc)) s += "<br>" + lk(SOC_COL) + "<b>" + num(soc) + ' %</b> <span class="m">Deye-SoC am Ende (erwartet)</span>';
+      return s;
+    },
+  });
+
+  /* Kopfzeile und Infozeile -- ueber den ganzen Plan, nicht nur den Tag */
+  let nl = 0, nh = 0, first = null;
+  if (pl && pl.act) pl.act.forEach((a, k) => {
+    const t = pl.t0 + k * (pl.step || STEP);
+    if (t + STEP <= now) return;
+    if (a === 2) { nl++; if (first === null) first = t; }
+    if (a === 1) nh++;
+  });
+  const p = priceNow(now);
+  $("emPlanSum").textContent = (p !== null ? "jetzt " + num(p, 1) + " ct" : "")
+    + (first !== null ? " · Laden ab " + (first > midnight(now, 1) - 1 ? dayTxt(first) + " " : "") + hm(first) : "");
+  const parts = [planDay === 2 ? dayTxt(d0) + "–" + dayTxt(midnight(now, 1)) : dayTxt(d0)];
+  if (pr) parts.push("Preise " + (pr.src === "tibber" ? "Tibber" : esc(pr.src || "?"))
+                     + (pr.fetched ? ", geholt " + hm(pr.fetched) : "") + (pr.err ? ' – <span class="pos">' + esc(pr.err) + "</span>" : ""));
+  else if (ERR.prices) parts.push('<span class="pos">Preise: ' + esc(ERR.prices) + "</span>");
+  if (pl && pl.act) parts.push("geplant: " + num(nl / 4, 2) + " h Laden, " + num(nh / 4, 2) + " h Halten");
+  $("emPlanInfo").innerHTML = parts.join(" · ");
+}
+document.querySelectorAll("#emDay button").forEach(b => b.addEventListener("click", () => {
+  planDay = +b.dataset.d;
+  redraw(true);
+}));
+document.querySelectorAll("#emBasis button").forEach(b => b.addEventListener("click", () => {
+  basis = b.dataset.b;
+  try { localStorage.setItem("emPriceBasis", basis); } catch (e) {}
+  redraw(true);
+}));
+
+/* ---------- PV-Prognose ---------- */
+/* Gemessene Energie [kWh] und Abdeckung [%] von Feld j in der Viertelstunde
+ * ab t; null, wenn dort nichts gemessen wurde (Zukunft, Display aus). */
+function measAt(fc, j, t) {
+  const q = fc && fc.planes && fc.planes[j];
+  if (!q || !q.mkwh || !ok(fc.meas_t0)) return null;
+  const k = Math.floor((t - fc.meas_t0) / STEP);
+  if (k < 0 || k >= q.mkwh.length || !ok(q.mkwh[k]) || !(q.mcov[k] > 0)) return null;
+  return { kwh: +q.mkwh[k], cov: q.mcov[k] };
+}
+/* Mittlere gemessene Leistung [kW] in der Viertelstunde ab t, Summe der
+ * Felder mit Messung; null ohne jede Messung. */
+function measKw(fc, t) {
+  let s = null;
+  (fc.planes || []).forEach((q, j) => {
+    const m = measAt(fc, j, t);
+    if (m) s = (s || 0) + m.kwh / (STEP / 3600 * m.cov / 100);
+  });
+  return s;
+}
+function drawPv() {
+  const box = $("emPvChart"), fc = D.fc, now = nowS();
+  const planes = (fc && fc.planes) || [];
+  $("emPvLegend").innerHTML = planes.map((q, j) => '<span class="cv-key"><i class="sq" style="background:' + PCOL[j % 6] + '"></i>'
+    + esc(q.name) + "</span>").join("") + '<span class="cv-key"><i style="background:' + REN_COL + '"></i>Netz: Anteil erneuerbar</span>'
+    + '<span class="cv-key"><i style="background:' + MEAS_COL + '"></i>gemessen (Summe)</span>'
+    + '<span class="cv-key"><i class="dash"></i>jetzt</span>';
+  if (!fc) { box.innerHTML = '<div class="cv-empty">' + (ERR.fc ? "Prognose nicht verfügbar: " + esc(ERR.fc) : "lädt …") + "</div>"; }
+  else if (!planes.length) { box.innerHTML = '<div class="cv-empty">Keine PV-Felder eingerichtet – siehe Einstellungen.</div>'; }
+  else {
+    const win = emWindow(now), d0 = win.d0, n = win.n, T = (i) => d0 + i * STEP;
+    const ser = planes.map(q => { const a = []; for (let i = 0; i < n; i++) a.push(at(q.kw, fc.t0, fc.step, T(i))); return a; });
+    const ren = [], meas = [];
+    let mx = 1;
+    for (let i = 0; i < n; i++) {
+      const m = mixAt(T(i));
+      ren.push(m ? m.ren : null);
+      meas.push(measKw(fc, T(i)));
+      let s = 0;
+      ser.forEach(a => { if (ok(a[i])) s += a[i]; });
+      mx = Math.max(mx, s, ok(meas[i]) ? meas[i] : 0);
+    }
+    chart(box, {
+      n: n, now: win.now, aligned: true, xt: emXt(d0, n),
+      panels: [
+        { title: "PV-Leistung [kW]", h: 170, hn: 130, min: 0, max: mx,
+          draw: (c) => { stack(c, ser, planes.map((q, j) => PCOL[j % 6])); line(c, meas, MEAS_COL); },
+          dots: (i) => { let s = 0; return ser.map((a, j) => { if (!ok(a[i])) return { v: null }; s += a[i]; return { v: s, col: PCOL[j % 6] }; })
+                           .concat([{ v: meas[i], col: MEAS_COL }]); } },
+        { title: "Netz: Anteil erneuerbar [%]", h: 64, hn: 54, min: 0, max: 100, step: 50,
+          draw: (c) => area(c, ren, REN_COL), dots: (i) => [{ v: ren[i], col: REN_COL }] },
+      ],
+      tip: (i) => {
+        let h = slotTxt(T(i)), s = 0, any = false;
+        ser.forEach((a, j) => {
+          if (!ok(a[i])) return;
+          any = true; s += a[i];
+          const me = measAt(fc, j, T(i));
+          h += "<br>" + sk(PCOL[j % 6]) + "<b>" + num(a[i], 2) + " kW</b> " + '<span class="m">' + esc(planes[j].name)
+             + (me ? " · gemessen " + num(me.kwh / (STEP / 3600 * me.cov / 100), 2) + " kW" : "") + "</span>";
+        });
+        if (any && ser.length > 1) h += '<br><b>' + num(s, 2) + ' kW</b> <span class="m">Summe Prognose</span>';
+        if (ok(meas[i])) h += "<br>" + lk(MEAS_COL) + "<b>" + num(meas[i], 2) + ' kW</b> <span class="m">gemessen</span>';
+        const m = mixAt(T(i));
+        if (m) h += "<br>" + lk(REN_COL) + "<b>" + num(m.ren) + ' %</b> <span class="m">erneuerbar · Sonne '
+                  + num(m.solar) + " % · Wind " + num(m.wind) + " %</span>";
+        return any || m ? h : null;
+      },
+    });
+  }
+  /* Tabelle je Feld */
+  let h = "", t = [0, 0, 0];
+  planes.forEach((q, j) => {
+    h += '<tr><td><span class="em-dot" style="background:' + PCOL[j % 6] + ';width:10px;height:10px;margin-right:6px;"></span>'
+      + esc(q.name) + "</td><td>" + num(q.kwh_today, 1) + "</td><td>" + num(q.meas_kwh_today, 1) + "</td><td>"
+      + num(q.kwh_tomorrow, 1) + "</td><td>" + num(q.cal, 2) + "</td></tr>";
+    ["kwh_today", "meas_kwh_today", "kwh_tomorrow"].forEach((k, m) => { if (ok(q[k])) t[m] += +q[k]; });
+  });
+  if (planes.length > 1)
+    h += '<tr class="sum"><td>Summe</td><td>' + num(t[0], 1) + "</td><td>" + num(t[1], 1) + "</td><td>" + num(t[2], 1) + "</td><td></td></tr>";
+  $("emPvBody").innerHTML = h || '<tr><td colspan="5" class="hint">–</td></tr>';
+  $("emPvSum").textContent = planes.length ? "heute " + num(t[0], 1) + " kWh · morgen " + num(t[2], 1) + " kWh" : "";
+  $("emPvInfo").innerHTML = fc ? ("Open-Meteo" + (fc.fetched ? ", geholt " + hm(fc.fetched) : "")
+    + " · Korrekturfaktor = gemessen/vorhergesagt, gelernt je Feld"
+    + (fc.err ? ' – <span class="pos">' + esc(fc.err) + "</span>" : "")) : "";
+}
+
+/* ---------- PV-Tagesenergie kumuliert ----------
+ * Ist (gemessen) gegen Prognose, je Tag ab Mitternacht aufsummiert -- im
+ * 48-h-Fenster beginnt der zweite Tag wieder bei 0. Verglichen werden nur
+ * Felder mit eigener Messung, sonst stuende Ist gegen eine zu grosse Prognose. */
+function drawPvE() {
+  const box = $("emPvEChart"), fc = D.fc, now = nowS();
+  const cp = (D.cfg && D.cfg.planes) || [];
+  const planes = (fc && fc.planes) || [];
+  const use = planes.map((q, j) => !cp[j] || cp[j].meter !== -1);
+  const names = planes.filter((q, j) => use[j]).map(q => q.name).join("+");
+  const nUse = use.filter(Boolean).length;
+  $("emPvELegend").innerHTML = '<span class="cv-key"><i class="sq" style="background:' + IST_COL + '"></i>Ist kumuliert</span>'
+    + '<span class="cv-key"><i style="background:' + PROG_COL + '"></i>Prognose kumuliert</span>'
+    + '<span class="cv-key"><i class="dash"></i>jetzt</span>';
+  if (!fc) { box.innerHTML = '<div class="cv-empty">' + (ERR.fc ? "Prognose nicht verfügbar: " + esc(ERR.fc) : "lädt …") + "</div>"; return; }
+  if (!names) { box.innerHTML = '<div class="cv-empty">Kein PV-Feld mit Messung – siehe Einstellungen.</div>'; return; }
+  const win = emWindow(now), d0 = win.d0, n = win.n, T = (i) => d0 + i * STEP;
+  const ist = [], prog = [];
+  let day = null, ci = 0, cp0 = 0, mx = 0.5, istNow = null, progNow = null, progDay = {}, cov = 0, slots = 0;
+  for (let i = 0; i < n; i++) {
+    const t = T(i), dd = midnight(t);
+    if (dd !== day) { day = dd; ci = 0; cp0 = 0; }
+    let pk = null;
+    planes.forEach((q, j) => {
+      if (!use[j]) return;
+      const v = at(q.kw, fc.t0, fc.step, t);
+      if (ok(v)) pk = (pk || 0) + v;
+    });
+    if (ok(pk)) cp0 += pk * STEP / 3600;
+    prog.push(ok(pk) || cp0 > 0 ? cp0 : null);
+    progDay[dd] = cp0;
+    /* Ist nur bis zur laufenden Viertelstunde, und nur am gemessenen Tag */
+    const measured = ok(fc.meas_t0) && dd === fc.meas_t0 && t <= now;
+    if (measured) {
+      let c = 0;
+      planes.forEach((q, j) => {
+        if (!use[j]) return;
+        const m = measAt(fc, j, t);
+        if (m) { ci += m.kwh; c += m.cov; }
+      });
+      cov += c / nUse; slots++;
+      ist.push(ci);
+      istNow = ci;
+      if (t + STEP > now) progNow = cp0 - (ok(pk) ? pk * (t + STEP - now) / 3600 : 0);
+    } else ist.push(null);
+    mx = Math.max(mx, cp0, ok(ist[i]) ? ist[i] : 0);
+  }
+  const covPct = slots ? cov / slots : 0;
+  chart(box, {
+    n: n, now: win.now, aligned: true, xt: emXt(d0, n),
+    panels: [
+      { title: box.clientWidth < 500 ? "Tagesenergie [kWh]" : "Tagesenergie kumuliert (" + esc(names) + ") [kWh]", h: 190, hn: 150, min: 0, max: mx * 1.05,
+        draw: (c) => { area(c, ist, IST_COL); line(c, prog, PROG_COL); },
+        dots: (i) => [{ v: ist[i], col: IST_COL }, { v: prog[i], col: PROG_COL }] },
+    ],
+    tip: (i) => {
+      if (!ok(ist[i]) && !ok(prog[i])) return null;
+      let h = "bis " + dayTxt(T(i)) + " " + hm(T(i) + STEP);
+      if (ok(ist[i])) h += "<br>" + sk(IST_COL) + "<b>" + num(ist[i], 2) + ' kWh</b> <span class="m">Ist</span>';
+      if (ok(prog[i])) h += "<br>" + lk(PROG_COL) + "<b>" + num(prog[i], 2) + ' kWh</b> <span class="m">Prognose</span>';
+      if (ok(ist[i]) && ok(prog[i]) && prog[i] > 0.05)
+        h += '<br><span class="m">Ist/Prognose ' + num(ist[i] / prog[i] * 100) + " %</span>";
+      return h;
+    },
+  });
+  const today = midnight(now), pd = progDay[today];
+  $("emPvESum").textContent = ok(istNow) ? "Ist " + num(istNow, 1) + " kWh · Prognose bis jetzt " + num(progNow, 1) + " kWh" : "";
+  $("emPvEInfo").innerHTML = (ok(istNow)
+      ? "Bis jetzt: Ist <b>" + num(istNow, 2) + " kWh</b>, Prognose <b>" + num(progNow, 2) + " kWh</b>"
+        + (progNow > 0.05 ? " (" + num(istNow / progNow * 100) + " %)" : "") + " · "
+      : "")
+    + (ok(pd) ? "Prognose ganzer Tag " + num(pd, 1) + " kWh" : "")
+    + (ok(istNow) && covPct < 97
+       ? ' · <span class="pos">Messung lückenhaft (' + num(covPct) + " % des Tages bis jetzt erfasst, z. B. Display aus): Ist zu niedrig</span>" : "")
+    + '<span class="nomob"><br>Prognose = aktuelle, kalibrierte Prognose (wird stündlich neu geholt), nicht die vom Morgen.</span>';
+}
+
+/* ---------- Verbrauchsprofil ---------- */
+function drawLoad() {
+  const box = $("emLoadChart"), ld = D.load, now = nowS();
+  if (!ld) { box.innerHTML = '<div class="cv-empty">' + (ERR.load ? "Profil nicht verfügbar: " + esc(ERR.load) : "lädt …") + "</div>"; return; }
+  const wd = (ld.wd || []).slice(0, 96), we = (ld.we || []).slice(0, 96);
+  while (wd.length < 96) wd.push(null);
+  while (we.length < 96) we.push(null);
+  const all = wd.concat(we).filter(ok);
+  const day = new Date().getDay(), isWe = day === 0 || day === 6;
+  /* Woher das Profil kommt: Durchschnitt der gespeicherten Tage (Langzeit-
+   * speicher, ab 3 Tagen je Typ) oder noch das gleitende Mittel. */
+  const src = ld.src || [0, 0], ad = ld.avg_days || [0, 0];
+  const kind = (k, name, pl) => src[k]
+    ? "Durchschnitt von " + num(ad[k]) + " " + (ad[k] === 1 ? name : pl)
+    : "gleitendes Mittel (" + name + "-Durchschnitt ab 3 gespeicherten Tagen)";
+  const df = (s) => { const p = String(s || "").split("-"); return p.length === 3 ? p[2] + "." + p[1] + "." + p[0] : ""; };
+  const longTxt = "Werktag: " + kind(0, "Werktag", "Werktagen") + " · Wochenende: " + kind(1, "Wochenendtag", "Wochenendtagen")
+    + " (je die letzten ~6 Wochen, Ausreißer gekappt)"
+    + (ld.hist_ok ? " · Langzeitspeicher: " + num(ld.hist_days) + " Tage" + (ld.hist_from ? " seit " + df(ld.hist_from) : "")
+                  : " · kein Langzeitspeicher")
+    + " · heute gilt das " + (isWe ? "Wochenend" : "Werktags") + "profil";
+  /* Am Telefon nur das Wesentliche */
+  const shortTxt = (src[0] ? "Werktag Ø " + num(ad[0]) + " Tage" : "Werktag: gleitend") + " · "
+    + (src[1] ? "Wochenende Ø " + num(ad[1]) + " Tage" : "Wochenende: gleitend")
+    + (ld.hist_ok ? " · " + num(ld.hist_days) + " Tage gespeichert" : "");
+  $("emLoadInfo").innerHTML = '<span class="nomob">' + esc(longTxt) + '</span><span class="mobonly">' + esc(shortTxt) + "</span>";
+  $("emLoadSum").textContent = ld.hist_ok ? num(ld.hist_days) + " Tage gespeichert" : "";
+  if (!all.length) { box.innerHTML = '<div class="cv-empty">Noch kein Tag gelernt – das Profil füllt sich mit jedem vollen Tag.</div>'; return; }
+  /* Gelernt wird ein TAGESprofil je Viertelstunde, getrennt nach Werktag und
+   * Wochenende. Im gemeinsamen Fenster (Heute | Morgen | 48 h) bekommt jeder
+   * Tag das Profil seines Typs -- genau die Kurve, mit der der Planer
+   * rechnet. Das jeweils andere Profil steht nur blass zum Vergleich daneben;
+   * zwei gleichwertige Linien ueber 48 h sahen aus wie doppelte Daten. */
+  const win = emWindow(now), d0 = win.d0, n = win.n, T = (i) => d0 + i * STEP;
+  const qix = (t) => { const d = new Date(t * 1000); return d.getHours() * 4 + Math.floor(d.getMinutes() / 15); };
+  const weekendAt = (t) => { const g = new Date(t * 1000).getDay(); return g === 0 || g === 6; };
+  const exp = [], alt = [], meas = [], today = midnight(now);
+  for (let i = 0; i < n; i++) {
+    const k = qix(T(i)), w = weekendAt(T(i));
+    exp.push(w ? we[k] : wd[k]);
+    alt.push(w ? wd[k] : we[k]);
+    meas.push(midnight(T(i)) === today && ld.today && ok(ld.today[k]) ? ld.today[k] : null);
+  }
+  const mxm = meas.filter(ok);
+  chart(box, {
+    n: n, now: win.now, aligned: true, xt: emXt(d0, n),
+    panels: [{ title: "Hausverbrauch [kW]", h: 170, hn: 130, min: 0, max: Math.max(0.5, Math.max.apply(null, all.concat(mxm))),
+               draw: (c) => {
+                 const d = pathOf(c, alt);
+                 if (d) svgEl("path", { d: d, fill: "none", stroke: "var(--bdi)", "stroke-width": 1.5,
+                                        "stroke-dasharray": "3 3", opacity: 0.8 }, c.g);
+                 line(c, exp, "var(--s1)");
+                 line(c, meas, "var(--fg)");
+               },
+               dots: (i) => [{ v: exp[i], col: "var(--s1)" }, { v: meas[i], col: "var(--fg)" }] }],
+    tip: (i) => {
+      const w = weekendAt(T(i));
+      return slotTxt(T(i))
+               + "<br>" + lk("var(--s1)") + "<b>" + num(exp[i], 2) + ' kW</b> <span class="m">erwartet ('
+               + (w ? "Wochenendprofil" : "Werktagsprofil") + ")</span>"
+               + (ok(meas[i]) ? "<br>" + lk("var(--fg)") + "<b>" + num(meas[i], 2) + ' kW</b> <span class="m">gemessen</span>' : "")
+               + '<br><span class="m">zum Vergleich ' + (w ? "Werktag" : "Wochenende") + ": " + num(alt[i], 2) + " kW</span>";
+    },
+  });
+}
+
+/* ---------- Fronius / BYD ---------- */
+const CHA_ST = { 1: "aus", 2: "leer", 3: "entlädt", 4: "lädt", 5: "voll", 6: "hält", 7: "Test" };
+function renderFr() {
+  const f = D.fr, allow = !!(D.cfg && D.cfg.byd_ctrl);
+  if (!f) { $("emFrKv").innerHTML = '<p class="hint">' + (ERR.fr ? "nicht verfügbar: " + esc(ERR.fr) : "lädt …") + "</p>"; return; }
+  const ctl = [];
+  if (f.ctl_mod & 1) ctl.push("Laden begrenzt");
+  if (f.ctl_mod & 2) ctl.push("Entladen begrenzt");
+  const rows = [
+    ["Verbindung", f.ok ? "ok · " + esc(f.ip) : f.err ? '<span class="pos">keine: ' + esc(f.err) + "</span>" : "wird gelesen …"],
+    ["SunSpec-Speichermodell ab Register", esc(f.addr)],
+    ["Ladestand BYD", num(f.soc, 1) + " %"],
+    frSl("reserve", "Reserve (MinRsvPct)", f.ok ? f.reserve : null, 0, 100, 1, allow && f.ok, (v) => num(v) + " %"),
+    ["Zustand (ChaSt)", esc(CHA_ST[f.cha_st] || f.cha_st)],
+    ["Steuerung (StorCtl_Mod)", esc(f.ctl_mod) + (ctl.length ? " – " + ctl.join(", ") : " – keine Begrenzung")],
+    /* Waehrend einer Sperre/Ladegrenze des ESP stellt der Regler den Grundwert
+     * des Betreibers ein (kommt nach dem Ende zurueck); live steht der Wert des ESP. */
+    frSl("out", "Entladen (OutWRte)", f.ok ? frBase(f, "out") : null, 0, 100, 0.5, allow && f.ok,
+         (v) => frRate(v, f) + (f.owed && f.base_known && Math.abs(f.out_rte - v) > 0.01 ? " · jetzt " + num(f.out_rte, 2) + " % (" + frWhy(f) + ")" : "")),
+    frSl("in", "Laden (InWRte)", f.ok ? frBase(f, "in") : null, 0, 100, 0.5, allow && f.ok,
+         (v) => frRate(v, f) + (f.owed && f.base_known && ok(f.base_in) && Math.abs(f.in_rte - v) > 0.01 ? " · jetzt " + num(f.in_rte, 2) + " % (" + frWhy(f) + ")" : "")),
+    frSl("cap", "Obere Ladegrenze (vom ESP gehalten)", ok(f.cap) ? f.cap : 100, 50, 100, 1, allow,
+         (v) => v >= 100 ? "aus" : num(v) + " %" + (f.cap_on ? " · Laden gerade gesperrt" : "")),
+    ["WChaMax", num(f.wchamax) + " W"],
+    ["Rückfallzeit (RvrtTms)", f.no_revert ? '<span class="pos">vom Fronius nicht unterstützt</span>'
+                                : (f.rvrt === 65535 ? "nicht gesetzt (65535)" : num(f.rvrt) + " s")],
+    ["Laden aus dem Netz (ChaGriSet)", f.grid_charge ? "erlaubt" : "nur PV"],
+    ["Entladung gesperrt", f.blocked ? "<b>ja</b>" + (f.lock_req ? " – von Hand" : " – Energiemanager") : "nein"],
+    ["Zwangsbetrieb", frForceTxt(f)],
+  ];
+  if (f.owed && !f.blocked) rows.push(["Aufhebung", "ausstehend – wird beim nächsten Zugriff nachgeholt"]);
+  if (f.ok && f.err) rows.push(["Letzter Fehler", '<span class="pos">' + esc(f.err) + "</span>"]);
+  /* Noch nichts gelesen (kurz nach dem Start sucht das Geraet den Fronius):
+   * keine Nullen zeigen, die wie Messwerte aussehen. */
+  if (!f.ok) {
+    const READ = ["SunSpec-Speichermodell ab Register", "Ladestand BYD", "Zustand (ChaSt)", "Steuerung (StorCtl_Mod)",
+                  "WChaMax", "Rückfallzeit (RvrtTms)", "Laden aus dem Netz (ChaGriSet)"];
+    rows.forEach(r => { if (READ.includes(r[0])) r[1] = "–"; });
+  }
+  /* Waehrend ein Regler gezogen oder geschrieben wird, nicht neu aufbauen --
+   * sonst springt er beim naechsten Abruf unter dem Finger zurueck. */
+  if (frBusy) return;
+  $("emFrKv").innerHTML = rows.map(r => r.sl
+      ? '<div class="kv sl"><span>' + r[0] + '</span><b id="frv-' + r.sl.reg + '">' + r[1] + "</b>" + r.sl.html + "</div>"
+      : '<div class="kv"><span>' + r[0] + "</span><b>" + r[1] + "</b></div>").join("");
+  $("emFrSum").textContent = !f.ok ? "keine Verbindung"
+    : "BYD " + num(f.soc) + " % · " + (f.force ? (f.force === 1 ? "Zwangsladen" : "Zwangsentladen") + " " + num(f.force_w) + " W"
+                                         : "Entladung " + (f.blocked ? "gesperrt" : "frei"));
+}
+/* Schieberegler je Wert. fmt(v) ist der Text daneben, waehrend des Ziehens
+ * live nachgefuehrt; geschrieben wird beim Loslassen. */
+let frBusy = false, frWriting = false;
+const FR_FMT = {};
+function frSl(reg, label, v, min, max, step, allow, fmt) {
+  FR_FMT[reg] = fmt;
+  const val = ok(v) ? v : min;
+  const row = [label, ok(v) ? fmt(+v) : "–"];
+  const p = Math.max(0, Math.min(1, (val - min) / (max - min)));
+  row.sl = { reg: reg, html: '<input type="range" data-reg="' + reg + '" min="' + min + '" max="' + max + '" step="' + step
+    + '" value="' + val + '" style="--p:' + p.toFixed(4) + '"' + (allow ? "" : " disabled") + ' aria-label="' + esc(label) + '">' };
+  return row;
+}
+/* Der Wert, den der Regler zeigt: der Grundwert, solange der ESP das Register haelt. */
+function frBase(f, k) {
+  if (f.owed && f.base_known && ok(f["base_" + k])) return +f["base_" + k];
+  return k === "out" ? f.out_rte : f.in_rte;
+}
+function frRate(v, f) { return num(v, 2) + " %" + (ok(f.wchamax) ? " (" + num(v * f.wchamax / 100) + " W)" : ""); }
+function frWhy(f) { return f.blocked ? "Sperre" : f.cap_on ? "Ladegrenze" : f.forcing ? "Zwangsbetrieb" : "ESP"; }
+$("emFrKv").addEventListener("pointerdown", (ev) => { if (ev.target.type === "range") frBusy = true; });
+/* Nur angetippt, nicht verschoben: kein change -- die Sperre fuer den Neuaufbau
+ * trotzdem wieder loesen. */
+$("emFrKv").addEventListener("pointerup", () => setTimeout(() => { if (!frWriting) frBusy = false; }, 400));
+$("emFrKv").addEventListener("input", (ev) => {
+  const el = ev.target, reg = el.dataset.reg;
+  if (!reg) return;
+  frBusy = true;
+  el.style.setProperty("--p", ((+el.value - +el.min) / (+el.max - +el.min)).toFixed(4));
+  $("frv-" + reg).textContent = FR_FMT[reg](+el.value);
+});
+$("emFrKv").addEventListener("change", async (ev) => {
+  const el = ev.target, reg = el.dataset.reg;
+  if (!reg) return;
+  const m = $("emFrMsg"), v = +el.value;
+  m.textContent = "schreibt …";
+  frWriting = true;
+  try {
+    let d;
+    if (reg === "cap") {
+      const r = await fetch("/api/em/cfg", { method: "POST", headers: { "Content-Type": "application/json" },
+                                             body: JSON.stringify({ byd_max: v }), signal: sig(8000) });
+      d = await r.json();
+      if (d.ok !== false && D.cfg) D.cfg.byd_max = v;
+    } else {
+      const r = await fetch("/api/em/fronius?cmd=set&reg=" + reg + "&v=" + v, { method: "POST", signal: sig(15000) });
+      d = await r.json();
+    }
+    m.textContent = d.ok === false ? "Fehler: " + (d.err || "?") : "übernommen" + (d.msg ? " – " + d.msg : " und zurückgelesen");
+  } catch (e) { m.textContent = "Fehler: keine Verbindung"; }
+  frWriting = false;
+  frBusy = false;
+  kick(false);
+});
+
+/* Laufender Zwangsbetrieb in Worten, sonst wie der letzte endete. */
+function frForceTxt(f) {
+  if (!f.force) return "aus" + (f.force_end ? " – zuletzt: " + esc(f.force_end) : "");
+  const what = (f.force === 1 ? "Laden " : "Entladen ") + num(f.force_w) + " W bis " + hm(f.force_until)
+             + " oder " + (f.force === 1 ? "≥ " : "≤ ") + num(f.force_soc) + " %";
+  return "<b>" + what + "</b>" + (f.forcing ? " · übernommen" : ' · <span class="pos">wird angewendet …</span>');
+}
+
+
+
+/* ---------- Einstellungen ---------- */
+let formDirty = false, planes = [], maxPlanes = 6, cfgSeen = false;
+const F = { lat: "emLat", lon: "emLon", deye_kwh: "emDeyeKwh", byd_kwh: "emBydKwh", byd_res: "emBydRes",
+            charge_kw: "emChargeKw", spread: "emSpread", cycle: "emCycle", soc_min: "emSocMin", soc_max: "emSocMax" };
+const FNAME = { lat: "Breite", lon: "Länge", deye_kwh: "Deye-Akku", byd_kwh: "BYD-Akku", byd_res: "BYD-Reserve",
+                charge_kw: "Ladeleistung", spread: "Mindestvorteil", cycle: "Verschleiß", soc_min: "SoC min", soc_max: "SoC max" };
+
+function meterOpts(sel) {
+  const opts = [[-1, "—"]];
+  (D.meters || []).forEach((g, k) => opts.push([ok(g.idx) ? +g.idx : k, g.name || g.mfr || ("Gerät " + k)]));
+  opts.push([METER_DEYE, "Deye (eigene PV-Strings)"]);
+  if (ok(sel) && !opts.some(o => o[0] === +sel)) opts.splice(1, 0, [+sel, "Gerät #" + sel]);
+  return opts.map(o => '<option value="' + o[0] + '"' + (+sel === o[0] ? " selected" : "") + ">" + esc(o[1]) + "</option>").join("");
+}
+function planeHtml(p, k) {
+  return '<div class="em-plane" data-k="' + k + '">'
+    + '<div class="hd"><span class="em-dot" style="background:' + PCOL[k % 6] + '"></span><span>Feld ' + (k + 1) + "</span>"
+    + '<span class="spacer"></span><button type="button" class="danger" data-rm="1">Entfernen</button></div>'
+    + '<div class="em-grid">'
+    + '<label>Name<input type="text" data-f="name" maxlength="15" value="' + esc(p.name) + '"></label>'
+    + '<label>Leistung [kWp]<input type="number" data-f="kwp" min="0.1" max="100" step="0.01" value="' + esc(p.kwp) + '"></label>'
+    + '<label>Neigung [°]<input type="number" data-f="tilt" min="0" max="90" step="1" value="' + esc(p.tilt) + '"></label>'
+    + '<div><label>Ausrichtung [°, Nord = 0]<input type="number" data-f="az" min="0" max="359" step="1" value="' + esc(p.az) + '"></label>'
+    + '<span class="em-az"><button type="button" data-az="90">Ost</button><button type="button" data-az="180">Süd</button>'
+    + '<button type="button" data-az="270">West</button></span></div>'
+    + '<label>AC-Grenze [kW, 0 = keine]<input type="number" data-f="ac" min="0" max="60" step="0.1" value="' + esc(p.ac || 0) + '"></label>'
+    + '<label>Messung<select data-f="meter">' + meterOpts(p.meter) + "</select></label>"
+    + "</div></div>";
+}
+function renderPlanes() {
+  $("emPlanes").innerHTML = planes.length ? planes.map(planeHtml).join("")
+    : '<p class="hint" style="margin:0 0 8px;">Noch kein PV-Feld. Ohne Felder plant der Manager ohne PV-Prognose.</p>';
+  $("emPlaneAdd").disabled = planes.length >= maxPlanes;
+  $("emPlaneMsg").textContent = planes.length >= maxPlanes ? "höchstens " + maxPlanes + " Felder" : "";
+}
+/* Neues Feld: ein Messgeraet gleichen Namens vorbelegen, solange der Nutzer
+ * die Auswahl nicht selbst angefasst hat. */
+function autoMeter(p) {
+  if (!p.fresh || p.meterTouched || !D.meters) return;
+  const nm = String(p.name || "").trim().toLowerCase();
+  const k = D.meters.findIndex(g => nm && String(g.name || "").trim().toLowerCase() === nm);
+  p.meter = k >= 0 ? (ok(D.meters[k].idx) ? +D.meters[k].idx : k) : -1;
+}
+$("emPlanes").addEventListener("input", (ev) => {
+  const box = ev.target.closest(".em-plane"), f = ev.target.dataset.f;
+  if (!box || !f) return;
+  const p = planes[+box.dataset.k];
+  p[f] = ev.target.value;
+  if (f === "meter") p.meterTouched = true;
+  if (f === "name" && p.fresh && !p.meterTouched) {
+    autoMeter(p);
+    box.querySelector('select[data-f="meter"]').value = String(p.meter);
+  }
+});
+$("emPlanes").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button"), box = ev.target.closest(".em-plane");
+  if (!b || !box) return;
+  const k = +box.dataset.k;
+  if (b.dataset.az) {
+    planes[k].az = b.dataset.az;
+    box.querySelector('input[data-f="az"]').value = b.dataset.az;
+    formDirty = true;
+  } else if (b.dataset.rm) {
+    if (!confirm("Feld „" + (planes[k].name || k + 1) + "“ entfernen? (wirksam erst mit Speichern)")) return;
+    planes.splice(k, 1);
+    formDirty = true;
+    renderPlanes();
+  }
+});
+$("emPlaneAdd").addEventListener("click", () => {
+  if (planes.length >= maxPlanes) return;
+  planes.push({ name: "", kwp: "", tilt: 30, az: 180, meter: -1, fresh: true });
+  formDirty = true;
+  renderPlanes();
+  const ins = $("emPlanes").querySelectorAll('input[data-f="name"]');
+  if (ins.length) ins[ins.length - 1].focus();
+});
+$("emFoldCfg").addEventListener("input", (ev) => { if (ev.target.id !== "emGeoQ") formDirty = true; });
+$("emFoldCfg").addEventListener("change", (ev) => { if (ev.target.id !== "emGeoQ") formDirty = true; });
+
+function fillForm() {
+  const c = D.cfg;
+  if (!c || formDirty) return;
+  for (const k in F) $(F[k]).value = ok(c[k]) ? c[k] : "";
+  $("emBydCtrl").checked = !!c.byd_ctrl;
+  maxPlanes = ok(c.max) ? +c.max : 6;
+  planes = (c.planes || []).map(p => ({ name: p.name, kwp: p.kwp, tilt: p.tilt, az: p.az, meter: ok(p.meter) ? +p.meter : -1 }));
+  renderPlanes();
+  renderTok();
+  /* Noch nichts eingerichtet: am Rechner gleich die Einstellungen zeigen */
+  if (!PHONE && !planes.length && !cfgSeen) $("emFoldCfg").open = true;
+  cfgSeen = true;
+  const kwp = planes.reduce((s, p) => s + (ok(p.kwp) ? +p.kwp : 0), 0);
+  $("emCfgSum").textContent = num(c.lat, 3) + " / " + num(c.lon, 3) + " · " + planes.length + " Feld" + (planes.length === 1 ? "" : "er")
+    + (planes.length ? ", " + num(kwp, 1) + " kWp" : "") + " · Tibber " + (c.tok ? "gesetzt" : "nicht gesetzt");
+}
+function renderTok() {
+  const t = D.cfg && D.cfg.tok;
+  $("emTokState").textContent = t ? "Token gesetzt" : "Token nicht gesetzt";
+  $("emTokState").className = "pill " + (t ? "ok" : "");
+  $("emTokDel").disabled = !t;
+}
+/* Pruefen wie im Zaehler-Tab: leer, unlesbar oder ausserhalb min/max wird
+ * nicht gesendet; die Meldung nennt das Feld, der Fokus springt hin. */
+function numOf(el, name) {
+  const v = el.validity;
+  if (el.value.trim() === "" || v.badInput || v.rangeOverflow || v.rangeUnderflow) {
+    el.focus();
+    throw new Error(name + " prüfen (" + el.min.replace(".", ",") + " bis " + el.max.replace(".", ",") + ")");
+  }
+  return +el.value;
+}
+function formBody() {
+  const b = {};
+  for (const k in F) b[k] = numOf($(F[k]), FNAME[k]);
+  b.lat = Math.round(b.lat * 1e5) / 1e5;
+  b.lon = Math.round(b.lon * 1e5) / 1e5;
+  /* wie die Firmware (em_cfg.c): mindestens 10 Punkte Abstand */
+  if (b.soc_min + 10 > b.soc_max) { $("emSocMin").focus(); throw new Error("SoC max muss mindestens 10 % über SoC min liegen"); }
+  b.mode = modeNow !== null ? modeNow : (D.cfg ? D.cfg.mode : 0);
+  b.byd_ctrl = $("emBydCtrl").checked ? 1 : 0;
+  const boxes = $("emPlanes").querySelectorAll(".em-plane");
+  b.planes = planes.map((p, k) => {
+    const q = (f) => boxes[k].querySelector('[data-f="' + f + '"]');
+    const name = q("name").value.trim();
+    if (!name) { q("name").focus(); throw new Error("Feld " + (k + 1) + ": Name fehlt"); }
+    if (planes.some((o, j) => j !== k && String(o.name).trim().toLowerCase() === name.toLowerCase())) {
+      q("name").focus(); throw new Error("Feldname „" + name + "“ doppelt");
+    }
+    return { name: name, kwp: numOf(q("kwp"), name + ": kWp"), tilt: numOf(q("tilt"), name + ": Neigung"),
+             az: numOf(q("az"), name + ": Ausrichtung"), ac: numOf(q("ac"), name + ": AC-Grenze"),
+             meter: +q("meter").value };
+  });
+  if (b.planes.length > maxPlanes) throw new Error("höchstens " + maxPlanes + " Felder");
+  return b;
+}
+async function postCfg(body, msgEl) {
+  msgEl.textContent = "speichert …";
+  try {
+    const r = await fetch("/api/em/cfg", { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify(body), signal: sig(8000) });
+    let d = null;
+    try { d = await r.json(); } catch (e) { throw new Error("HTTP " + r.status); }
+    if (!d.ok) { msgEl.textContent = "Fehler: " + (d.err || "abgelehnt"); return false; }
+    msgEl.textContent = "gespeichert";
+    formDirty = false;
+    $("emTok").value = "";
+    D.cfg = null;           /* frisch laden: der naechste Durchlauf fuellt das Formular */
+    kick(true);
+    setTimeout(() => { if (msgEl.textContent === "gespeichert") msgEl.textContent = ""; }, 5000);
+    return true;
+  } catch (e) {
+    msgEl.textContent = "Fehler: " + (e.message || "keine Verbindung");
+    return false;
+  }
+}
+$("emSave").addEventListener("click", () => {
+  const m = $("emSaveMsg");
+  if (!D.cfg && !formDirty) { m.textContent = "Einstellungen noch nicht vom Gerät geladen"; return; }
+  let b;
+  try { b = formBody(); } catch (e) { m.textContent = e.message; return; }
+  const tok = $("emTok").value.trim();
+  if (tok) b.token = tok;
+  postCfg(b, m);
+});
+/* Token loeschen schickt die zuletzt GELADENEN Werte mit, nicht das
+ * Formular -- sonst wuerden halb getippte Aenderungen nebenbei gespeichert. */
+$("emTokDel").addEventListener("click", () => {
+  const c = D.cfg;
+  if (!c || !confirm("Tibber-Token löschen? Ohne Token holt der Manager keine Preise mehr.")) return;
+  const b = {};
+  ["lat", "lon", "deye_kwh", "byd_kwh", "byd_res", "charge_kw", "spread", "cycle", "soc_min", "soc_max", "mode", "byd_ctrl", "planes"]
+    .forEach(k => { b[k] = c[k]; });
+  b.token = "";
+  const keep = formDirty;
+  postCfg(b, $("emSaveMsg")).then(okd => { if (okd && keep) formDirty = true; });
+});
+
+/* Ortssuche: Open-Meteo Geocoding, CORS ist dort offen */
+async function geoSearch() {
+  const q = $("emGeoQ").value.trim(), list = $("emGeoList");
+  if (!q) return;
+  list.innerHTML = '<span class="hint">sucht …</span>';
+  try {
+    const r = await fetch("https://geocoding-api.open-meteo.com/v1/search?name=" + encodeURIComponent(q) + "&count=5&language=de",
+                          { signal: sig(8000) });
+    const d = await r.json();
+    const res = d.results || [];
+    list.innerHTML = res.length ? "" : '<span class="hint">nichts gefunden</span>';
+    res.forEach(g => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = [g.name, g.admin1, g.country].filter(Boolean).join(", ")
+        + " (" + num(g.latitude, 3) + " / " + num(g.longitude, 3) + ")";
+      b.addEventListener("click", () => {
+        $("emLat").value = Math.round(g.latitude * 1e5) / 1e5;
+        $("emLon").value = Math.round(g.longitude * 1e5) / 1e5;
+        formDirty = true;
+        list.innerHTML = '<span class="hint">übernommen: ' + esc(g.name) + " – noch speichern</span>";
+      });
+      list.appendChild(b);
+    });
+  } catch (e) { list.innerHTML = '<span class="pos">Suche fehlgeschlagen (Internet?)</span>'; }
+}
+$("emGeoBtn").addEventListener("click", geoSearch);
+$("emGeoQ").addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); geoSearch(); } });
+
+/* Das PV-Modell des Betreibers, wie in pv_forecast.c (Spencer-Sonnenstand,
+ * HDKR, Martin-Ruiz-IAM, Faiman, Huld, 8 % Verluste, Schneeabschlag) --
+ * fuer die Vorschau mit noch nicht gespeicherten Feldern. Die Firmware ist
+ * die Referenz; die Host-Tests pruefen sie gegen eine Python-Fassung. */
+function pvSun(t, lat, lon) {
+  const u = new Date(t * 1000), y0 = Date.UTC(u.getUTCFullYear(), 0, 1);
+  const doy = Math.floor((t * 1000 - y0) / 86400000) + 1;
+  const hr = u.getUTCHours() + u.getUTCMinutes() / 60 + u.getUTCSeconds() / 3600;
+  const B = 2 * Math.PI * (doy - 1 + (hr - 12) / 24) / 365, c = Math.cos, s = Math.sin;
+  const dec = 0.006918 - 0.399912 * c(B) + 0.070257 * s(B) - 0.006758 * c(2 * B) + 0.000907 * s(2 * B)
+            - 0.002697 * c(3 * B) + 0.00148 * s(3 * B);
+  const eot = 229.18 * (0.000075 + 0.001868 * c(B) - 0.032077 * s(B) - 0.014615 * c(2 * B) - 0.040849 * s(2 * B));
+  const hra = (hr * 60 + eot + 4 * lon) / 4 - 180, la = lat * Math.PI / 180;
+  const cz = Math.max(-1, Math.min(1, s(la) * s(dec) + c(la) * c(dec) * c(hra * Math.PI / 180)));
+  const sz = Math.sqrt(1 - cz * cz);
+  let az = 180;
+  if (sz > 1e-6) {
+    az = Math.acos(Math.max(-1, Math.min(1, (s(dec) - s(la) * cz) / (c(la) * sz)))) * 180 / Math.PI;
+    if (hra > 0) az = 360 - az;
+  }
+  return { cz: cz, az: az, doy: doy };
+}
+function pvKw(p, w, t, lat, lon) {
+  if (!ok(w.ghi) || !ok(w.dhi)) return null;
+  if (w.ghi <= 0) return 0;
+  const S = pvSun(t, lat, lon), tb = p.tilt * Math.PI / 180, sz = Math.sqrt(Math.max(0, 1 - S.cz * S.cz));
+  const caoi = S.cz * Math.cos(tb) + sz * Math.sin(tb) * Math.cos((S.az - p.az) * Math.PI / 180);
+  const cp = S.cz > 0 && caoi > 0 ? caoi : 0, dni = ok(w.dni) ? Math.max(0, w.dni) : 0, dhi = Math.max(0, w.dhi);
+  const e0 = 1367 * (1 + 0.033 * Math.cos(2 * Math.PI * S.doy / 365)), ai = Math.min(1, dni / e0);
+  const rb = cp / Math.max(S.cz, 0.087), f = Math.sqrt(Math.max(0, (w.ghi - dhi) / w.ghi));
+  const iso = (1 + Math.cos(tb)) / 2 * (1 + f * Math.pow(Math.sin(tb / 2), 3));
+  const snow = ok(w.snow) ? w.snow : 0, gnd = w.ghi * (snow > 1 ? 0.65 : 0.2) * (1 - Math.cos(tb)) / 2;
+  const iam = cp > 0 ? (1 - Math.exp(-cp / 0.16)) / (1 - Math.exp(-1 / 0.16)) : 0;
+  const poa = dni * cp * iam + dhi * (ai * rb + (1 - ai) * iso) + gnd;
+  if (!(poa > 0)) return 0;
+  const tc = (ok(w.tair) ? w.tair : 15) + poa / (25 + 6.84 * (ok(w.wind) ? Math.max(0, w.wind) : 1));
+  const g = poa / 1000, lg = Math.log(g), tp = tc - 25;
+  const eta = 1 - 0.017237 * lg - 0.040465 * lg * lg + tp * (-0.004702 + 0.000149 * lg + 0.00017 * lg * lg) + 0.000005 * tp * tp;
+  let kw = p.kwp * g * Math.max(0, eta) * 0.92;
+  if (p.tilt < 60) kw *= snow > 5 ? 0.05 : snow > 2 ? 0.3 : snow > 0.5 ? 0.7 : 1;
+  return p.ac > 0 ? Math.min(kw, p.ac) : kw;
+}
+
+/* Prognose testen: direkt bei Open-Meteo, mit den Werten aus dem Formular,
+ * dasselbe Modell wie das Geraet -- ohne den gelernten Korrekturfaktor. */
+$("emTestBtn").addEventListener("click", async () => {
+  const out = $("emTestOut");
+  let lat, lon, list;
+  try {
+    lat = numOf($("emLat"), "Breite"); lon = numOf($("emLon"), "Länge");
+    const boxes = $("emPlanes").querySelectorAll(".em-plane");
+    list = planes.map((p, k) => {
+      const q = (f) => boxes[k].querySelector('[data-f="' + f + '"]');
+      const nm = q("name").value.trim() || "Feld " + (k + 1);
+      return { name: nm, kwp: numOf(q("kwp"), nm + ": kWp"), tilt: numOf(q("tilt"), nm + ": Neigung"),
+               az: numOf(q("az"), nm + ": Ausrichtung"), ac: numOf(q("ac"), nm + ": AC-Grenze") };
+    });
+  } catch (e) { out.innerHTML = '<p class="hint">' + esc(e.message) + "</p>"; return; }
+  if (!list.length) { out.innerHTML = '<p class="hint">Erst ein Feld anlegen.</p>'; return; }
+  out.innerHTML = '<p class="hint">fragt Open-Meteo …</p>';
+  const now = nowS(), d0 = midnight(now), d1 = midnight(now, 1), d2 = midnight(now, 2);
+  let rows;
+  try {
+    const url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon
+      + "&minutely_15=shortwave_radiation,diffuse_radiation,direct_normal_irradiance,temperature_2m,wind_speed_10m"
+      + "&hourly=snow_depth&wind_speed_unit=ms&forecast_days=3&timezone=UTC";
+    const r = await fetch(url, { signal: sig(10000) });
+    const d = await r.json();
+    if (d.error) throw new Error(d.reason || "Fehler");
+    const m = d.minutely_15, snowAt = {};
+    (d.hourly.time || []).forEach((h, i) => { snowAt[h] = (d.hourly.snow_depth[i] || 0) * 100; });
+    rows = list.map((p) => {
+      let a = 0, b = 0, peak = 0;
+      m.time.forEach((s, i) => {
+        const t = Date.parse(s + "Z") / 1000 - STEP / 2;        /* Mitte der Viertelstunde davor */
+        if (t < d0 || t >= d2) return;
+        const hs = new Date((t - STEP / 2) * 1000).toISOString().slice(0, 13) + ":00";
+        const kw = pvKw(p, { ghi: m.shortwave_radiation[i], dhi: m.diffuse_radiation[i], dni: m.direct_normal_irradiance[i],
+                             tair: m.temperature_2m[i], wind: m.wind_speed_10m[i], snow: snowAt[hs] || 0 }, t, lat, lon);
+        if (!ok(kw)) return;
+        peak = Math.max(peak, kw);
+        if (t < d1) a += kw / 4; else b += kw / 4;
+      });
+      return "<tr><td>" + esc(p.name) + "</td><td>" + num(a, 1) + " kWh</td><td>" + num(b, 1) + " kWh</td><td>" + num(peak, 2) + " kW</td></tr>";
+    });
+  } catch (e) {
+    rows = ['<tr><td colspan="4" class="pos">' + esc(e.message || "keine Verbindung") + "</td></tr>"];
+  }
+  out.innerHTML = '<table><thead><tr><th>Feld</th><th>heute</th><th>morgen</th><th>Spitze</th></tr></thead><tbody>'
+    + rows.join("") + "</tbody></table>"
+    + '<p class="hint" style="margin:0 0 10px;">Vorschau mit demselben Modell wie das Gerät (Sonnenstand, HDKR, '
+    + "Modultemperatur, Huld-Wirkungsgrad, 8 % Verluste, AC-Grenze), noch ohne Korrekturfaktor.</p>";
+});
+
+/* ---------- Bedienung oben ---------- */
+document.querySelectorAll("#emMode button").forEach(b => b.addEventListener("click", async () => {
+  const m = +b.dataset.m, msg = $("emModeMsg");
+  if (m === modeNow) return;
+  if (m === 2 && !confirm("Automatik einschalten? Der Energie-Manager steuert dann Laden und Halten des Deye-Akkus nach Plan.")) return;
+  msg.textContent = "…";
+  try {
+    const r = await fetch("/api/em/mode?m=" + m, { method: "POST", signal: sig(5000) });
+    const d = await r.json();
+    if (d.ok) { modeNow = m; msg.textContent = ""; } else msg.textContent = "Fehler: " + (d.err || "?");
+  } catch (e) { msg.textContent = "Fehler: keine Verbindung"; }
+  renderStatus();
+  kick(false);
+}));
+document.querySelectorAll("#emCardStatus button[data-what]").forEach(b => b.addEventListener("click", async () => {
+  const msg = $("emRefMsg");
+  msg.textContent = "…";
+  try {
+    const r = await fetch("/api/em/refresh?what=" + b.dataset.what, { method: "POST", signal: sig(5000) });
+    const d = await r.json();
+    msg.textContent = d.ok ? "angestoßen – kommt in ein paar Sekunden" : "Fehler: " + (d.err || "?");
+  } catch (e) { msg.textContent = "Fehler: keine Verbindung"; }
+  /* Das Geraet holt im Hintergrund; kurz warten, dann alles neu lesen. */
+  setTimeout(() => { kick(true); setTimeout(() => { if (/angesto/.test(msg.textContent)) msg.textContent = ""; }, 3000); }, 4000);
+}));
+
+/* ---------- Abfrage ---------- */
+async function get(url) {
+  const r = await fetch(url, { cache: "no-store", signal: sig(6000) });
+  if (!r.ok) throw new Error(r.status === 404 ? "Firmware ohne " + url : "HTTP " + r.status);
+  return r.json();
+}
+async function grab(key, url) {
+  try { D[key] = await get(url); ERR[key] = ""; }
+  catch (e) { ERR[key] = e.name === "TimeoutError" || e.name === "AbortError" ? "Zeitüberschreitung" : (e.message || "keine Verbindung"); }
+}
+let lastSlow = 0;
+async function cycle(slow) {
+  if (!D.cfg) { await grab("cfg", "/api/em/cfg"); fillForm(); }
+  await grab("plan", "/api/em/plan");
+  if (D.plan && ok(D.plan.mode)) modeNow = +D.plan.mode;
+  else if (modeNow === null && D.cfg && ok(D.cfg.mode)) modeNow = +D.cfg.mode;
+  if (slow || Date.now() - lastSlow >= 60000) {
+    lastSlow = Date.now();
+    await grab("prices", "/api/em/prices");
+    await grab("fc", "/api/em/forecast");
+    await grab("load", "/api/em/load");
+    /* Was seit Mitternacht wirklich war (SoC, Plan je Viertelstunde) */
+    await grab("hist", "/api/em/hist?from=" + midnight(nowS(), 0));
+  }
+  /* Geraeteliste fuer die Auswahl "Messung" -- einmal je Seitenaufruf */
+  if (!D.meters) {
+    try { const d = await get("/api/meter"); D.meters = d.meters || []; } catch (e) { /* naechster Durchlauf */ }
+    if (D.meters && !$("emPlanes").contains(document.activeElement)) {
+      planes.forEach(autoMeter);
+      renderPlanes();
+    }
+  }
+  if ($("emFoldFr").open) await grab("fr", "/api/em/fronius");
+  render();
+}
+/* ---------- Datenquellen ---------- */
+function srcState(q, now) {
+  if (!q.used) return ["src-off", "– nicht genutzt"];
+  if (q.fails && q.r429) return ["src-wait", "⏸ gebremst (zu viele Anfragen)"];
+  if (q.fails) return ["src-bad", "✕ nicht erreichbar"];
+  if (q.stage) return ["src-wait", "… wird geholt (" + q.stage + "/6)"];
+  if (q.last_ok) return ["src-ok", "✓ erreichbar"];
+  if (q.last_try) return ["src-wait", "… wartet auf Antwort"];
+  return ["src-off", "– noch nicht abgefragt"];
+}
+function renderSrc() {
+  const pr = D.prices, body = $("emSrcBody");
+  if (!pr || !pr.sources) { body.innerHTML = '<tr><td colspan="5" class="hint">' + (ERR.prices ? esc(ERR.prices) : "lädt …") + "</td></tr>"; return; }
+  const now = pr.now || nowS();
+  const when = (t) => !t ? "–" : (midnight(t) === midnight(now) ? "" : dayTxt(t) + " ") + hm(t);
+  let bad = 0, used = 0;
+  body.innerHTML = pr.sources.map((q, i) => {
+    const st = srcState(q, now);
+    if (q.used) { used++; if (q.fails) bad++; }
+    /* Was die letzte gute Antwort abdeckte; Open-Meteo: immer zwei Tage */
+    const cov = !q.used || !q.last_ok ? "–" : i === 4 ? "heute + morgen" : q.tomorrow ? "heute + morgen"
+              : "nur heute" + (i >= 2 ? " (morgen kommt meist abends)" : i === 0 ? " (morgen ab ~13 Uhr)" : "");
+    const next = q.next ? (q.next <= now + 15 ? "jetzt" : when(q.next)) : "–";
+    return "<tr><td>" + esc(q.name) + '<span class="host">' + esc(q.host) + "</span></td>"
+      + '<td><span class="' + st[0] + '">' + st[1] + "</span>"
+      + (q.err ? '<span class="err">' + esc(q.err) + (q.fails > 1 ? " (" + q.fails + "× in Folge)" : "") + "</span>" : "") + "</td>"
+      + "<td>" + when(q.last_ok) + "</td>"
+      + '<td class="nomob">' + next + "</td>"
+      + '<td class="nomob">' + cov + "</td></tr>";
+  }).join("");
+  $("emSrcSum").className = bad ? "src-bad" : "hint";
+  $("emSrcSum").textContent = bad ? "· " + bad + (bad === 1 ? " Quelle gestört" : " Quellen gestört")
+                                  : "· alle " + used + " erreichbar";
+}
+function render() {
+  renderStatus();
+  renderSrc();
+  renderFr();
+  renderTok();
+  redraw(false);
+}
+/* Diagramme nur neu zeichnen, wenn sich Daten, Breite oder die Minute
+ * (Strich "jetzt") geaendert haben -- sonst verschwindet ein offener Tooltip
+ * bei jedem Poll. Zugeklappt hat ein Diagramm keine Breite: dann spaeter. */
+const drawn = {};
+function redraw(force) {
+  const t5 = Math.floor(Date.now() / 300000);
+  [["emFoldPlan", "emPlanChart", drawPlan, () => [D.plan, D.prices, D.cfg && [D.cfg.soc_min, D.cfg.soc_max], ERR.plan, ERR.prices, planDay, basis]],
+   ["emFoldPv", "emPvChart", drawPv, () => [D.fc, D.prices && D.prices.mix, ERR.fc, planDay]],
+   ["emFoldPvE", "emPvEChart", drawPvE, () => [D.fc, D.cfg && D.cfg.planes, ERR.fc, planDay]],
+   ["emFoldLoad", "emLoadChart", drawLoad, () => [D.load, ERR.load, planDay]]].forEach(([fold, box, fn, keyOf]) => {
+    if (!$(fold).open || $("tab-em").hidden) return;
+    const key = JSON.stringify(keyOf()) + "|" + $(box).clientWidth + "|" + t5;
+    if (!force && drawn[box] === key) return;
+    drawn[box] = key;
+    fn();
+  });
+}
+
+let vis = false, timer = null, busy = false, again = false;
+async function loop() {
+  if (!vis) return;
+  if (busy) { again = true; return; }
+  busy = true;
+  again = false;
+  clearTimeout(timer);
+  try { if (!document.hidden) await cycle(false); } finally { busy = false; }
+  if (vis) timer = setTimeout(loop, again ? 0 : 15000);
+}
+/* Sofort einen Durchlauf; slow = Preise/Prognose/Lastprofil mitnehmen */
+function kick(slow) {
+  if (slow) lastSlow = 0;
+  if (!vis) return;
+  if (busy) { again = true; return; }
+  clearTimeout(timer);
+  loop();
+}
+window.emTabVisible = function (visible) {
+  if (visible && !vis) { vis = true; loop(); }
+  if (!visible && vis) { vis = false; clearTimeout(timer); timer = null; }
+};
+document.addEventListener("visibilitychange", () => { if (!document.hidden && vis) kick(false); });
+
+["emFoldPlan", "emFoldPv", "emFoldPvE", "emFoldLoad"].forEach(id => $(id).addEventListener("toggle", () => redraw(true)));
+$("emFoldFr").addEventListener("toggle", () => { if ($("emFoldFr").open) kick(false); });
+$("emFoldCfg").addEventListener("toggle", () => { if ($("emFoldCfg").open && !D.meters) kick(false); });
+let rz = null;
+window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => redraw(false), 200); });
+
+/* Telefon: Status und Preis/Plan offen, der Rest zu. */
+if (PHONE) { $("emFoldPv").open = false; $("emFoldLoad").open = false; }
+renderPlanes();
+})();
+</script>
+
+<script>
 /* ---------------- Farbschema-Umschalter ---------------- */
 (function () {
   var btns = document.querySelectorAll(".theme button");
@@ -2213,6 +5097,84 @@ async function importRegs(input){
   mark();
 })();
 
+/* ---------------- Fronius-Zaehler (Deye als Erzeuger) ----------------
+ * Pollt /api/frm nur, solange der Tab sichtbar ist (vier Sockets am :80-Server).
+ * Leistung im Vorzeichen des Zaehlers: + = der Deye bezieht, - = er liefert. */
+(function () {
+  var timer = null, loaded = false;
+  function $(id) { return document.getElementById(id); }
+  function num(x, d) { return Number(x).toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d }); }
+  function tile(id, val, foot, cls) {
+    var t = $(id);
+    t.querySelector(".val").textContent = val;
+    t.querySelector(".val").className = "val" + (cls ? " " + cls : "");
+    t.querySelector(".foot").textContent = foot || "";
+  }
+  function render(d) {
+    var st = $("frmState"), txt, cls;
+    if (!d.en)              { txt = "aus"; cls = ""; }
+    else if (!d.listening)  { txt = "Port " + d.port + " nicht belegt"; cls = "bad"; }
+    else if (!d.fresh)      { txt = "schweigt \u2014 keine aktuellen Deye-Werte"; cls = "bad"; }
+    else if (!d.req || d.age > 30000) { txt = "wartet auf den Fronius"; cls = "hot"; }
+    else                    { txt = "Fronius fragt ab"; cls = "ok"; }
+    st.textContent = txt; st.className = "pill" + (cls ? " " + cls : "");
+
+    var on = d.en && d.fresh;
+    tile("frmTP", on ? num(d.total, 0) + " W" : "\u2013",
+         on ? "L1 " + num(d.p[0], 0) + " \u00b7 L2 " + num(d.p[1], 0) + " \u00b7 L3 " + num(d.p[2], 0) : "",
+         on ? (d.total < 0 ? "neg" : (d.total > 0 ? "pos" : "")) : "");
+    tile("frmTI", num(d.imp_kwh, 2) + " kWh", "");
+    tile("frmTE", num(d.exp_kwh, 2) + " kWh", "");
+    tile("frmTR", num(d.req, 0),
+         d.req ? "vor " + Math.round(d.age / 1000) + " s" + (d.client ? " \u00b7 " + d.client : "") +
+                 (d.ex ? " \u00b7 " + d.ex + " Exc." : "") + (d.silent ? " \u00b7 " + d.silent + " stumm" : "") : "");
+
+    $("frmPort").textContent = "Port " + d.port + " (TCP-Bridge)";
+    $("frmPort2").textContent = d.port;
+    $("frmUnit2").textContent = d.unit;
+    $("frmIp").textContent = location.hostname;
+    if (!loaded) {            /* Formular nur einmal fuellen, sonst ueberschreibt das Polling die Eingabe */
+      loaded = true;
+      $("frmEn").checked = !!d.en;
+      $("frmUnit").value = String(d.unit);
+      $("frmSn").value = d.sn;
+      $("frmSnt").value = d.snt;
+      if ($("frmUnit").value !== String(d.unit)) {
+        var o = document.createElement("option"); o.textContent = d.unit; $("frmUnit").appendChild(o);
+        $("frmUnit").value = String(d.unit);
+      }
+    }
+  }
+  function poll() {
+    fetch("/api/frm", { cache: "no-store" }).then(function (r) { return r.json(); })
+      .then(render).catch(function () {
+        var st = $("frmState"); st.textContent = "keine Verbindung zum Display"; st.className = "pill bad";
+      });
+  }
+  $("frmSave").addEventListener("click", function () {
+    var m = $("frmMsg");
+    m.textContent = "speichert\u2026";
+    fetch("/api/frm/set?en=" + ($("frmEn").checked ? 1 : 0) + "&unit=" + encodeURIComponent($("frmUnit").value) +
+          "&sn=" + encodeURIComponent($("frmSn").value.trim()) + "&snt=" + encodeURIComponent($("frmSnt").value.trim()),
+          { cache: "no-store" })
+      .then(function (r) {
+        if (r.status === 401) throw new Error("Anmeldung n\u00f6tig");
+        return r.json();
+      })
+      .then(function (j) {
+        if (!j.ok) throw new Error(j.err || "abgelehnt");
+        m.textContent = "gespeichert"; render(j.st);
+      })
+      .catch(function (e) { m.textContent = "Fehler: " + e.message; });
+  });
+  window.frmTabVisible = function (visible) {
+    if (visible && !timer) { poll(); timer = setInterval(poll, 2000); }
+    if (!visible && timer) { clearInterval(timer); timer = null; }
+  };
+  if (window.matchMedia && matchMedia("(max-width:640px)").matches) $("frmHow").open = false;
+  else $("frmHow").open = true;
+})();
+
 /* ---------------- Tabs ----------------
  * Die Zaehlerseite pollt im Sekundentakt; der :80-Server hat nur vier Sockets.
  * Deshalb meldet der Tabwechsel dem Zaehler-Modul, ob es sichtbar ist, und das
@@ -2221,10 +5183,12 @@ async function importRegs(input){
   var buttons = document.querySelectorAll("nav.tabs button");
   function show(name, push) {
     buttons.forEach(function (b) { b.classList.toggle("on", b.dataset.tab === name); });
-    ["meter", "regs", "sys"].forEach(function (t) {
+    ["meter", "em", "regs", "frm", "sys"].forEach(function (t) {
       document.getElementById("tab-" + t).hidden = (t !== name);
     });
     if (window.meterTabVisible) window.meterTabVisible(name === "meter");
+    if (window.emTabVisible) window.emTabVisible(name === "em");
+    if (window.frmTabVisible) window.frmTabVisible(name === "frm");
     if (name === "sys" && window.sysLoadInfo) window.sysLoadInfo();
     if (push && location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
   }

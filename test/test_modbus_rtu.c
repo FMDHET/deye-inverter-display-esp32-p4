@@ -615,6 +615,214 @@ static void test_selftest_says_which_half_is_missing(void)
     CHECK(strstr(selftest_why_not(&c), "Master") != NULL);
 }
 
+/* ------------------------------ HOLD ----------------------------------- */
+
+static void hold_live(float inv_total)
+{
+    s_live.valid = true;
+    s_live.blocks = MB_DEYE_BLK_ALL;
+    s_live.inv_total = inv_total;
+    s_live_ms = (uint32_t)(fake_now_us / 1000);
+}
+
+static void test_hold_ramps_a_discharging_deye_to_zero(void)
+{
+    reset_all();
+    fake_grid_fresh = true;
+    fake_grid_w = 400;                       /* still importing 400 W     */
+    hold_live(-1200);                        /* Deye delivers 1200 W      */
+    modbus_rtu_set_hold(600);
+    float total = 0;
+    compute_served(true, fake_grid_w, NULL, NULL, NULL, &total);
+    CHECK_F(total, -1200, 0.5);              /* "you export your output"  */
+
+    hold_live(0);                            /* it has ramped down        */
+    fake_grid_w = 1600;                      /* the grid now covers it    */
+    compute_served(true, fake_grid_w, NULL, NULL, NULL, &total);
+    CHECK_F(total, 0, 0.5);                  /* equilibrium at 0 W        */
+    modbus_rtu_set_hold(0);
+}
+
+static void test_hold_still_takes_a_surplus(void)
+{
+    reset_all();
+    fake_grid_fresh = true;
+    fake_grid_w = -2000;                     /* Fronius exports 2 kW      */
+    hold_live(800);                          /* Deye charges 800 W        */
+    modbus_rtu_set_hold(600);
+    float total = 0;
+    compute_served(true, fake_grid_w, NULL, NULL, NULL, &total);
+    CHECK_F(total, -2000, 0.5);              /* normal: keep absorbing    */
+    modbus_rtu_set_hold(0);
+}
+
+/* The operator's lock is a second source of the same hold: it holds alone,
+ * and the energy manager lifting ITS hold does not lift the lock. */
+static void test_lock_holds_and_survives_the_managers_release(void)
+{
+    reset_all();
+    fake_grid_fresh = true;
+    fake_grid_w = 400;
+    hold_live(-1200);
+    modbus_rtu_set_lock(120);
+    CHECK(modbus_rtu_lock_active());
+    CHECK(!modbus_rtu_hold_active());
+    float total = 0;
+    compute_served(true, fake_grid_w, NULL, NULL, NULL, &total);
+    CHECK_F(total, -1200, 0.5);
+    modbus_rtu_set_hold(600);
+    modbus_rtu_set_hold(0);                  /* the manager lets go ...   */
+    compute_served(true, fake_grid_w, NULL, NULL, NULL, &total);
+    CHECK_F(total, -1200, 0.5);              /* ... the lock still holds  */
+    fake_now_us += 121LL * 1000000;          /* not renewed: it expires   */
+    hold_live(-1200);
+    CHECK(!modbus_rtu_lock_active());
+    compute_served(true, fake_grid_w, NULL, NULL, NULL, &total);
+    CHECK_F(total, 400, 0.5);                /* normal again              */
+    modbus_rtu_set_lock(0);
+}
+
+static void test_hold_never_touches_a_stale_reading(void)
+{
+    reset_all();
+    hold_live(-1200);
+    modbus_rtu_set_hold(600);
+    float total = 123;
+    compute_served(false, 0, NULL, NULL, NULL, &total);
+    CHECK_F(total, 0, 0.001);                /* stale is still 0          */
+    modbus_rtu_set_hold(0);
+}
+
+static void test_hold_expires_and_needs_fresh_output(void)
+{
+    reset_all();
+    fake_grid_fresh = true;
+    fake_grid_w = 400;
+    hold_live(-1200);
+    modbus_rtu_set_hold(60);
+    CHECK(modbus_rtu_hold_active());
+    fake_time_advance_ms(61000);
+    CHECK(!modbus_rtu_hold_active());
+    float total = 0;
+    hold_live(-1200);
+    compute_served(true, fake_grid_w, NULL, NULL, NULL, &total);
+    CHECK_F(total, 400, 0.5);                /* expired: normal again     */
+
+    modbus_rtu_set_hold(600);
+    fake_time_advance_ms(7000);              /* output reading 7 s old    */
+    compute_served(true, fake_grid_w, NULL, NULL, NULL, &total);
+    CHECK_F(total, 400, 0.5);                /* no guessing: normal       */
+    modbus_rtu_set_hold(0);
+}
+
+/* --------------------- efficiency by power (the curve) ------------------ */
+
+static void reset_curve(void)
+{
+    fake_nvs_reset_eff();
+    memset(&s_curve, 0, sizeof(s_curve));
+    s_curve.ver = MB_EFF_CURVE_VER; s_curve.nbins = MB_EFF_BINS;
+    s_curve_dirty = false;
+}
+
+static void test_bins_follow_the_edges(void)
+{
+    CHECK_I(mb_eff_bin_of(0), 0);
+    CHECK_I(mb_eff_bin_of(149.9f), 0);
+    CHECK_I(mb_eff_bin_of(150), 1);
+    CHECK_I(mb_eff_bin_of(999), 4);
+    CHECK_I(mb_eff_bin_of(1000), 5);
+    CHECK_I(mb_eff_bin_of(1249), 5);
+    CHECK_I(mb_eff_bin_of(1250), 6);            /* 250 W steps from 1 to 5 kW */
+    CHECK_I(mb_eff_bin_of(4999), 20);
+    CHECK_I(mb_eff_bin_of(5000), 21);
+    CHECK_I(mb_eff_bin_of(19999), 27);
+    CHECK_I(mb_eff_bin_of(20000), 28);
+    CHECK_I(mb_eff_bin_of(45000), 28);          /* the last bin is open */
+    CHECK_I(MB_EFF_BIN_LO[MB_EFF_BINS - 1], 20000);
+    for (int i = 1; i < MB_EFF_BINS; i++) CHECK(MB_EFF_BIN_LO[i] > MB_EFF_BIN_LO[i - 1]);
+}
+
+static void test_a_round_adds_energy_and_time(void)
+{
+    reset_curve();
+    eff_bin_add(&s_curve.dis[5], 1000.0f, 940.0f, 2000000);    /* 2 s */
+    eff_bin_add(&s_curve.dis[5], 1000.0f, -30.0f, 2000000);    /* AC drawn: out 0 */
+    CHECK_F(s_curve.dis[5].in_wh, 2000.0 * 2 / 3600, 1e-4);
+    CHECK_F(s_curve.dis[5].out_wh, 940.0 * 2 / 3600, 1e-4);
+    CHECK_I(s_curve.dis[5].s, 4);
+    CHECK(s_curve_dirty);
+}
+
+static void test_the_curve_survives_a_restart(void)
+{
+    reset_curve();
+    eff_bin_add(&s_curve.chg[17], 4000.0f, 3800.0f, 2000000);
+    eff_bin_add(&s_curve.idle, 60.0f, 0.0f, 2000000);
+    eff_curve_save(true);
+    CHECK(!s_curve_dirty);
+
+    mb_eff_curve_t before = s_curve;
+    memset(&s_curve, 0, sizeof(s_curve));
+    eff_curve_load();
+    CHECK(memcmp(&s_curve, &before, sizeof(before)) == 0);
+}
+
+static void test_a_failed_save_is_retried(void)
+{
+    reset_curve();
+    eff_bin_add(&s_curve.dis[3], 600.0f, 540.0f, 2000000);
+    fake_nvs_fail = true;
+    eff_curve_save(true);
+    CHECK(s_curve_dirty);                       /* still owed */
+    fake_nvs_fail = false;
+    eff_curve_save(true);
+    CHECK(!s_curve_dirty);
+}
+
+static void test_an_unchanged_curve_is_not_rewritten(void)
+{
+    reset_curve();
+    eff_bin_add(&s_curve.dis[3], 600.0f, 540.0f, 2000000);
+    eff_curve_save(true);
+    fake_nvs_fail = true;                       /* a write now would fail ... */
+    eff_curve_save(true);
+    CHECK(!s_curve_dirty);                      /* ... but none is attempted */
+    fake_nvs_fail = false;
+}
+
+static void test_a_foreign_or_damaged_curve_is_discarded(void)
+{
+    reset_curve();
+    eff_bin_add(&s_curve.dis[3], 600.0f, 540.0f, 2000000);
+    s_curve.nbins = MB_EFF_BINS + 1;            /* written by another layout */
+    eff_curve_save(true);
+    memset(&s_curve, 0, sizeof(s_curve));
+    eff_curve_load();
+    CHECK_F(s_curve.dis[3].in_wh, 0, 0);
+
+    reset_curve();
+    eff_bin_add(&s_curve.dis[3], 600.0f, 540.0f, 2000000);
+    s_curve.chg[2].out_wh = NAN;
+    eff_curve_save(true);
+    memset(&s_curve, 0, sizeof(s_curve));
+    eff_curve_load();
+    CHECK_F(s_curve.dis[3].in_wh, 0, 0);        /* all of it, not just the bad bin */
+}
+
+static void test_reset_empties_and_saves(void)
+{
+    reset_curve();
+    eff_bin_add(&s_curve.dis[3], 600.0f, 540.0f, 2000000);
+    eff_curve_save(true);
+    modbus_rtu_reset_eff_curve();
+    CHECK_I(s_curve.dis[3].s, 0);
+    CHECK_I(s_curve.ver, MB_EFF_CURVE_VER);
+    memset(&s_curve, 0xFF, sizeof(s_curve));
+    eff_curve_load();
+    CHECK_I(s_curve.dis[3].s, 0);               /* the empty curve is what was stored */
+}
+
 int main(void)
 {
     RUN(test_stale_serves_zero);
@@ -640,5 +848,17 @@ int main(void)
     RUN(test_selftest_refuses_without_a_partner);
     RUN(test_selftest_refuses_when_a_bus_is_switched_off);
     RUN(test_selftest_says_which_half_is_missing);
+    RUN(test_hold_ramps_a_discharging_deye_to_zero);
+    RUN(test_hold_still_takes_a_surplus);
+    RUN(test_lock_holds_and_survives_the_managers_release);
+    RUN(test_hold_never_touches_a_stale_reading);
+    RUN(test_hold_expires_and_needs_fresh_output);
+    RUN(test_bins_follow_the_edges);
+    RUN(test_a_round_adds_energy_and_time);
+    RUN(test_the_curve_survives_a_restart);
+    RUN(test_a_failed_save_is_retried);
+    RUN(test_an_unchanged_curve_is_not_rewritten);
+    RUN(test_a_foreign_or_damaged_curve_is_discarded);
+    RUN(test_reset_empties_and_saves);
     return t_report("modbus_rtu");
 }

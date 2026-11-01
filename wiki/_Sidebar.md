@@ -21,6 +21,8 @@
 **Benutzen**
 
 * [Deye-Steuerung](Deye-Steuerung)
+* [Energiemanager](Energiemanager) — Tibber, PV-Prognose, Plan
+* [Fronius-Zähler](Fronius-Zaehler) — Deye als Erzeuger
 * [MQTT und Home Assistant](MQTT-und-Home-Assistant)
 * [Web-Mirror](Web-Mirror)
 * [Zeit und VPN](Zeit-und-VPN)

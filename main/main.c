@@ -15,6 +15,9 @@
 #include "modbus_rtu.h"
 #include "modbus_gw.h"
 #include "deye_ctrl.h"
+#include "eff_sweep.h"
+#include "em_cfg.h"
+#include "energy_mgr.h"
 #include "mqtt_fwd.h"
 #include "ntp_client.h"
 #include "wg_client.h"
@@ -125,6 +128,9 @@ void app_main(void)
             ESP_LOGE(TAG, "modbus_rtu_start failed: %s", esp_err_to_name(err));
         }
         deye_ctrl_start();   /* async writer task (needs modbus_rtu running) */
+        eff_sweep_init();    /* efficiency sweep, idle until started from /deye */
+        em_cfg_init();       /* energy manager settings (Energie tab)          */
+        em_mgr_start();      /* energy manager task: feeds, plan, actions      */
         /* Modbus-TCP <-> RTU bridge: serve the RS485 buses (i.e. the Deye's
          * registers) to LAN clients on port 502. Needs modbus_rtu running. */
         err = modbus_gw_start();

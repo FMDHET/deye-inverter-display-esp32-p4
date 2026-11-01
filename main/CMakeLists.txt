@@ -15,10 +15,27 @@ idf_component_register(
         "modbus_tcp.c"
         "modbus_rtu.c"
         "modbus_gw.c"
+        "fronius_meter.c"
         "deye_ctrl.c"
+        "eff_sweep.c"
+        "em_cfg.c"
+        "https_get.c"
+        "price_feed.c"
+        "pv_forecast.c"
+        "load_profile.c"
+        "load_hist.c"
+        "em_hist.c"
+        "bat_lock.c"
+        "sunspec_mppt.c"
+        "deye_force.c"
+        "keep_ram.c"
+        "em_planner.c"
+        "fronius_storage.c"
+        "energy_mgr.c"
         "deye_web.c"
         "meter_web.c"
         "mqtt_fwd.c"
+        "byd_energy.c"
         "ntp_client.c"
         "wg_client.c"
         "fonts.c"
@@ -28,7 +45,7 @@ idf_component_register(
     INCLUDE_DIRS "."
     EMBED_TXTFILES "web_mirror.html" "recovery.html" "deye.html"
     EMBED_FILES "montserrat_medium.ttf"
-    PRIV_REQUIRES nvs_flash espcoredump mbedtls json esp_wifi esp_event esp_netif spiffs esp_http_server lwip esp_driver_jpeg app_update esp_driver_ledc esp_driver_uart mqtt esp_wireguard
+    PRIV_REQUIRES nvs_flash esp_partition spi_flash espcoredump mbedtls json esp_http_client esp-tls esp_wifi esp_event esp_netif spiffs esp_http_server lwip esp_driver_jpeg app_update esp_driver_ledc esp_driver_uart mqtt esp_wireguard
 )
 
 # ---------------------------------------------------------------------------

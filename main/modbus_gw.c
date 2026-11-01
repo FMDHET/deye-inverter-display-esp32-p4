@@ -1,5 +1,6 @@
 #include "modbus_gw.h"
 #include "modbus_rtu.h"
+#include "fronius_meter.h"
 
 #include <string.h>
 #include <errno.h>
@@ -70,6 +71,7 @@ typedef struct {
     int      fd;
     int      have;                /* bytes buffered from a partial frame */
     uint32_t last_ms;
+    uint32_t ip;                  /* peer, network byte order            */
     uint8_t  buf[GW_RXBUF];
 } gw_client_t;
 
@@ -140,12 +142,36 @@ static void gw_shutdown(int *lsock)
 
 /* ----------------------------- request path ---------------------------- */
 
-/* Forward one complete MBAP frame to the RS485 side and answer the client. */
-static void gw_serve(gw_client_t *c, const uint8_t *f, int flen, uint32_t tmo_ms)
+/* Wrap a response PDU already sitting at out + GW_MBAP into its MBAP frame
+ * and send it. */
+static void gw_reply(gw_client_t *c, const uint8_t *f, uint8_t *out, int body)
+{
+    uint16_t len = (uint16_t)(body + 1);           /* unit byte + PDU */
+    out[0] = f[0]; out[1] = f[1];                  /* echo the transaction id */
+    out[2] = 0; out[3] = 0;                        /* protocol id = Modbus */
+    out[4] = (uint8_t)(len >> 8); out[5] = (uint8_t)len;
+    out[GW_UNIT] = f[GW_UNIT];
+    if (send_all(c->fd, out, GW_MBAP + body) < 0) gw_close(c);
+}
+
+/* Forward one complete MBAP frame to the RS485 side and answer the client --
+ * or, for the producer meter's unit id, answer it here (fronius_meter.c). */
+static void gw_serve(gw_client_t *c, const uint8_t *f, int flen, uint32_t tmo_ms,
+                     const mb_rtu_cfg_t *cfg)
 {
     uint8_t unit    = f[GW_UNIT];
     uint8_t fc      = f[GW_MBAP];
     int     pdu_len = flen - GW_MBAP;              /* >= 1, checked by caller */
+
+    /* The meter's unit id is taken out BEFORE the bus routing: with a single
+     * bridged bus every unit id would otherwise be passed to the Deye. */
+    if (cfg->frm_enabled && unit == cfg->frm_unit) {
+        uint8_t out[GW_FRAME_MAX];
+        int body = fronius_meter_answer(f + GW_MBAP, pdu_len, out + GW_MBAP,
+                                        GW_FRAME_MAX - GW_MBAP, c->ip);
+        if (body > 0) gw_reply(c, f, out, body);
+        return;                                    /* 0 -> stay silent */
+    }
 
     /* No repacking: an MBAP frame from GW_UNIT on is [unit][PDU], and an RTU
      * ADU without its CRC is [slave id][PDU] -- byte-identical layouts. So the
@@ -153,7 +179,7 @@ static void gw_serve(gw_client_t *c, const uint8_t *f, int flen, uint32_t tmo_ms
      * is received straight into the reply frame, saving 512 B of stack and two
      * memcpys per request. */
     uint8_t out[GW_FRAME_MAX];
-    int bus = modbus_rtu_gw_route(unit);
+    int bus = cfg->gw_enabled ? modbus_rtu_gw_route(unit) : -1;
     int n   = (bus < 0) ? -1
             : modbus_rtu_txn(bus, f + GW_UNIT, pdu_len + 1,
                              out + GW_UNIT, GW_FRAME_MAX - GW_UNIT, tmo_ms);
@@ -176,17 +202,13 @@ static void gw_serve(gw_client_t *c, const uint8_t *f, int flen, uint32_t tmo_ms
                  bus < 0 ? "no bridged bus" : "no RTU reply", n);
     }
 
-    uint16_t len = (uint16_t)(body + 1);           /* unit byte + PDU */
-    out[0] = f[0]; out[1] = f[1];                  /* echo the transaction id */
-    out[2] = 0; out[3] = 0;                        /* protocol id = Modbus */
-    out[4] = (uint8_t)(len >> 8); out[5] = (uint8_t)len;
-    out[GW_UNIT] = unit;                           /* == the id the RTU echoed */
-    if (send_all(c->fd, out, GW_MBAP + body) < 0) gw_close(c);
+    gw_reply(c, f, out, body);                     /* unit == the id the RTU echoed */
 }
 
 /* Drain the socket and dispatch every COMPLETE frame it yielded. TCP is a
  * stream: a read can carry half a request or several pipelined ones. */
-static void gw_recv(gw_client_t *c, uint32_t now, uint32_t tmo_ms)
+static void gw_recv(gw_client_t *c, uint32_t now, uint32_t tmo_ms,
+                    const mb_rtu_cfg_t *cfg)
 {
     /* Space is always > 0: the loop below cannot leave a COMPLETE frame in the
      * buffer, and the static assert above guarantees one frame fits. */
@@ -208,7 +230,7 @@ static void gw_recv(gw_client_t *c, uint32_t now, uint32_t tmo_ms)
         int total = 6 + len;
         if (c->have < total) break;                /* frame still incomplete   */
 
-        gw_serve(c, c->buf, total, tmo_ms);
+        gw_serve(c, c->buf, total, tmo_ms, cfg);
         if (c->fd < 0) return;                     /* send failed -> closed    */
 
         c->have -= total;
@@ -276,6 +298,7 @@ static void gw_accept(int lsock, int maxcl, uint32_t now)
     s_cl[slot].fd      = fd;
     s_cl[slot].have    = 0;
     s_cl[slot].last_ms = now;
+    s_cl[slot].ip      = sa.sin_addr.s_addr;
     ESP_LOGI(TAG, "client %s connected (slot %d, %d/%d)",
              inet_ntoa(sa.sin_addr), slot, used + 1, maxcl);
 }
@@ -294,7 +317,9 @@ static void gw_task(void *arg)
          * nothing here can be 0 or out of range. */
         mb_rtu_cfg_t cfg;
         modbus_rtu_get_cfg(&cfg);
-        bool     want  = cfg.gw_enabled != 0;
+        /* The listener serves two things: the RS485 bridge and the producer
+         * meter. Either one keeps it up; gw_serve() tells them apart. */
+        bool     want  = cfg.gw_enabled != 0 || cfg.frm_enabled != 0;
         uint16_t port  = cfg.gw_port;
         uint32_t tmo   = cfg.gw_timeout_ms;
         int      maxcl = cfg.gw_max_clients;
@@ -312,6 +337,8 @@ static void gw_task(void *arg)
                          port, maxcl);
             }
         }
+
+        fronius_meter_tick();
 
         int clients = 0;
         for (int i = 0; i < MB_GW_MAX_CLIENTS; i++) if (s_cl[i].fd >= 0) clients++;
@@ -352,7 +379,7 @@ static void gw_task(void *arg)
         for (int i = 0; i < MB_GW_MAX_CLIENTS; i++) {
             if (s_cl[i].fd < 0) continue;
             if (r > 0 && FD_ISSET(s_cl[i].fd, &rd)) {
-                gw_recv(&s_cl[i], now, tmo);
+                gw_recv(&s_cl[i], now, tmo, &cfg);
             } else if ((uint32_t)(now - s_cl[i].last_ms) > GW_IDLE_MS) {
                 ESP_LOGI(TAG, "client slot %d idle -- closed", i);
                 gw_close(&s_cl[i]);

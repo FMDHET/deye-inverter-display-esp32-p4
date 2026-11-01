@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_log.h"
 
 static const char *TAG = "meter_web";
@@ -19,7 +20,7 @@ static const char *TAG = "meter_web";
 /* Never start another device row without this much room left: the served +
  * manip tail that follows the loop is ~450 B and must always fit. */
 #define JSON_TAIL 700
-static char s_json[JSON_CAP];
+static EXT_RAM_BSS_ATTR char s_json[JSON_CAP];
 
 /* Append to `buf` and return the new offset, saturating at cap-1 instead of
  * running past it. snprintf returns what it WOULD have written, so tracking the
@@ -121,6 +122,10 @@ static esp_err_t values_handler(httpd_req_t *req)
                      "\"p\":[%.0f,%.0f,%.0f]",
                      ph.v[0], ph.v[1], ph.v[2], ph.i[0], ph.i[1], ph.i[2],
                      ph.p[0], ph.p[1], ph.p[2]);
+        mb_energy_t en;
+        if (modbus_tcp_get_energy(i, &en))
+            o = jcat(s_json, JSON_CAP, o, ",\"imp_kwh\":%.2f,\"exp_kwh\":%.2f,\"en_age\":%u",
+                     en.import_kwh, en.export_kwh, (unsigned)en.age_ms);
         o = jcat(s_json, JSON_CAP, o, "}");
     }
     o = jcat(s_json, JSON_CAP, o,

@@ -14,6 +14,7 @@
 
 #include "esp_check.h"
 #include "esp_http_server.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
@@ -208,7 +209,7 @@ static esp_err_t h_scan(httpd_req_t *req)
 {
     /* single httpd worker task -> these statics are not re-entered */
     static wifi_mgr_ap_t aps[SCAN_MAX_APS];
-    static char json[4096];
+    static EXT_RAM_BSS_ATTR char json[4096];
 
     wifi_mgr_scan_start();
     int waited = 0;
@@ -361,7 +362,7 @@ esp_err_t captive_start(void)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size       = 6144;
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 32;   /* mirror + ota + deye + meter + log/coredump/config + captive */
+    cfg.max_uri_handlers = 48;   /* mirror + ota + deye + meter + log/coredump/config + captive */
     cfg.recv_wait_timeout = 12;  /* grace for a large OTA upload under load */
     cfg.send_wait_timeout = 12;
     /* 4, not 7. These are not free slots, they are 4 of the 16 lwIP sockets the

@@ -25,6 +25,8 @@ void fake_uart_rx_push(const void *data, size_t n);
 /* --- NVS: set fake_nvs_fail to make every write fail --- */
 extern bool fake_nvs_fail;
 void fake_nvs_reset(void);
+void fake_nvs_reset_eff(void);   /* forget the efficiency blobs */
+void fake_nvs_reset_em(void);    /* forget the energy manager blobs */
 
 /* --- HTTP: the request header a test hands in, and what came back --- */
 extern char fake_req_auth_hdr[256];

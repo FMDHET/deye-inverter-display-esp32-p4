@@ -59,6 +59,19 @@ typedef struct {
      * exactly "use the default" here, so no layout change and no migration.
      * 0 = default (MB_SLAVE_HOLD_DEFAULT_S), 255 = never go quiet, else seconds. */
     uint8_t  slave_hold_s;
+
+    /* ---- the Deye as a Fronius producer meter (appended, fronius_meter.h) --
+     * Served by the TCP bridge's listener, so it uses gw_port; the bridge's
+     * own on/off only governs the forwarding to RS485. */
+    uint8_t  frm_enabled;     /* 0/1                                         */
+    uint8_t  frm_unit;        /* unit id it answers (0 -> FRM_DEFAULT_UNIT)  */
+    uint8_t  _rsv2[2];        /* the struct pads to 28 anyway -- say so      */
+    /* Serial number it reports (appended). The NUMBER (registers 20487/20488)
+     * is what the Fronius compares and shows; the TEXT (20480..20486, one
+     * character per register) goes along with it. 0 / "" -> the defaults in
+     * fronius_meter.h. */
+    uint32_t frm_serial;
+    char     frm_serial_txt[8];   /* exactly FRM_SERIAL_TXT_LEN chars + NUL */
 } mb_rtu_cfg_t;
 
 /* A stale reading is a dead sensor in the inverter's control loop. 0 W keeps
@@ -249,7 +262,73 @@ typedef struct {
                               * counted -- only then is a momentary
                               * efficiency worth showing                      */
     mb_deye_eff_lt_t lt;
+    uint32_t rounds;         /* poll rounds since boot: a consumer sampling
+                              * faster than the 2 s cadence (eff_sweep) uses
+                              * it to take each round exactly once            */
+
+    /* The Deye's own battery counters (516..519, 0.1 kWh, low word first):
+     * energy charged / discharged since commissioning, for Home Assistant's
+     * energy dashboard. Read every MB_DEYE_ECTR_POLL_MS; a reading that runs
+     * backwards or jumps is dropped (energy_ctr.h). */
+    bool     ectr_ok;        /* both counters read at least once since boot  */
+    uint32_t ectr_age_ms;    /* since the older of the two was last accepted */
+    double   bat_chg_kwh, bat_dis_kwh;
 } mb_deye_live_t;
+
+#define MB_DEYE_ECTR_POLL_MS 30000
+
+/* ---------------- efficiency by power (the curve) ----------------------
+ * Every round that counts for the sums above also lands in a power bin, so
+ * the efficiency can be read per power range instead of as one average.
+ * The bin is chosen by the AC side in both directions -- delivered power when
+ * discharging, drawn power when charging -- so both curves share one x axis.
+ * 250 W bins from 1 to 5 kW, the range the house actually runs in and the
+ * sweep's default steps; coarser above.
+ *
+ * Rounds with less than MB_EFF_IDLE_W on the AC side go to `idle` instead:
+ * the battery then feeds the inverter's own consumption and nothing else,
+ * which is the fixed loss in watts (idle.in / hours), not a point of the
+ * curve.
+ *
+ * Floats, not doubles: the record (~0.7 kB) lives in a 24 KB NVS partition
+ * next to every setting of the device. A float sum resolves a 2 s round of 100 W
+ * (0.06 Wh) until the bin holds about 1 MWh. */
+#define MB_EFF_BINS    29
+#define MB_EFF_IDLE_W  50.0f
+#define MB_EFF_CURVE_VER 1
+extern const uint16_t MB_EFF_BIN_LO[MB_EFF_BINS];   /* lower edge in W */
+
+typedef struct {
+    float    in_wh, out_wh;  /* efficiency = out / in, both directions        */
+    uint32_t s;              /* seconds counted                               */
+} mb_eff_bin_t;
+
+typedef struct {
+    uint16_t     ver;        /* MB_EFF_CURVE_VER                              */
+    uint16_t     nbins;      /* MB_EFF_BINS -- another layout is discarded    */
+    uint32_t     start;      /* unix time of the first counted round, 0 = n/a */
+    mb_eff_bin_t dis[MB_EFF_BINS];   /* discharge: in = bat+PV, out = AC     */
+    mb_eff_bin_t chg[MB_EFF_BINS];   /* charge:    in = AC,     out = bat+PV */
+    mb_eff_bin_t idle;               /* discharging, AC below MB_EFF_IDLE_W  */
+} mb_eff_curve_t;
+
+/* Bin of an AC power (W, >= 0). */
+int         mb_eff_bin_of(float ac_w);
+void        modbus_rtu_get_eff_curve(mb_eff_curve_t *out);
+
+/* Energy manager HOLD: the Deye must not discharge (it may still charge from
+ * a surplus) -- done through the meter emulation, no register writes. Lasts
+ * for_s seconds (<= 3600) and must be renewed; 0 ends it at once. Expiry is
+ * the safety net: a stalled energy manager cannot leave the battery parked. */
+void        modbus_rtu_set_hold(uint32_t for_s);
+bool        modbus_rtu_hold_active(void);
+/* The operator's lock of the Deye battery (deye_lock.h): the same hold, a
+ * second source with the same rules -- the battery is held while either is
+ * in force, and neither lifts the other. */
+void        modbus_rtu_set_lock(uint32_t for_s);
+bool        modbus_rtu_lock_active(void);
+/* Start the curve over (user action). Saved to NVS right away. */
+void        modbus_rtu_reset_eff_curve(void);
 
 void        modbus_rtu_get_deye_live(mb_deye_live_t *out);
 /* Zero the short-term conversion-energy sums (user action from the /deye

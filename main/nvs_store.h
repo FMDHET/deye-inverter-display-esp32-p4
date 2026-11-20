@@ -27,6 +27,9 @@ bool      nvs_store_has_sta(void);
 esp_err_t nvs_store_get_wifi_list(void *buf, size_t *len);
 esp_err_t nvs_store_set_wifi_list(const void *buf, size_t len);
 esp_err_t nvs_store_clear_wifi_list(void);
+/* The mesh node (SSID + BSSID) that last gave the STA an address (wifi_mgr). */
+esp_err_t nvs_store_get_wifi_good(void *buf, size_t len);
+esp_err_t nvs_store_set_wifi_good(const void *buf, size_t len);
 
 /* ------------- WiFi AP password (optional override) -------- */
 /* AP SSID is always "DeyeDisplay-XXYYZZ" (MAC suffix); only the
@@ -57,6 +60,9 @@ esp_err_t nvs_store_set_contrast(uint8_t pct);
 bool      nvs_store_sec_order_ok(const char *s);
 esp_err_t nvs_store_get_sec_order(char *buf, size_t len);
 esp_err_t nvs_store_set_sec_order(const char *s);
+/* The same per tab of /deye ("meter" or NULL = the key above, others "so_<tab>"). */
+esp_err_t nvs_store_get_sec_order_tab(const char *tab, char *buf, size_t len);
+esp_err_t nvs_store_set_sec_order_tab(const char *tab, const char *s);
 
 /* Display standby: turn the backlight off after this many seconds of no
  * touch (0 = never). */
@@ -96,6 +102,10 @@ esp_err_t nvs_store_set_mb_rtu(const void *buf, size_t len);
 /* BYD charged/discharged energy integrated on the display (byd_energy.c). */
 esp_err_t nvs_store_get_byd_energy(void *buf, size_t len);
 esp_err_t nvs_store_set_byd_energy(const void *buf, size_t len);
+
+/* Price of the stored battery energy (bat_cost.c): state, not settings. */
+esp_err_t nvs_store_get_bat_cost(void *buf, size_t len);
+esp_err_t nvs_store_set_bat_cost(const void *buf, size_t len);
 
 /* Long-term Deye conversion energy (mb_deye_eff_lt_t). */
 esp_err_t nvs_store_get_deye_eff(void *buf, size_t len);

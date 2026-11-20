@@ -73,6 +73,7 @@ typedef struct {
 } node_t;
 
 static node_t s_pv, s_house, s_grid, s_byd, s_deye;
+static lv_obj_t *s_deye_price, *s_byd_price;   /* ct/kWh of the stored energy, under the caption */
 static lv_obj_t *s_build_lbl;
 static lv_obj_t *s_notice_lbl;      /* the "something is not true here" line */
 static lv_obj_t *s_clock_lbl;     /* top-center HH:MM         */
@@ -1333,11 +1334,40 @@ void ui_flow_create(void)
         { &s_byd,  "Batterie BYD" },
     };
     for (int i = 0; i < 4; i++) {
-        lv_obj_t *cap = lv_label_create(scr);
+        bool bat = corner[i].n == &s_deye || corner[i].n == &s_byd;
+        if (!bat) {
+            lv_obj_t *cap = lv_label_create(scr);
+            lv_label_set_text(cap, corner[i].cap);
+            lv_obj_set_style_text_font(cap, F_SM, 0);
+            lv_obj_set_style_text_color(cap, COL_SUB, 0);
+            lv_obj_align_to(cap, corner[i].n->arc, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
+            continue;
+        }
+        /* Batteries: caption and what a kWh out of them costs (bat_cost.h)
+         * on ONE line -- a second line under the bottom node runs into the
+         * notice line at the screen's bottom edge. A content-sized row,
+         * aligned to the screen (persistent, unlike align_to), so it stays
+         * centred under the node whatever the price text's width. */
+        int cx, cy;
+        node_pos(corner[i].n == &s_deye ? CORNER_DEYE : CORNER_BYD, &cx, &cy);
+        lv_obj_t *row = lv_obj_create(scr);
+        lv_obj_remove_style_all(row);
+        lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(row, 8, 0);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t *cap = lv_label_create(row);
         lv_label_set_text(cap, corner[i].cap);
         lv_obj_set_style_text_font(cap, F_SM, 0);
         lv_obj_set_style_text_color(cap, COL_SUB, 0);
-        lv_obj_align_to(cap, corner[i].n->arc, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
+        lv_obj_t *pl = lv_label_create(row);
+        lv_label_set_text(pl, "");
+        lv_obj_set_style_text_font(pl, F_SM, 0);
+        lv_obj_set_style_text_color(pl, corner[i].n->accent, 0);
+        lv_obj_add_flag(pl, LV_OBJ_FLAG_HIDDEN);          /* out of the row until there is a price */
+        lv_obj_align(row, LV_ALIGN_TOP_MID, cx - SCREEN_W / 2, cy + NODE_DIA / 2 + 4);
+        if (corner[i].n == &s_deye) s_deye_price = pl; else s_byd_price = pl;
     }
 
     /* Drive the flow animation (~30 fps for a smooth, fine stream). */
@@ -1507,6 +1537,25 @@ void ui_flow_set_byd(float kw_signed, float soc_pct)
 void ui_flow_set_deye(float kw_signed, float soc_pct)
 {
     set_battery(&s_deye, 3, kw_signed, soc_pct);
+}
+
+static void set_price(lv_obj_t *l, float ct)
+{
+    if (!l) return;
+    char buf[24] = "";
+    if (isfinite(ct)) {
+        snprintf(buf, sizeof(buf), "%.1f ct/kWh", ct);
+        for (char *p = buf; *p; p++) if (*p == '.') { *p = ','; break; }
+    }
+    if (strcmp(lv_label_get_text(l), buf)) lv_label_set_text(l, buf);
+    if (buf[0]) lv_obj_remove_flag(l, LV_OBJ_FLAG_HIDDEN);
+    else        lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+}
+
+void ui_flow_set_bat_price(float deye_ct, float byd_ct)
+{
+    set_price(s_deye_price, deye_ct);
+    set_price(s_byd_price, byd_ct);
 }
 
 /* Reset a node to the "--" placeholder (no live source). flow_idx < 0 = no flow

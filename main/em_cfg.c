@@ -12,11 +12,14 @@ static const char *TAG = "em_cfg";
 
 /* The layout is the NVS record and part of the settings backup: pin it. */
 _Static_assert(sizeof(em_plane_t) == 28, "em_plane_t layout");
-_Static_assert(sizeof(em_cfg_t) == 12 + EM_MAX_PLANES * 28 + 12 + EM_TOKEN_MAX + 16, "em_cfg_t layout");
+_Static_assert(EM_CFG_SIZE_V1 == 12 + EM_MAX_PLANES * 28 + 12 + EM_TOKEN_MAX + 16, "em_cfg_t v1 layout");
+_Static_assert(sizeof(em_cfg_t) == EM_CFG_SIZE_V1 + 8, "em_cfg_t layout");
 
 static em_cfg_t     s_cfg = { .ver = EM_CFG_VER, .charge_kw = EM_DEF_CHARGE_KW,
                               .min_spread_ct = EM_DEF_MIN_SPREAD, .cycle_cost_ct = EM_DEF_CYCLE_COST,
-                              .soc_min_pct = EM_DEF_SOC_MIN, .soc_max_pct = EM_DEF_SOC_MAX };
+                              .soc_min_pct = EM_DEF_SOC_MIN, .soc_max_pct = EM_DEF_SOC_MAX,
+                              .byd_eff_pct = EM_DEF_BYD_EFF,
+                              .win_hours = EM_DEF_WIN_HOURS };
 
 /* A record from before a field existed has it at 0: fill in the default. */
 static void defaults(em_cfg_t *c)
@@ -24,6 +27,8 @@ static void defaults(em_cfg_t *c)
     if (c->charge_kw == 0.0f)     c->charge_kw     = EM_DEF_CHARGE_KW;
     if (c->min_spread_ct == 0.0f) c->min_spread_ct = EM_DEF_MIN_SPREAD;
     if (c->soc_max_pct == 0)      c->soc_max_pct   = EM_DEF_SOC_MAX;
+    if (c->byd_eff_pct == 0)      c->byd_eff_pct   = EM_DEF_BYD_EFF;
+    if (c->win_hours == 0)        c->win_hours     = EM_DEF_WIN_HOURS;
 }
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -75,6 +80,14 @@ static esp_err_t check(em_cfg_t *c, char *err, size_t len)
     if (c->soc_max_pct > 100 || c->soc_min_pct + 10 > c->soc_max_pct)
         return refuse(err, len, "SoC-Grenzen: max. bis 100 %, mindestens 10 % über min.");
     if (c->mode > EM_MODE_AUTO) return refuse(err, len, "unbekannte Betriebsart");
+    if (!in_range(c->feedin_ct, 0.0f, 100.0f))
+        return refuse(err, len, "Einspeisevergütung 0 bis 100 ct/kWh (0 = aus)");
+    if (c->byd_eff_pct < 50 || c->byd_eff_pct > 100)
+        return refuse(err, len, "Wirkungsgrad BYD 50 bis 100 %");
+    if (c->win_hours < 1 || c->win_hours > 12)
+        return refuse(err, len, "Günstiges Fenster 1 bis 12 Stunden");
+    c->feedin_neg0 = c->feedin_neg0 ? 1 : 0;
+    c->byd_plan    = c->byd_plan ? 1 : 0;
     c->byd_ctrl = c->byd_ctrl ? 1 : 0;
     c->ver = EM_CFG_VER;
     c->_rsv0 = 0;

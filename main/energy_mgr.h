@@ -39,6 +39,25 @@ typedef struct {
     float    saving_ct;       /* cost_base - cost_plan over the horizon       */
     int64_t  next_charge_from, next_charge_to;   /* next CHARGE block, 0 = none */
     float    deye_soc;
+
+    /* Signals for Home Assistant (flexible loads: wallbox, heat pump, ...) */
+    bool     cheap_now;       /* price in the cheapest quarter of the next 24 h */
+    int64_t  win_from, win_to;/* cheapest window of em_cfg win_hours, 0 = none  */
+    float    win_ct;          /* its mean price, NAN = none                   */
+    bool     surplus_on;      /* PV surplus held for a while (hysteresis)      */
+    float    surplus_kw;      /* PV minus house, kW, NAN unknown               */
+
+    /* BYD plan (em_byd_plan.h) */
+    bool     byd_plan_on;     /* switched on and computed                      */
+    bool     byd_hold_now;    /* the plan keeps it from discharging now        */
+    float    byd_thr_ct;      /* cheapest price that still gets BYD energy, NAN */
+
+    bool     loss_measured;   /* the planner uses the Deye's measured losses    */
+    float    load_factor;     /* weather factor on today's load forecast        */
+
+    /* Problems worth a push message (Home Assistant), "" = none */
+    bool     problem;
+    char     problems[160];
 } em_status_t;
 
 void em_mgr_start(void);                     /* after em_cfg_init, modbus_rtu, deye_ctrl */

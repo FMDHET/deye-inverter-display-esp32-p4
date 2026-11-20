@@ -1,6 +1,7 @@
 #include "modbus_tcp.h"
 #include "sunspec_mppt.h"
 #include "nvs_store.h"
+#include "bat_cost.h"
 #include "ui_flow.h"
 #include "lvgl_port.h"
 #include "deye_ctrl.h"
@@ -1213,6 +1214,10 @@ static void agg_task(void *arg)
             if (a.netz_v)  ui_flow_set_grid(a.netz / 1000.0f); else ui_flow_clear_grid();
             if (deye_pw_v) ui_flow_set_deye(deye_pw / 1000.0f, a.deyeSoc); else ui_flow_clear_deye();
             if (a.byd_v)   ui_flow_set_byd(a.bydW / 1000.0f, a.bydSoc); else ui_flow_clear_byd();
+            bat_cost_status_t bs;
+            bat_cost_get(&bs);
+            ui_flow_set_bat_price(bs.deye.valid ? bs.deye.out_ct : NAN,
+                                  (bs.byd.valid && a.byd_v) ? bs.byd.out_ct : NAN);
             app_lvgl_unlock();
         }
 

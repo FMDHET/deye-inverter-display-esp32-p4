@@ -45,6 +45,7 @@ typedef struct {
     float dis_max, chg_max;   /* AC kW                                     */
     float ld[3], lc[3];       /* loss coefficients, discharge / charge     */
     float spread, cycle, feedin;
+    bool  feedin_neg0;        /* exports earn nothing at a negative price  */
     float pv_scale;
     float term_per_kwh;       /* value of one DC kWh left at the end       */
     /* With slots after the horizon (in->n_ext): the value of the energy left
@@ -191,7 +192,8 @@ static float slot_step(const ctx_t *c, const em_plan_in_t *in, uint16_t i,
 
     float grid = load - pv + pv_used + g_used - p_dis;
     o->grid   = grid;
-    o->cost   = (grid > 0.0f ? grid * in->price_ct[i] : grid * c->feedin) * DT_H
+    float fi  = (c->feedin_neg0 && in->price_ct[i] < 0.0f) ? 0.0f : c->feedin;
+    o->cost   = (grid > 0.0f ? grid * in->price_ct[i] : grid * fi) * DT_H
               + c->cycle * dc_dis;
     o->p_dis  = p_dis;
     o->g_used = g_used;
@@ -540,6 +542,7 @@ static void ctx_init(ctx_t *c, const em_plan_in_t *in, uint16_t n)
     c->spread   = sane(in->min_spread_ct, 0.0f);
     c->cycle    = sane(in->cycle_cost_ct, 0.0f);
     c->feedin   = isfinite(in->feedin_ct) ? in->feedin_ct : 0.0f;
+    c->feedin_neg0 = in->feedin_neg0 != 0;
     c->dis_max  = sane(in->dis_kw_max, 0.0f);
     c->chg_max  = sane(in->charge_kw, 0.0f);
 

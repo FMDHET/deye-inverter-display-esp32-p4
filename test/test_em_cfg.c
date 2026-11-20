@@ -169,6 +169,33 @@ static void test_the_byd_charge_cap(void)
     CHECK_I(now.byd_max_soc, 50);
 }
 
+static void test_feed_in_and_byd_efficiency(void)
+{
+    reset();
+    em_cfg_t c = base();
+    char err[100] = "";
+    CHECK_I(em_cfg_set(&c, err, sizeof(err)), ESP_OK);
+    em_cfg_t back;
+    em_cfg_get(&back);
+    CHECK_F(back.feedin_ct, 0.0, 1e-9);            /* not set: no accounting */
+    CHECK_I(back.byd_eff_pct, EM_DEF_BYD_EFF);     /* 0 in an old record     */
+    c.feedin_ct = 11.0f; c.byd_eff_pct = 92;
+    CHECK_I(em_cfg_set(&c, err, sizeof(err)), ESP_OK);
+    memset(&s_cfg, 0, sizeof(s_cfg));
+    em_cfg_init();
+    em_cfg_get(&back);
+    CHECK_F(back.feedin_ct, 11.0, 1e-6);
+    CHECK_I(back.byd_eff_pct, 92);
+    c.feedin_ct = 120.0f;
+    CHECK(em_cfg_set(&c, err, sizeof(err)) != ESP_OK);
+    c.feedin_ct = NAN;
+    CHECK(em_cfg_set(&c, err, sizeof(err)) != ESP_OK);
+    c.feedin_ct = 8.2f; c.byd_eff_pct = 40;
+    CHECK(em_cfg_set(&c, err, sizeof(err)) != ESP_OK);
+    em_cfg_get(&back);
+    CHECK_F(back.feedin_ct, 11.0, 1e-6);           /* refused: unchanged */
+}
+
 int main(void)
 {
     RUN(test_a_good_record_is_stored_and_loaded);
@@ -178,5 +205,6 @@ int main(void)
     RUN(test_the_byd_charge_cap);
     RUN(test_defaults_for_an_old_record);
     RUN(test_a_failed_write_keeps_the_old_settings);
+    RUN(test_feed_in_and_byd_efficiency);
     return t_report("em_cfg");
 }

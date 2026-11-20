@@ -638,8 +638,48 @@ static void test_fills_early_rather_than_buying_dearer(void)
     CHECK(out.s[15].soc_end > 97.0f);
 }
 
+/* § 51 EEG: with feedin_neg0, an export at a negative price earns nothing. */
+static void test_no_feed_in_pay_at_negative_prices(void)
+{
+    base_in(8);
+    set(0, 8, -5.0f, 3.0f, 0.5f);         /* 2.5 kW export for 2 h, battery full */
+    in.soc_pct = 100.0f;
+    em_plan_compute(&in, &out);
+    float paid = out.cost_base_ct;
+    in.feedin_neg0 = 1;
+    em_plan_compute(&in, &out);
+    CHECK_F(out.cost_base_ct - paid, 2.5f * 2.0f * 8.0f, 0.5f);   /* the 40 ct are gone */
+    check_invariants();
+    /* a positive price still pays */
+    set(0, 8, 5.0f, 3.0f, 0.5f);
+    in.feedin_neg0 = 0;
+    em_plan_compute(&in, &out);
+    paid = out.cost_base_ct;
+    in.feedin_neg0 = 1;
+    em_plan_compute(&in, &out);
+    CHECK_F(out.cost_base_ct, paid, 1e-3f);
+}
+
+/* Paid to take energy: an empty battery charges at the negative price for
+ * the dear evening. */
+static void test_negative_price_charges(void)
+{
+    base_in(48);
+    in.soc_pct = 10.0f;
+    set(0, 8, -8.0f, 0.0f, 0.5f);
+    set(8, 32, 30.0f, 0.0f, 0.5f);
+    set(32, 48, 45.0f, 0.0f, 2.0f);
+    in.feedin_neg0 = 1;
+    em_plan_compute(&in, &out);
+    check_invariants();
+    CHECK(count_act(EM_ACT_CHARGE, 0, 8) > 0);
+    CHECK_I(count_act(EM_ACT_CHARGE, 8, 48), 0);
+}
+
 int main(void)
 {
+    RUN(test_no_feed_in_pay_at_negative_prices);
+    RUN(test_negative_price_charges);
     RUN(test_flat_price_plans_nothing);
     RUN(test_horizon_ends_at_first_nan);
     RUN(test_no_capacity_plans_nothing);

@@ -18,7 +18,7 @@ BUILD    = build
 SUITES = test_modbus_rtu test_webauth test_deye_ctrl test_nvs_store test_sls_guard \
          test_dns_hijack test_eff_sweep test_em_cfg test_price_feed test_pv_forecast \
          test_load_profile test_fronius_storage test_em_planner test_bat_lock test_sunspec_mppt test_deye_force \
-         test_energy_ctr test_em_hist
+         test_energy_ctr test_em_hist test_bat_cost test_em_loss test_load_weather test_em_byd_plan
 
 OBJ_COMMON = $(BUILD)/harness.o $(BUILD)/fakes/fakes.o
 OBJ_HTTP   = $(BUILD)/fakes/fakes_http.o
@@ -76,6 +76,14 @@ $(BUILD)/test_sunspec_mppt: $(BUILD)/test_sunspec_mppt.o $(BUILD)/harness.o
 $(BUILD)/test_deye_force: $(BUILD)/test_deye_force.o $(OBJ_COMMON)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 $(BUILD)/test_energy_ctr: $(BUILD)/test_energy_ctr.o $(BUILD)/harness.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_em_byd_plan: $(BUILD)/test_em_byd_plan.o $(BUILD)/harness.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_load_weather: $(BUILD)/test_load_weather.o $(BUILD)/harness.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_em_loss: $(BUILD)/test_em_loss.o $(BUILD)/harness.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(BUILD)/test_bat_cost: $(BUILD)/test_bat_cost.o $(BUILD)/harness.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 $(BUILD)/test_em_hist: $(BUILD)/test_em_hist.o $(OBJ_COMMON)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)

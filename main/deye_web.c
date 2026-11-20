@@ -17,6 +17,9 @@
 #include "bat_lock.h"
 #include "deye_force.h"
 #include "fronius_storage.h"
+#include "bat_cost.h"
+#include "load_weather.h"
+#include "em_savings.h"
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
@@ -92,19 +95,28 @@ static esp_err_t write_handler(httpd_req_t *req)
 
     int addr = qparam_int(req, "addr", -1);
     int val  = qparam_int(req, "val",  -1);
+    /* n > 1: the same value into addr .. addr+n-1 (e.g. all six TOU power
+     * registers 154..159 at once), one write each, stopping at the first
+     * failure -- `done` says how far it got. */
+    int n    = qparam_int(req, "n", 1);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
-    if (addr < 0 || addr > 65535 || val < 0 || val > 65535)
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"err\":\"bad args\"}");
+    if (addr < 0 || addr > 65535 || val < 0 || val > 65535 || n < 1 || n > 64 || addr + n - 1 > 65535)
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"err\":\"bad args (n 1..64)\"}");
 
-    int rc = modbus_rtu_deye_write((uint16_t)addr, (uint16_t)val);
-    ESP_LOGW(TAG, "write reg %d = %d -> rc=%d", addr, val, rc);
+    int rc = 0, done = 0;
+    for (; done < n; done++) {
+        rc = modbus_rtu_deye_write((uint16_t)(addr + done), (uint16_t)val);
+        if (rc != 0) break;
+    }
+    if (n == 1) ESP_LOGW(TAG, "write reg %d = %d -> rc=%d", addr, val, rc);
+    else        ESP_LOGW(TAG, "write regs %d..%d = %d -> %d of %d, rc=%d", addr, addr + n - 1, val, done, n, rc);
 
-    char buf[96];
-    snprintf(buf, sizeof(buf), "{\"ok\":%s,\"rc\":%d,\"addr\":%d,\"val\":%d}",
-             rc == 0 ? "true" : "false", rc, addr, val);
+    char buf[128];
+    snprintf(buf, sizeof(buf), "{\"ok\":%s,\"rc\":%d,\"addr\":%d,\"val\":%d,\"n\":%d,\"done\":%d}",
+             rc == 0 ? "true" : "false", rc, addr, val, n, done);
     return httpd_resp_sendstr(req, buf);
 }
 
@@ -128,6 +140,40 @@ static int jcat(char *buf, size_t cap, int o, const char *fmt, ...)
     if (n < 0) return o;
     o += n;
     return ((size_t)o >= cap) ? (int)cap - 1 : o;
+}
+
+/* Price of the stored energy (bat_cost.h) as one JSON object:
+ * {"on":1,"feedin":11,"grid_ct":28.4,"grid_live":1,"since":…,"deye":{…},"byd":{…}}
+ * per battery: ct per kWh delivered, grid share %, content kWh, value EUR,
+ * efficiencies and the charged energy by source since `since`. Unknown = null. */
+static int jnumf(char *b, size_t cap, int o, const char *k, float v, int dec)
+{
+    return isfinite(v) ? jcat(b, cap, o, "\"%s\":%.*f", k, dec, v) : jcat(b, cap, o, "\"%s\":null", k);
+}
+
+static int bc_bat_json(char *b, size_t cap, int o, const char *key, const bat_cost_bat_t *v)
+{
+    o = jcat(b, cap, o, "\"%s\":{\"ok\":%d,", key, v->valid ? 1 : 0);
+    o = jnumf(b, cap, o, "ct", v->out_ct, 2);          o = jcat(b, cap, o, ",");
+    o = jnumf(b, cap, o, "grid", v->grid_pct, 1);      o = jcat(b, cap, o, ",");
+    o = jnumf(b, cap, o, "kwh", v->content_kwh, 2);    o = jcat(b, cap, o, ",");
+    o = jnumf(b, cap, o, "eur", v->value_eur, 2);
+    return jcat(b, cap, o, ",\"eta_c\":%.4f,\"eta_d\":%.4f,\"eta_meas\":%d,"
+                "\"pv_kwh\":%.3f,\"grid_kwh\":%.3f,\"other_kwh\":%.3f,\"cost_eur\":%.2f}",
+                v->eta_c, v->eta_d, v->eta_measured ? 1 : 0,
+                v->st.pv_kwh, v->st.grid_kwh, v->st.other_kwh, v->st.cost_ct / 100.0);
+}
+
+static int bc_json(char *b, size_t cap, int o)
+{
+    bat_cost_status_t bs;
+    bat_cost_get(&bs);
+    o = jcat(b, cap, o, "{\"on\":%d,\"feedin\":%.2f,\"grid_ct\":%.2f,\"grid_live\":%d,\"since\":%lld,",
+             bs.active ? 1 : 0, bs.feedin_ct, bs.grid_ct, bs.grid_live ? 1 : 0, (long long)bs.since);
+    o = bc_bat_json(b, cap, o, "deye", &bs.deye);
+    o = jcat(b, cap, o, ",");
+    o = bc_bat_json(b, cap, o, "byd", &bs.byd);
+    return jcat(b, cap, o, "}");
 }
 
 /* GET /api/deye/live -> the inverter's own measurements, already scaled.
@@ -189,6 +235,9 @@ static esp_err_t live_handler(httpd_req_t *req)
         o = jcat(s_live_json, LIVE_CAP, o,
                  "\"ectr\":{\"chg_kwh\":%.1f,\"dis_kwh\":%.1f,\"age\":%u},",
                  l.bat_chg_kwh, l.bat_dis_kwh, (unsigned)l.ectr_age_ms);
+    o = jcat(s_live_json, LIVE_CAP, o, "\"bc\":");
+    o = bc_json(s_live_json, LIVE_CAP, o);
+    o = jcat(s_live_json, LIVE_CAP, o, ",");
     /* Battery mode: what is in force, how long it still has, and whether its
      * register writes actually verified -- a forced mode whose writes failed
      * used to look exactly like one that worked. */
@@ -354,14 +403,15 @@ static esp_err_t curve_post_handler(httpd_req_t *req)
 }
 
 /* ---------------- standard section order of this page ----------------
- * GET  /api/ui/order        -> {"order":"live,curve,..."}  ("" = built-in)
- * POST /api/ui/order?o=...  -> save it for every browser that has not
+ * GET  /api/ui/order[?tab=em] -> {"order":"live,curve,..."}  ("" = built-in)
+ * POST /api/ui/order?o=...[&tab=em] -> save it for every browser that has not
  *                              sorted on its own; o= empty erases it.
  * The commas may arrive as %2C: httpd_query_key_value() does not decode. */
 static esp_err_t order_get_handler(httpd_req_t *req)
 {
-    char o[NVS_SEC_ORDER_MAX], buf[NVS_SEC_ORDER_MAX + 16];
-    nvs_store_get_sec_order(o, sizeof(o));
+    char o[NVS_SEC_ORDER_MAX], buf[NVS_SEC_ORDER_MAX + 16], q[64] = "", tab[12] = "";
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) httpd_query_key_value(q, "tab", tab, sizeof(tab));
+    nvs_store_get_sec_order_tab(tab, o, sizeof(o));
     snprintf(buf, sizeof(buf), "{\"order\":\"%s\"}", o);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -372,7 +422,7 @@ static esp_err_t order_post_handler(httpd_req_t *req)
 {
     if (!web_auth_ok(req)) return ESP_OK;
     httpd_resp_set_type(req, "application/json");
-    char q[400], raw[3 * NVS_SEC_ORDER_MAX], o[NVS_SEC_ORDER_MAX];
+    char q[400] = "", raw[3 * NVS_SEC_ORDER_MAX], o[NVS_SEC_ORDER_MAX];
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK ||
         httpd_query_key_value(q, "o", raw, sizeof(raw)) != ESP_OK)
         raw[0] = '\0';
@@ -382,9 +432,11 @@ static esp_err_t order_post_handler(httpd_req_t *req)
         else o[n++] = *p;
     }
     o[n] = '\0';
-    if (nvs_store_set_sec_order(o) != ESP_OK)
+    char tab[12] = "";
+    httpd_query_key_value(q, "tab", tab, sizeof(tab));
+    if (nvs_store_set_sec_order_tab(tab, o) != ESP_OK)
         return httpd_resp_sendstr(req, "{\"ok\":false,\"err\":\"Reihenfolge ung\u00fcltig oder nicht gespeichert\"}");
-    ESP_LOGI(TAG, "standard section order: %s", o[0] ? o : "(built-in)");
+    ESP_LOGI(TAG, "standard section order (%s): %s", tab[0] ? tab : "meter", o[0] ? o : "(built-in)");
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
@@ -401,10 +453,10 @@ static esp_err_t em_cfg_route_get(httpd_req_t *req)
     int o = snprintf(buf, sizeof(buf),
         "{\"lat\":%.5f,\"lon\":%.5f,\"deye_kwh\":%.2f,\"byd_kwh\":%.2f,\"byd_res\":%u,\"byd_max\":%u,"
         "\"charge_kw\":%.2f,\"spread\":%.2f,\"cycle\":%.2f,\"soc_min\":%u,\"soc_max\":%u,"
-        "\"mode\":%u,\"byd_ctrl\":%u,\"tok\":%d,\"max\":%d,\"planes\":[",
+        "\"mode\":%u,\"byd_ctrl\":%u,\"feedin\":%.2f,\"byd_eff\":%u,\"neg0\":%u,\"win_h\":%u,\"byd_plan\":%u,\"tok\":%d,\"max\":%d,\"planes\":[",
         c.lat, c.lon, c.deye_kwh, c.byd_kwh, c.byd_reserve_pct, c.byd_max_soc ? c.byd_max_soc : 100,
         c.charge_kw, c.min_spread_ct, c.cycle_cost_ct, c.soc_min_pct, c.soc_max_pct,
-        c.mode, c.byd_ctrl, c.tibber_token[0] ? 1 : 0, EM_MAX_PLANES);
+        c.mode, c.byd_ctrl, c.feedin_ct, c.byd_eff_pct, c.feedin_neg0, c.win_hours, c.byd_plan, c.tibber_token[0] ? 1 : 0, EM_MAX_PLANES);
     for (int i = 0; i < c.nplanes && o < (int)sizeof(buf) - 120; i++) {
         const em_plane_t *p = &c.plane[i];
         o += snprintf(buf + o, sizeof(buf) - o,
@@ -461,6 +513,13 @@ static esp_err_t em_cfg_route_post(httpd_req_t *req)
     c.soc_max_pct = (smax >= 0 && smax <= 100) ? (uint8_t)(smax + 0.5f) : 255;
     c.mode        = (md >= 0 && md <= 9) ? (uint8_t)md : 255;
     c.byd_ctrl    = bc ? 1 : 0;
+    c.feedin_ct   = jnum(root, "feedin", c.feedin_ct);
+    float be      = jnum(root, "byd_eff", c.byd_eff_pct);
+    c.byd_eff_pct = (be >= 0 && be <= 100) ? (uint8_t)(be + 0.5f) : 1;     /* 1: refused by em_cfg */
+    c.feedin_neg0 = jnum(root, "neg0", c.feedin_neg0) ? 1 : 0;
+    c.byd_plan    = jnum(root, "byd_plan", c.byd_plan) ? 1 : 0;
+    float wh      = jnum(root, "win_h", c.win_hours);
+    c.win_hours   = (wh >= 0 && wh <= 99) ? (uint8_t)(wh + 0.5f) : 99;          /* 99: refused by em_cfg */
 
     char err[120] = "";
     const cJSON *pl = cJSON_GetObjectItem(root, "planes");
@@ -659,6 +718,35 @@ static int em_load(char *b)
     for (int i = 0; i < 96; i++)
         o = isnan(lp.today_kw[i]) ? jcat(b, EM_JSON_CAP, o, "%snull", i ? "," : "")
                                   : jcat(b, EM_JSON_CAP, o, "%s%.3f", i ? "," : "", lp.today_kw[i]);
+    /* Load against the weather (load_weather.h) */
+    static EXT_RAM_BSS_ATTR load_weather_t wx;
+    load_weather_get(&wx);
+    o = jcat(b, EM_JSON_CAP, o, "],\"wx\":{\"ok\":%d,\"alpha\":%.4f,\"beta\":%.5f,\"r2\":%.3f,\"n\":%d,"
+             "\"kwh_per_k\":%.3f,\"fetched\":%lld,\"days\":[",
+             wx.m.ok ? 1 : 0, wx.m.alpha, wx.m.beta, wx.m.r2, wx.m.n, wx.kwh_per_k, (long long)wx.fetched);
+    for (int i = 0; i < LW_FC_DAYS; i++) {
+        o = jcat(b, EM_JSON_CAP, o, "%s{\"day\":%ld,", i ? "," : "", (long)wx.day[i]);
+        o = em_num(b, o, "t", wx.t_mean[i], 1);
+        o = jcat(b, EM_JSON_CAP, o, ",\"f\":%.3f}", wx.factor[i]);
+    }
+    o = jcat(b, EM_JSON_CAP, o, "],");
+    o = em_str(b, o, "err", wx.err);
+    return jcat(b, EM_JSON_CAP, o, "}}");
+}
+
+/* GET /api/em/savings: per local day (oldest first, today last) what the
+ * grid cost, what it would have cost without batteries, and the change of
+ * the stored energy at what it cost (em_savings.h); ct and kWh. */
+static int em_savings_json(char *b)
+{
+    static EXT_RAM_BSS_ATTR em_sav_day_t d[EM_SAV_DAYS];
+    int n = em_savings_get(d, EM_SAV_DAYS);
+    int o = jcat(b, EM_JSON_CAP, 0, "{\"days\":[");
+    for (int i = 0; i < n; i++)
+        o = jcat(b, EM_JSON_CAP, o, "%s{\"t0\":%lld,\"slots\":%u,\"cost\":%.1f,\"base\":%.1f,\"stored\":%.1f,"
+                 "\"imp\":%.2f,\"exp\":%.2f,\"pv\":%.2f,\"house\":%.2f}",
+                 i ? "," : "", (long long)d[i].t0, d[i].slots, d[i].cost_ct, d[i].base_ct, d[i].stored_ct,
+                 d[i].imp_kwh, d[i].exp_kwh, d[i].pv_kwh, d[i].house_kwh);
     return jcat(b, EM_JSON_CAP, o, "]}");
 }
 
@@ -823,7 +911,22 @@ static int em_plan_json(char *b)
     o = em_str(b, o, "force_end", fs.force_end);
     o = jcat(b, EM_JSON_CAP, o, ",");
     o = em_str(b, o, "err", fs.err);
-    return jcat(b, EM_JSON_CAP, o, "}}");
+    o = jcat(b, EM_JSON_CAP, o, "}");
+    /* Signals for flexible loads, the BYD plan, the problems (energy_mgr.h) */
+    o = jcat(b, EM_JSON_CAP, o, ",\"sig\":{\"cheap\":%d,\"win\":[%lld,%lld],\"win_h\":%u,",
+             st.cheap_now ? 1 : 0, (long long)st.win_from, (long long)st.win_to,
+             lcfg.win_hours ? lcfg.win_hours : EM_DEF_WIN_HOURS);
+    o = em_num(b, o, "win_ct", st.win_ct, 2);          o = jcat(b, EM_JSON_CAP, o, ",");
+    o = jcat(b, EM_JSON_CAP, o, "\"surplus\":%d,", st.surplus_on ? 1 : 0);
+    o = em_num(b, o, "surplus_kw", st.surplus_kw, 2);
+    o = jcat(b, EM_JSON_CAP, o, "},\"byd_plan\":{\"on\":%d,\"hold\":%d,",
+             st.byd_plan_on ? 1 : 0, st.byd_hold_now ? 1 : 0);
+    o = em_num(b, o, "thr", st.byd_thr_ct, 1);
+    o = jcat(b, EM_JSON_CAP, o, "},\"loss_meas\":%d,", st.loss_measured ? 1 : 0);
+    o = em_num(b, o, "load_factor", st.load_factor, 3);
+    o = jcat(b, EM_JSON_CAP, o, ",\"problem\":%d,", st.problem ? 1 : 0);
+    o = em_str(b, o, "problems", st.problems);
+    return jcat(b, EM_JSON_CAP, o, "}");
 }
 
 static int em_fronius(char *b)
@@ -873,6 +976,8 @@ static esp_err_t em_get_handler(httpd_req_t *req)
     else if (wl == 4 && !strncmp(what, "plan", 4))     n = em_plan_json(s_emj);
     else if (wl == 4 && !strncmp(what, "hist", 4))     n = em_hist_json(req, s_emj);
     else if (wl == 7 && !strncmp(what, "fronius", 7)) { em_mgr_want_fronius(); n = em_fronius(s_emj); }
+    else if (wl == 5 && !strncmp(what, "bcost", 5))    n = bc_json(s_emj, EM_JSON_CAP, 0);
+    else if (wl == 7 && !strncmp(what, "savings", 7))  n = em_savings_json(s_emj);
     if (n < 0) return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "unknown /api/em route");
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -997,6 +1102,16 @@ static esp_err_t em_post_handler(httpd_req_t *req)
         } else {
             snprintf(err, sizeof(err), "cmd=block&on=0|1, cmd=charge|discharge&w=…&min=…&soc=…, cmd=stop "
                                        "oder cmd=reserve&pct=…");
+        }
+    } else if (wl == 5 && !strncmp(what, "bcost", 5)) {
+        /* cmd=reset: both batteries start again at the feed-in tariff */
+        char cmd[12] = "";
+        httpd_query_key_value(q, "cmd", cmd, sizeof(cmd));
+        if (!strcmp(cmd, "reset")) {
+            bat_cost_reset();
+            snprintf(okmsg, sizeof(okmsg), "beginnt neu (innerhalb 10 s)");
+        } else {
+            snprintf(err, sizeof(err), "cmd=reset");
         }
     } else {
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "unknown /api/em route");

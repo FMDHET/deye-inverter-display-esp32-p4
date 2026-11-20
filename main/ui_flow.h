@@ -39,6 +39,8 @@ void ui_flow_set_house(float kw);          /* >= 0 */
 void ui_flow_set_grid(float kw_signed);    /* + import, - export */
 void ui_flow_set_byd(float kw_signed, float soc_pct);
 void ui_flow_set_deye(float kw_signed, float soc_pct);
+/* Price per kWh out of each battery (ct, bat_cost.h); NAN = empty line. */
+void ui_flow_set_bat_price(float deye_ct, float byd_ct);
 
 /* Reset a node to the "--" placeholder when its source is gone (device disabled/
  * removed or value stale), so the dashboard never ghosts the last value. */

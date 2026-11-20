@@ -247,6 +247,12 @@ static esp_err_t import_handler(httpd_req_t *req)
          * config from a firmware with fewer fields; the owning module handles
          * that on load, but writing it straight through would strip the newer
          * fields silently -- so refuse instead of half-restoring. */
+        /* Exception: the energy manager record of before the feed-in fields.
+         * Those fields have "not set" as their zero, so padding is exact. */
+        if (b->set_fixed == nvs_store_set_em_cfg && len == EM_CFG_SIZE_V1 && len < b->size) {
+            memset(raw + len, 0, b->size - len);
+            len = b->size;
+        }
         if (b->size && len != b->size) {
             ESP_LOGW(TAG, "%s: %u bytes, expected %u -- skipped",
                      b->key, (unsigned)len, (unsigned)b->size);

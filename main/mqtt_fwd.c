@@ -10,6 +10,8 @@
 #include "deye_force.h"
 #include "modbus_rtu.h"
 #include "byd_energy.h"
+#include "bat_cost.h"
+#include "em_savings.h"
 #include "deye_ctrl.h"
 
 #include <stdlib.h>
@@ -223,6 +225,19 @@ static void publish_em_discovery(void)
         { "pv_tomorrow","PV-Prognose morgen",      "kWh",    "energy",    NULL,          "mdi:solar-power" },
         { "saving",     "Ersparnis laut Plan",     "EUR",    "monetary",  NULL,          "mdi:piggy-bank" },
         { "byd_soc",    "BYD SoC (Fronius)",       "%",      "battery",   "measurement", NULL },
+        /* price of the stored energy (bat_cost.h) */
+        { "deye_bat_ct",   "Deye Akkustrom Preis",     "ct/kWh", NULL,       "measurement", "mdi:battery-heart-variant" },
+        { "deye_bat_grid", "Deye Akkustrom Netzanteil","%",      NULL,       "measurement", "mdi:transmission-tower" },
+        { "deye_bat_eur",  "Deye Akkuinhalt Wert",     "EUR",    "monetary", NULL,          "mdi:cash" },
+        { "byd_bat_ct",    "BYD Akkustrom Preis",      "ct/kWh", NULL,       "measurement", "mdi:battery-heart-variant" },
+        { "byd_bat_grid",  "BYD Akkustrom Netzanteil", "%",      NULL,       "measurement", "mdi:transmission-tower" },
+        { "byd_bat_eur",   "BYD Akkuinhalt Wert",      "EUR",    "monetary", NULL,          "mdi:cash" },
+        /* what the batteries saved, from the record (em_savings.h) */
+        { "saved_today",   "Ersparnis heute",          "EUR",    "monetary", NULL,          "mdi:piggy-bank-outline" },
+        { "saved_month",   "Ersparnis Monat",          "EUR",    "monetary", NULL,          "mdi:piggy-bank" },
+        /* for automations of flexible loads */
+        { "surplus_kw",    "PV-Überschuss Leistung",   "kW",     "power",    "measurement", "mdi:solar-power-variant" },
+        { "win_ct",        "Günstigstes Fenster Preis","ct/kWh", NULL,       "measurement", "mdi:cash-clock" },
     };
     for (unsigned i = 0; i < sizeof(S) / sizeof(S[0]); i++) {
         int o = snprintf(b, sizeof(b), "\"name\":\"%s\",\"stat_t\":\"%s\",\"val_tpl\":\"{{ value_json.%s }}\","
@@ -249,6 +264,29 @@ static void publish_em_discovery(void)
     snprintf(b, sizeof(b), "\"name\":\"BYD-Entladung gesperrt\",\"stat_t\":\"%s\",\"val_tpl\":\"{{ value_json.byd_blocked }}\","
              "\"pl_on\":\"1\",\"pl_off\":\"0\",\"icon\":\"mdi:battery-lock\"", s_t_em);
     em_disc("binary_sensor", "byd_blocked", b);
+    /* Flexible loads: switch a wallbox, heat pump or dishwasher on these. */
+    snprintf(b, sizeof(b), "\"name\":\"Strom günstig jetzt\",\"stat_t\":\"%s\",\"val_tpl\":\"{{ value_json.cheap_now }}\","
+             "\"pl_on\":\"1\",\"pl_off\":\"0\",\"icon\":\"mdi:cash-check\"", s_t_em);
+    em_disc("binary_sensor", "cheap_now", b);
+    snprintf(b, sizeof(b), "\"name\":\"PV-Überschuss\",\"stat_t\":\"%s\",\"val_tpl\":\"{{ value_json.surplus }}\","
+             "\"pl_on\":\"1\",\"pl_off\":\"0\",\"icon\":\"mdi:solar-power\"", s_t_em);
+    em_disc("binary_sensor", "surplus", b);
+    snprintf(b, sizeof(b), "\"name\":\"Günstigstes Fenster ab\",\"stat_t\":\"%s\",\"val_tpl\":\"{{ value_json.win_from }}\","
+             "\"dev_cla\":\"timestamp\",\"icon\":\"mdi:clock-start\"", s_t_em);
+    em_disc("sensor", "win_from", b);
+    snprintf(b, sizeof(b), "\"name\":\"Günstigstes Fenster bis\",\"stat_t\":\"%s\",\"val_tpl\":\"{{ value_json.win_to }}\","
+             "\"dev_cla\":\"timestamp\",\"icon\":\"mdi:clock-end\"", s_t_em);
+    em_disc("sensor", "win_to", b);
+    snprintf(b, sizeof(b), "\"name\":\"BYD wird aufgespart\",\"stat_t\":\"%s\",\"val_tpl\":\"{{ value_json.byd_hold }}\","
+             "\"pl_on\":\"1\",\"pl_off\":\"0\",\"icon\":\"mdi:battery-clock-outline\"", s_t_em);
+    em_disc("binary_sensor", "byd_hold", b);
+    /* Something is wrong: an automation can push it to the phone. */
+    snprintf(b, sizeof(b), "\"name\":\"Energiemanager Problem\",\"stat_t\":\"%s\",\"val_tpl\":\"{{ value_json.problem }}\","
+             "\"pl_on\":\"1\",\"pl_off\":\"0\",\"dev_cla\":\"problem\"", s_t_em);
+    em_disc("binary_sensor", "problem", b);
+    snprintf(b, sizeof(b), "\"name\":\"Energiemanager Problembeschreibung\",\"stat_t\":\"%s\","
+             "\"val_tpl\":\"{{ value_json.problems }}\",\"icon\":\"mdi:alert-circle-outline\"", s_t_em);
+    em_disc("sensor", "problems", b);
     snprintf(b, sizeof(b), "\"name\":\"BYD-Zwangsbetrieb bis\",\"stat_t\":\"%s\",\"val_tpl\":\"{{ value_json.byd_force_until }}\","
              "\"dev_cla\":\"timestamp\",\"icon\":\"mdi:timer-sand\"", s_t_em);
     em_disc("sensor", "byd_force_until", b);
@@ -398,7 +436,7 @@ static void publish_em_state(void)
     em_mgr_get_status(&st);
     em_cfg_get(&c);
     fronius_storage_get(&fs);
-    static EXT_RAM_BSS_ATTR char j[1600];
+    static EXT_RAM_BSS_ATTR char j[3072];
     char nf[40], nt[40], why[160];
     iso(nf, sizeof(nf), st.next_charge_from);
     iso(nt, sizeof(nt), st.next_charge_to);
@@ -421,6 +459,53 @@ static void publish_em_state(void)
     modbus_tcp_status_t ts;
     modbus_tcp_get_status(&ts);
     o = jf(j, sizeof(j), o, "byd_soc", fs.ok ? fs.soc_pct : (ts.byd_soc > 0.0f ? ts.byd_soc : NAN), 1);
+    bat_cost_status_t bs;
+    bat_cost_get(&bs);
+    o = jf(j, sizeof(j), o, "deye_bat_ct",   bs.deye.valid ? bs.deye.out_ct : NAN, 2);
+    o = jf(j, sizeof(j), o, "deye_bat_grid", bs.deye.valid ? bs.deye.grid_pct : NAN, 1);
+    o = jf(j, sizeof(j), o, "deye_bat_eur",  bs.deye.valid ? bs.deye.value_eur : NAN, 2);
+    o = jf(j, sizeof(j), o, "byd_bat_ct",    bs.byd.valid ? bs.byd.out_ct : NAN, 2);
+    o = jf(j, sizeof(j), o, "byd_bat_grid",  bs.byd.valid ? bs.byd.grid_pct : NAN, 1);
+    o = jf(j, sizeof(j), o, "byd_bat_eur",   bs.byd.valid ? bs.byd.value_eur : NAN, 2);
+    {   /* savings: today and this month, EUR */
+        static EXT_RAM_BSS_ATTR em_sav_day_t sd[EM_SAV_DAYS];
+        int nd = em_savings_get(sd, EM_SAV_DAYS);
+        float today = NAN, month = NAN;
+        if (nd) {
+            const em_sav_day_t *t = &sd[nd - 1];
+            today = (t->base_ct - (t->cost_ct - t->stored_ct)) / 100.0f;
+            time_t tt = (time_t)t->t0;
+            struct tm tm0; localtime_r(&tt, &tm0);
+            month = 0;
+            for (int i = 0; i < nd; i++) {
+                time_t ti = (time_t)sd[i].t0;
+                struct tm tmi; localtime_r(&ti, &tmi);
+                if (tmi.tm_mon == tm0.tm_mon && tmi.tm_year == tm0.tm_year)
+                    month += (sd[i].base_ct - (sd[i].cost_ct - sd[i].stored_ct)) / 100.0f;
+            }
+        }
+        o = jf(j, sizeof(j), o, "saved_today", today, 2);
+        o = jf(j, sizeof(j), o, "saved_month", month, 2);
+    }
+    o = jf(j, sizeof(j), o, "surplus_kw", st.surplus_kw, 2);
+    o = jf(j, sizeof(j), o, "win_ct", st.win_ct, 2);
+    {
+        char wf[40], wt[40];
+        iso(wf, sizeof(wf), st.win_from);
+        iso(wt, sizeof(wt), st.win_to);
+        char pr[200];
+        size_t q = 0;
+        for (const char *p = st.problems; *p && q + 2 < sizeof(pr); p++) {
+            if (*p == '"' || *p == '\\') pr[q++] = '\\';
+            pr[q++] = *p;
+        }
+        pr[q] = '\0';
+        if (o > 0 && (size_t)o < sizeof(j))
+            o += snprintf(j + o, sizeof(j) - o, ",\"cheap_now\":%d,\"surplus\":%d,\"win_from\":%s,\"win_to\":%s,"
+                          "\"byd_hold\":%d,\"problem\":%d,\"problems\":\"%s\"",
+                          st.cheap_now ? 1 : 0, st.surplus_on ? 1 : 0, wf, wt,
+                          st.byd_hold_now ? 1 : 0, st.problem ? 1 : 0, pr[0] ? pr : "OK");
+    }
     o = jf(j, sizeof(j), o, "charge_kw", c.charge_kw, 2);
     o = jf(j, sizeof(j), o, "spread", c.min_spread_ct, 1);
     char fu[40], lu[40], bu[40];

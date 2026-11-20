@@ -97,6 +97,24 @@ bool nvs_store_has_sta(void)
 /* ---- Multiple STA credentials (opaque blob: array of wifi_cred_t) ---- */
 #define K_STA_LIST "stalist"
 
+static esp_err_t get_blob_prefix(const char *ns, const char *key, void *buf, size_t len);
+
+esp_err_t nvs_store_get_wifi_good(void *buf, size_t len)
+{
+    return get_blob_prefix(NS_WIFI, "good", buf, len);
+}
+
+esp_err_t nvs_store_set_wifi_good(const void *buf, size_t len)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS_WIFI, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_blob(h, "good", buf, len);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+
 esp_err_t nvs_store_get_wifi_list(void *buf, size_t *len)
 {
     nvs_handle_t h;
@@ -255,24 +273,42 @@ bool nvs_store_sec_order_ok(const char *s)
     return true;
 }
 
-esp_err_t nvs_store_get_sec_order(char *buf, size_t len)
+/* One order per tab of /deye. The meter tab keeps the key it always had,
+ * every other tab "so_<tab>" (tab: 1..8 lowercase letters). */
+static bool sec_key(const char *tab, char *key, size_t n)
+{
+    if (!tab || !tab[0] || !strcmp(tab, "meter")) { snprintf(key, n, "%s", K_SEC_ORDER); return true; }
+    size_t l = strlen(tab);
+    if (l > 8) return false;
+    for (size_t i = 0; i < l; i++) if (tab[i] < 'a' || tab[i] > 'z') return false;
+    snprintf(key, n, "so_%s", tab);
+    return true;
+}
+
+esp_err_t nvs_store_get_sec_order_tab(const char *tab, char *buf, size_t len)
 {
     if (!buf || !len) return ESP_ERR_INVALID_ARG;
     buf[0] = '\0';
-    esp_err_t e = get_str(NS_DISP, K_SEC_ORDER, buf, len);
+    char key[16];
+    if (!sec_key(tab, key, sizeof(key))) return ESP_ERR_INVALID_ARG;
+    esp_err_t e = get_str(NS_DISP, key, buf, len);
     if (e != ESP_OK || !nvs_store_sec_order_ok(buf)) buf[0] = '\0';
     return e;
 }
 
-esp_err_t nvs_store_set_sec_order(const char *s)
+esp_err_t nvs_store_set_sec_order_tab(const char *tab, const char *s)
 {
-    if (!nvs_store_sec_order_ok(s)) return ESP_ERR_INVALID_ARG;
+    char key[16];
+    if (!sec_key(tab, key, sizeof(key)) || !nvs_store_sec_order_ok(s)) return ESP_ERR_INVALID_ARG;
     if (!s[0]) {                                   /* empty = back to built-in */
-        esp_err_t e = erase_key(NS_DISP, K_SEC_ORDER);
+        esp_err_t e = erase_key(NS_DISP, key);
         return e == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : e;
     }
-    return set_str(NS_DISP, K_SEC_ORDER, s);
+    return set_str(NS_DISP, key, s);
 }
+
+esp_err_t nvs_store_get_sec_order(char *buf, size_t len) { return nvs_store_get_sec_order_tab(NULL, buf, len); }
+esp_err_t nvs_store_set_sec_order(const char *s)          { return nvs_store_set_sec_order_tab(NULL, s); }
 
 #define K_SLEEP "sleep"
 
@@ -435,6 +471,22 @@ size_t nvs_store_free_entries(void)
 /* Energy manager settings (em_cfg_t): location, PV planes, capacities, the
  * Tibber token. Its own namespace, so it can be wiped on its own. */
 #define NS_EM "em"
+
+esp_err_t nvs_store_get_bat_cost(void *buf, size_t len)
+{
+    return get_blob_prefix(NS_EM, "bcost", buf, len);
+}
+
+esp_err_t nvs_store_set_bat_cost(const void *buf, size_t len)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS_EM, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_blob(h, "bcost", buf, len);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
 
 esp_err_t nvs_store_get_em_cfg(void *buf, size_t len)
 {

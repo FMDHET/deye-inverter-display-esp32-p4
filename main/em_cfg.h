@@ -61,7 +61,25 @@ typedef struct {
     uint8_t    soc_max_pct;             /* Deye: grid charge never above this   */
     uint8_t    mode;                    /* EM_MODE_*                            */
     uint8_t    byd_ctrl;                /* 1 = may block the BYD's discharge    */
+
+    /* ---- price of the stored energy (bat_cost.h) ---- appended in build 382;
+     * a record from before reads them as 0 (off / default). */
+    float      feedin_ct;               /* feed-in tariff, ct/kWh; 0 = not set, no
+                                         * accounting                          */
+    uint8_t    byd_eff_pct;             /* BYD round trip efficiency, %; the Deye's
+                                         * is measured, the BYD's is not         */
+    /* In what were three reserved bytes (record size unchanged): */
+    uint8_t    feedin_neg0;             /* 1 = no feed-in pay while the exchange price
+                                         * is negative (§ 51 EEG, newer plants)   */
+    uint8_t    win_hours;               /* length of the "cheapest window" signal
+                                         * for Home Assistant, h; 0 = default     */
+    uint8_t    byd_plan;                /* 1 = keep the BYD's energy for the dearest
+                                         * hours (needs byd_ctrl)                 */
 } em_cfg_t;
+
+/* Size of the record before the feed-in fields: a backup from such a
+ * firmware is still taken (config_web.c), the new fields start at 0. */
+#define EM_CFG_SIZE_V1  304
 
 /* What the energy manager does with its plan. */
 #define EM_MODE_OFF     0   /* nothing: no plan, no action                      */
@@ -74,6 +92,8 @@ typedef struct {
 #define EM_DEF_CYCLE_COST    2.0f
 #define EM_DEF_SOC_MIN       15
 #define EM_DEF_SOC_MAX       95
+#define EM_DEF_BYD_EFF       90
+#define EM_DEF_WIN_HOURS     3
 
 /* Load from NVS. Call once at start. */
 void      em_cfg_init(void);

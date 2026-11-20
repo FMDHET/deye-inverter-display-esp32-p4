@@ -77,6 +77,11 @@ typedef struct {
     float    feedin_ct;                /* paid per exported kWh (may be 0)     */
     float    pv_confidence;            /* 0..1, scales PV down for planning grid charges (e.g. 0.8) */
     float    loss_dis[3], loss_chg[3]; /* a,b,c; all zero → defaults above     */
+    /* § 51 EEG: newer plants are not paid for what they feed in while the
+     * exchange price is negative. 1 = exports in a slot with price < 0 earn
+     * nothing (the price is the end price, which is negative only when the
+     * exchange part is, by more than the fees). */
+    uint8_t  feedin_neg0;
 } em_plan_in_t;
 
 typedef struct {
